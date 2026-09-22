@@ -4,7 +4,8 @@ import kotlinx.coroutines.flow.Flow
 
 /**
  * A capability an agent can invoke: web search, file read, shell command…
- * Tools are pure contracts; execution goes through a [ToolExecutor].
+ * Tools own their execution logic; [ToolExecutor] orchestrates permission
+ * checks around [execute].
  */
 interface Tool {
     /** Stable identifier the model references, e.g. "web.search". */
@@ -21,6 +22,9 @@ interface Tool {
 
     /** JSON-Schema-like description of the arguments. */
     val parametersSchemaJson: String
+
+    /** Runs the tool. Implementations must parse defensively and never throw. */
+    suspend fun execute(argumentsJson: String): ToolResult
 }
 
 /** Outcome of a tool execution; errors are values, not exceptions. */
@@ -29,7 +33,10 @@ sealed class ToolResult {
     data class Failure(val message: String) : ToolResult()
 }
 
-/** Executes a registered tool. Implementations enforce permissions. */
+/**
+ * Executes a registered tool after enforcing its permission requirements.
+ * Returns failures as values; dangerous operations never run silently.
+ */
 interface ToolExecutor {
     suspend fun execute(toolId: String, argumentsJson: String): ToolResult
 }

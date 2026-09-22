@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Code
 import androidx.compose.material.icons.outlined.Folder
+import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.Public
 import androidx.compose.material.icons.outlined.Terminal
@@ -49,7 +50,8 @@ import java.util.Calendar
 fun HomeScreen(
     container: AppContainer,
     onOpenChat: (String) -> Unit,
-    onOpenSettings: () -> Unit
+    onOpenSettings: () -> Unit,
+    onOpenConversations: () -> Unit = {}
 ) {
     val viewModel: HomeViewModel = viewModel(factory = HomeViewModelFactory(container))
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -73,6 +75,12 @@ fun HomeScreen(
                 }
             },
             actions = {
+                IconButton(onClick = onOpenConversations) {
+                    Icon(
+                        imageVector = Icons.Outlined.History,
+                        contentDescription = "Conversations"
+                    )
+                }
                 IconButton(onClick = onOpenSettings) {
                     Icon(
                         imageVector = Icons.Outlined.MoreVert,

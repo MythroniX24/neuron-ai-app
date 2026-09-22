@@ -28,7 +28,16 @@ interface PermissionManager {
     val pendingRequests: Flow<List<PermissionRequest>>
     val granted: Flow<Set<Capability>>
 
-    suspend fun request(capability: Capability, reason: String, requestedBy: String)
+    /**
+     * Suspends until the user decides. Returns true when granted.
+     * Implementations may auto-grant safe capabilities.
+     */
+    suspend fun request(
+        capability: Capability,
+        reason: String,
+        requestedBy: String
+    ): Boolean
+
     suspend fun grant(requestId: String)
     suspend fun deny(requestId: String)
     suspend fun revoke(capability: Capability)

@@ -17,6 +17,9 @@ class InMemoryToolRegistryTest {
         override val requiredCapabilities: Set<com.neuron.ai.core.permissions.Capability> =
             emptySet()
         override val parametersSchemaJson: String = "{}"
+
+        override suspend fun execute(argumentsJson: String) =
+            com.neuron.ai.core.agent.ToolResult.Success("ok")
     }
 
     @Test

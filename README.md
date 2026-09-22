@@ -6,24 +6,30 @@ Neuron-AI is designed from the ground up as an agent platform — not just a cha
 The roadmap spans AI chat with multiple custom providers, a coding agent, browser and
 terminal agents, tool calling, workspace management, and background tasks.
 
-**Current status: Phase 0 — Foundation & Architecture.**
+**Current status: Phase 1 — Core Neuron-AI.**
 
-## Phase 0 — what ships today
+## Phase 1 — what ships today
 
-- ✅ Kotlin + Jetpack Compose (Material 3) foundation, single-activity
-- ✅ Light-first design system: colors, typography, spacing, shapes, shared components
-- ✅ Dark theme architecture (Light / Dark / System in Settings)
-- ✅ Home screen with greeting, quick actions, and chat composer
-- ✅ Chat screen with reactive message flow
-- ✅ Core abstractions: `AIProvider`, `Agent`, `Tool`, `Task`, `PermissionManager`,
-  `Conversation`, `Project`/`Workspace`, `Memory`, `BrowserSession`, `TerminalSession`
-- ✅ Secure credential storage (Android Keystore) + log redaction
-- ✅ Settings persistence via DataStore
-- ✅ Unit tests for the data layer
-- ✅ `ARCHITECTURE.md` documenting every layer and decision
+- ✅ Everything from Phase 0 (foundation, design system, abstractions)
+- ✅ Real AI chat with **streaming** responses over any OpenAI-compatible endpoint
+  (OpenAI, OpenRouter, Groq, Together, Ollama, LM Studio, vLLM…)
+- ✅ Provider manager: add/edit/test/delete providers, custom base URLs, model IDs,
+  custom headers, vision & tool toggles — API keys stored in the Android Keystore
+- ✅ Per-conversation model selection from the chat top bar
+- ✅ Persistent conversations (Room): rename, delete, search, continue old chats
+- ✅ Markdown rendering: headings, lists, quotes, tables, links, code blocks with
+  syntax highlighting and copy
+- ✅ LaTeX math rendering (JLaTeXMath) with graceful fallback
+- ✅ File attachments: picker, previews, removal; images sent as vision input when
+  the provider supports it
+- ✅ Agent runtime v1: tool loop with streaming, agent activity UI (✓ ⟳ steps)
+- ✅ Safe foundational tools: time, calculator, text stats, workspace file read/search
+- ✅ Permission system: tools request capabilities, user allow/deny dialog, revocable
+- ✅ Task manager: stop running tasks, clear finished, statuses surfaced in UI
+- ✅ Unit tests for the provider wire protocol, tools, permissions, tasks and storage
 
-There is deliberately **no mock AI** in Phase 0 — provider connectivity arrives in
-Phase 1 behind the already-defined `AIProvider` seam.
+There is deliberately **no mock AI** anywhere — the chat works against real providers
+you configure yourself.
 
 ## Building
 
@@ -60,8 +66,8 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the full design.
 | Phase | Focus |
 |-------|-------|
 | **0 — Foundation** ✅ | Architecture, design system, abstractions, polished shell |
-| **1 — Core Neuron-AI** | Real AI providers (OpenAI-compatible), streaming chat, markdown, conversation persistence (Room), provider settings |
-| **2 — Advanced Agent Platform** | Agents, tool calling, browser/terminal integrations, workspaces, tasks, background execution |
+| **1 — Core Neuron-AI** ✅ | Real AI providers, streaming chat, markdown + LaTeX, Room persistence, provider settings, agent tools, permissions |
+| **2 — Advanced Agent Platform** | Coding/browser/terminal agents, workspaces, project management, background execution |
 
 ## License
 
