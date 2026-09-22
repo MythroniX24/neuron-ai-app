@@ -127,29 +127,8 @@ class ChatViewModel(
      * assistant tool-call parents are not persisted, and dangling tool rows
      * are rejected by several providers. Capped to keep requests sane.
      */
-    private suspend fun buildHistory(): List<ChatMessage> {
-        val all = conversations.messagesOf(conversationId).first()
-        // Drop trailing non-user rows: the just-appended prompt (and any
-        // partial assistant text from a stopped previous attempt).
-        var end = all.size
-        while (end > 0 && all[end - 1].role != Message.Role.USER) end--
-        val prior = all.subList(0, maxOf(0, end - 1))
-        return prior
-            .filter { it.role != Message.Role.TOOL && it.metadata?.isError != true }
-            .takeLast(30)
-            .map { msg ->
-                ChatMessage(
-                    role = when (msg.role) {
-                        Message.Role.USER -> ChatMessage.Role.USER
-                        Message.Role.ASSISTANT -> ChatMessage.Role.ASSISTANT
-                        Message.Role.SYSTEM -> ChatMessage.Role.SYSTEM
-                        Message.Role.TOOL -> ChatMessage.Role.TOOL
-                    },
-                    content = msg.content,
-                    attachments = msg.attachments
-                )
-            }
-    }
+    private suspend fun buildHistory(): List<ChatMessage> =
+        buildChatContext(conversations.messagesOf(conversationId).first())
 
     fun setModel(providerId: String, modelId: String) {
         viewModelScope.launch(dispatchers.io) {
@@ -199,8 +178,26 @@ class ChatViewModel(
                 attachments = attachments
             )
             _draftAttachments.value = emptyList()
+            maybeAutoTitle(prompt)
             runAgentTurn(prompt)
         }
+    }
+
+    /**
+     * Names the chat after its first user message (2–3 words), like mainstream
+     * chat apps. Fires once, in the background; never blocks or fails the send.
+     */
+    private suspend fun maybeAutoTitle(prompt: String) {
+        val conversation = _conversation.value ?: return
+        val isUntitled = conversation.title == "New chat" || conversation.title.isBlank()
+        if (!isUntitled || prompt.isBlank()) return
+
+        val title = deriveChatTitle(prompt)
+        runCatching { conversations.renameConversation(conversationId, title) }
+            .onSuccess {
+                // Keep the local state in sync — the top bar and drawer read it.
+                _conversation.value = conversation.copy(title = title)
+            }
     }
 
     fun stop() {
