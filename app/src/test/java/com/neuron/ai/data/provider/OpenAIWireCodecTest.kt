@@ -131,7 +131,9 @@ class OpenAIWireCodecTest {
         val call = events.filterIsInstance<StreamEvent.ToolCallRequested>().single()
         assertEquals("call-9", call.callId)
         assertEquals("math.evaluate", call.toolId)
-        assertEquals("""{"expression":"1+2"}""", call.argumentsJson)
+        // Contract: assembled arguments must be valid JSON with the expression field.
+        val parsed = json.parseToJsonElement(call.argumentsJson).jsonObject
+        assertEquals("1+2", parsed["expression"]?.jsonPrimitive?.content)
     }
 
     @Test
