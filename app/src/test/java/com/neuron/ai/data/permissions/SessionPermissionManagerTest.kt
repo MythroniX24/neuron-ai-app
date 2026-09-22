@@ -2,6 +2,7 @@ package com.neuron.ai.data.permissions
 
 import com.neuron.ai.core.permissions.Capability
 import kotlinx.coroutines.async
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
@@ -19,9 +20,9 @@ class SessionPermissionManagerTest {
 
         // The request should appear as pending while suspended.
         withTimeout(2_000) {
-            while (manager.pendingRequests.value.isEmpty()) kotlinx.coroutines.delay(10)
+            while (manager.pendingRequests.first().isEmpty()) kotlinx.coroutines.delay(10)
         }
-        val request = manager.pendingRequests.value.single()
+        val request = manager.pendingRequests.first().single()
         assertEquals(Capability.FILESYSTEM_READ, request.capability)
         assertEquals("fs.read", request.requestedBy)
 
@@ -36,9 +37,9 @@ class SessionPermissionManagerTest {
         val decision = async { manager.request(Capability.NETWORK, "call web", "web.tool") }
 
         withTimeout(2_000) {
-            while (manager.pendingRequests.value.isEmpty()) kotlinx.coroutines.delay(10)
+            while (manager.pendingRequests.first().isEmpty()) kotlinx.coroutines.delay(10)
         }
-        manager.deny(manager.pendingRequests.value.single().id)
+        manager.deny(manager.pendingRequests.first().single().id)
 
         assertFalse(decision.await())
         assertFalse(manager.isGranted(Capability.NETWORK))
@@ -53,14 +54,14 @@ class SessionPermissionManagerTest {
         // First request must be granted manually…
         val decision = async { manager.request(Capability.TERMINAL, "run cmd", "terminal") }
         withTimeout(2_000) {
-            while (manager.pendingRequests.value.isEmpty()) kotlinx.coroutines.delay(10)
+            while (manager.pendingRequests.first().isEmpty()) kotlinx.coroutines.delay(10)
         }
-        manager.grant(manager.pendingRequests.value.single().id)
+        manager.grant(manager.pendingRequests.first().single().id)
         assertTrue(decision.await())
 
         // …then subsequent requests resolve immediately without a new prompt.
         assertTrue(manager.request(Capability.TERMINAL, "run again", "terminal"))
-        assertTrue(manager.pendingRequests.value.isEmpty())
+        assertTrue(manager.pendingRequests.first().isEmpty())
     }
 
     @Test
@@ -68,9 +69,9 @@ class SessionPermissionManagerTest {
         val manager = SessionPermissionManager()
         val decision = async { manager.request(Capability.BROWSER, "open page", "browser") }
         withTimeout(2_000) {
-            while (manager.pendingRequests.value.isEmpty()) kotlinx.coroutines.delay(10)
+            while (manager.pendingRequests.first().isEmpty()) kotlinx.coroutines.delay(10)
         }
-        manager.grant(manager.pendingRequests.value.single().id)
+        manager.grant(manager.pendingRequests.first().single().id)
         assertTrue(manager.isGranted(Capability.BROWSER))
 
         manager.revoke(Capability.BROWSER)
