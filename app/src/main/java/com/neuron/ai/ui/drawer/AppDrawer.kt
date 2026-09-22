@@ -95,19 +95,22 @@ fun AppDrawer(
                         icon = {
                             Icon(Icons.AutoMirrored.Outlined.Chat, contentDescription = null)
                         },
+                        // NavigationDrawerItem has no supportingContent slot;
+                        // the date rides inside the two-line label instead.
                         label = {
-                            Text(
-                                conversation.title,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        },
-                        supportingContent = {
-                            Text(
-                                DateFormat.getDateInstance(DateFormat.SHORT)
-                                    .format(Date(conversation.updatedAtEpochMs)),
-                                style = MaterialTheme.typography.labelSmall
-                            )
+                            Column {
+                                Text(
+                                    conversation.title,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    DateFormat.getDateInstance(DateFormat.SHORT)
+                                        .format(Date(conversation.updatedAtEpochMs)),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
                         },
                         selected = false,
                         colors = NavigationDrawerItemDefaults.colors(
