@@ -1,0 +1,29 @@
+# Gradle
+.gradle/
+build/
+app/build/
+**/build/
+
+# IDE
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+.DS_Store
+
+# Local configuration (machine-specific)
+local.properties
+
+# Keystores — never commit signing material
+*.jks
+*.keystore
+
+# Logs & crash dumps
+*.log
+captures/
+
+# Android Studio / IntelliJ candidates
+/captures
+.externalNativeBuild
+.cxx
