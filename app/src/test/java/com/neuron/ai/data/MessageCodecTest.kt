@@ -3,6 +3,7 @@ package com.neuron.ai.data
 import com.neuron.ai.core.conversation.Message
 import com.neuron.ai.core.conversation.MessageMetadata
 import com.neuron.ai.data.db.MessageCodec
+import com.neuron.ai.data.db.toDomain
 import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
