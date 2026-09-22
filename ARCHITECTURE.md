@@ -51,8 +51,14 @@ com.neuron.ai
 │   ├── memory/                 # Memory seam
 │   └── integration/            # BrowserSession, TerminalSession seams
 ├── data/
-│   ├── conversation/           # InMemoryConversationRepository (→ Room in Phase 1)
-│   └── tool/                   # InMemoryToolRegistry
+│   ├── db/                     # Room entities, DAO, database, codecs
+│   ├── conversation/           # RoomConversationRepository
+│   ├── provider/               # ProviderRepository, OpenAI-compatible provider, wire codec
+│   ├── agent/                  # ToolUsingAgent, DefaultToolExecutor
+│   ├── tool/                   # InMemoryToolRegistry, SafeTools
+│   ├── attachment/             # AttachmentStore (app-private storage)
+│   ├── permissions/            # SessionPermissionManager
+│   └── task/                   # DefaultTaskManager
 ├── di/
 │   └── AppContainer.kt         # explicit manual dependency graph
 └── ui/
@@ -82,11 +88,10 @@ com.neuron.ai
 | UI state         | `StateFlow` in ViewModels (`HomeUiState`)      |
 | Repository state | `MutableStateFlow` inside data implementations |
 | Preferences      | DataStore (`SettingsRepository`)               |
-| Persistence      | Repository seam (Room in Phase 1)              |
+| Persistence      | Room (`ConversationRepository` via `RoomConversationRepository`) |
 
 All state is observable through `kotlinx.coroutines.flow.Flow`; nothing caches UI state
-globally. The repository mutex (`InMemoryConversationRepository`) guarantees
-suspend-function atomicity while flows remain the reactive surface.
+globally. Repository writes run on the IO dispatcher; Room flows keep the UI reactive.
 
 ## 5. AI provider architecture
 
@@ -143,21 +148,28 @@ seam; real background execution arrives in Phase 2 within Android's constraints
 |--------------------|---------------------------------------|-------|
 | Settings           | Preferences DataStore                 | 0     |
 | Secrets            | EncryptedSharedPreferences (Keystore) | 0     |
-| Conversations      | In-memory (process lifetime)          | 0     |
-| Conversations/files| Room + workspace sandbox              | 1     |
+| Conversations      | Room (`NeuronDatabase`, v1)           | 1     |
+| Attachments        | App-private files + metadata in Room  | 1     |
+| Provider configs   | JSON file in app-private storage      | 1     |
+| Projects/workspace | Room + sandboxed root                 | 2     |
 
 ## 11. Security
 
 - **Secrets:** `SecureCredentialStore` wraps Android Keystore (AES256-GCM master key).
   If initialization fails, the factory degrades to a **non-persisting in-memory store**
-  and logs a warning — it never falls back to plain-text persistence.
+  and logs a warning — it never falls back to plain-text persistence. API keys are
+  written to it the moment a provider is saved, and are read only into a request's
+  `Authorization` header.
 - **Redaction:** every log line passes through `redactSecrets()`, which masks values of
   keys matching `key|token|secret|password|credential|authorization`.
 - **Logs:** all logging goes through the `Logger` facade — no direct `Log.*` calls.
 - **Backups:** `allowBackup` is on; when secrets become persistent in Phase 1, switch to
   backup-excluding rules for the encrypted prefs file.
-- **Workspaces:** future filesystem access is confined to explicit project roots;
-  path traversal must be rejected by implementations.
+- **Workspace sandbox:** `SafeTools.FileRead`/`FileSearch` confine all access to the
+  `filesDir/workspace` root; canonical-path checks reject `../` and absolute escapes
+  (covered by unit tests).
+- **Attachments:** imported files are copied into app-private storage; shared-storage
+  URIs are never passed to tools or providers directly.
 
 ## 12. Browser integration
 
@@ -191,6 +203,24 @@ Deliberate decisions that keep the codebase open:
    user-presentable failure story.
 5. **No fake functionality** — Phase 0 deliberately ships no mock AI replies; the chat
    UI works against the real repository seam so Phase 1 only adds a provider.
+
+## Phase 1 implementation status
+
+- **Provider system:** `OpenAICompatibleProvider` (OkHttp + SSE streaming, tool-calling
+  wire format, vision data-URLs) behind the `AIProvider` seam; `ProviderRepository`
+  owns user configs, connection testing, and per-conversation model binding.
+- **Agent runtime:** `ToolUsingAgent` implements the streaming tool loop with a strict
+  `goal.allowedTools` allowlist, a step budget, and user-facing activity events only.
+- **Tools:** time, calculator (recursive-descent evaluator — no `javax.script`), text
+  stats, workspace file read/search. New tools register without touching the loop.
+- **Permissions:** `SessionPermissionManager` surfaces allow/deny decisions to the UI;
+  grants last for the session and can be revoked.
+- **Tasks:** `DefaultTaskManager` runs supervised coroutines with cancel/retry and
+  NonCancellable status transitions.
+- **Storage:** Room v1 for conversations and messages; attachments in app-private
+  storage with metadata blobs; provider configs persisted as JSON (keys excluded).
+- **Rendering:** hand-rolled Markdown (headings, lists, quotes, tables, code blocks
+  with copy + basic highlighting) and LaTeX via `ru.noties:jlatexmath-android`.
 
 ## Key technical decisions
 

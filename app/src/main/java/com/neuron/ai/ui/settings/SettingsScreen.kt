@@ -37,7 +37,10 @@ private val THEME_OPTIONS = listOf(ThemeMode.LIGHT, ThemeMode.DARK, ThemeMode.SY
 @Composable
 fun SettingsScreen(
     container: AppContainer,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    onOpenProviders: () -> Unit = {},
+    onOpenConversations: () -> Unit = {},
+    onOpenTasks: () -> Unit = {}
 ) {
     val viewModel: SettingsViewModel =
         viewModel(factory = SettingsViewModelFactory(container))
@@ -97,17 +100,31 @@ fun SettingsScreen(
             HorizontalDivider(modifier = Modifier.padding(vertical = Spacing.lg))
 
             Text(
+                text = "Data",
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+
+            SettingsLink("Conversations", "Search, rename and delete chats") {
+                onOpenConversations()
+            }
+            SettingsLink("Tasks", "See and stop running agent tasks") {
+                onOpenTasks()
+            }
+
+            HorizontalDivider(modifier = Modifier.padding(vertical = Spacing.lg))
+
+            Text(
                 text = "AI Providers",
                 style = MaterialTheme.typography.titleMedium,
                 color = MaterialTheme.colorScheme.onSurface
             )
-            Text(
-                text = "OpenAI-compatible provider configuration arrives in Phase 1. " +
-                    "Credentials will be stored in the Android Keystore, never in plain text.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = Spacing.sm)
-            )
+            SettingsLink(
+                "Manage providers",
+                "OpenAI-compatible endpoints, keys stored in the Android Keystore"
+            ) {
+                onOpenProviders()
+            }
 
             HorizontalDivider(modifier = Modifier.padding(vertical = Spacing.lg))
 
@@ -119,12 +136,37 @@ fun SettingsScreen(
                         style = MaterialTheme.typography.titleMedium
                     )
                     Text(
-                        text = "Version 0.1.0 — Phase 0",
+                        text = "Version 0.2.0 — Phase 1",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun SettingsLink(title: String, subtitle: String, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(vertical = Spacing.md),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.bodyLarge)
+            Text(
+                subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        Text(
+            "›",
+            style = MaterialTheme.typography.titleLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
     }
 }

@@ -1,21 +1,35 @@
 package com.neuron.ai.di
 
 import android.content.Context
+import com.neuron.ai.core.agent.ToolExecutor
+import com.neuron.ai.core.agent.ToolRegistry
 import com.neuron.ai.core.conversation.ConversationRepository
 import com.neuron.ai.core.coroutines.DefaultDispatcherProvider
 import com.neuron.ai.core.coroutines.DispatcherProvider
 import com.neuron.ai.core.log.AndroidLogger
 import com.neuron.ai.core.log.Logger
+import com.neuron.ai.core.permissions.PermissionManager
 import com.neuron.ai.core.security.SecureCredentialStore
 import com.neuron.ai.core.security.SecureCredentialStoreFactory
 import com.neuron.ai.core.settings.SettingsRepository
 import com.neuron.ai.core.settings.SettingsRepositoryImpl
-import com.neuron.ai.core.agent.ToolRegistry
-import com.neuron.ai.data.conversation.InMemoryConversationRepository
+import com.neuron.ai.core.task.TaskManager
+import com.neuron.ai.data.agent.DefaultToolExecutor
+import com.neuron.ai.data.attachment.AttachmentStore
+import com.neuron.ai.data.conversation.RoomConversationRepository
+import com.neuron.ai.data.db.NeuronDatabase
+import com.neuron.ai.data.permissions.SessionPermissionManager
+import com.neuron.ai.data.provider.ProviderRepository
+import com.neuron.ai.data.task.DefaultTaskManager
 import com.neuron.ai.data.tool.InMemoryToolRegistry
+import com.neuron.ai.data.tool.SafeTools
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
+import kotlinx.serialization.json.Json
 
 /**
- * Phase 0 dependency container. Hand-rolled on purpose: one explicit place
+ * Phase 1 dependency container. Hand-rolled on purpose: one explicit place
  * where every collaborator is created, zero reflection, trivially inspectable.
  * If the graph grows beyond this, migrate to Hilt without changing call sites.
  */
@@ -31,8 +45,39 @@ class AppContainer(context: Context) {
     val settingsRepository: SettingsRepository =
         SettingsRepositoryImpl(context, dispatchers)
 
+    val json: Json = Json { ignoreUnknownKeys = true }
+
+    val database: NeuronDatabase = NeuronDatabase.get(context)
+
     val conversationRepository: ConversationRepository =
-        InMemoryConversationRepository()
+        RoomConversationRepository(database.conversationDao(), dispatchers, json)
+
+    val attachmentStore: AttachmentStore =
+        AttachmentStore(context, dispatchers, logger)
+
+    val providerRepository: ProviderRepository =
+        ProviderRepository(context, secureCredentials, dispatchers, logger)
+
+    val permissionManager: PermissionManager = SessionPermissionManager()
 
     val toolRegistry: ToolRegistry = InMemoryToolRegistry()
+
+    val toolExecutor: ToolExecutor =
+        DefaultToolExecutor(toolRegistry, permissionManager, logger)
+
+    val taskManager: TaskManager = DefaultTaskManager(dispatchers)
+
+    private val initScope = CoroutineScope(SupervisorJob() + dispatchers.io)
+
+    init {
+        // Phase 1 foundational tools — registration only, no UI coupling.
+        initScope.launch {
+            toolRegistry.register(SafeTools.CurrentTime())
+            toolRegistry.register(SafeTools.Calculator())
+            toolRegistry.register(SafeTools.TextStats())
+            val workspace = java.io.File(context.filesDir, "workspace")
+            toolRegistry.register(SafeTools.FileRead(workspace))
+            toolRegistry.register(SafeTools.FileSearch(workspace))
+        }
+    }
 }
