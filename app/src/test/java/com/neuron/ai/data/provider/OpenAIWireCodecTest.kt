@@ -132,7 +132,7 @@ class OpenAIWireCodecTest {
         // fragments is guaranteed correct — the concatenation below must
         // yield the arguments string {"expression":"1+2"}.
         parser.parse(toolCallChunk(callId = "call-9", name = "math.evaluate", arguments = "{\"expr"))
-        parser.parse(toolCallChunk(callId = null, name = null, arguments = "ession\":\"1+2}"))
+        parser.parse(toolCallChunk(callId = null, name = null, arguments = "ession\":\"1+2\"}"))
         val events = parser.parse("""{"choices":[{"delta":{},"finish_reason":"tool_calls"}]}""")
 
         val call = events.filterIsInstance<StreamEvent.ToolCallRequested>().single()
