@@ -65,7 +65,7 @@ internal class OpenAIWireCodec(private val json: Json) {
 
             ChatMessage.Role.ASSISTANT ->
                 if (message.toolCalls.isNotEmpty()) {
-                    put("content", message.content.ifBlank { JsonNull })
+                    put("content", message.content.ifBlank { null })
                     put("tool_calls", buildJsonArray {
                         message.toolCalls.forEach { call ->
                             add(buildJsonObject {

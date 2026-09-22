@@ -9,12 +9,14 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.neuron.ai.core.permissions.Capability
 import com.neuron.ai.core.permissions.PermissionManager
 import com.neuron.ai.core.permissions.PermissionRequest
+import kotlinx.coroutines.launch
 
 /** UI-facing labels for capabilities. */
 object PermissionUiMapper {
@@ -38,6 +40,7 @@ fun PermissionDialogHost(
     content: @Composable () -> Unit
 ) {
     val pending by permissionManager.pendingRequests.collectAsStateWithLifecycle(initialValue = emptyList())
+    val scope = rememberCoroutineScope()
 
     content()
 
@@ -63,12 +66,12 @@ fun PermissionDialogHost(
                 }
             },
             confirmButton = {
-                TextButton(onClick = { permissionManager.grant(request.id) }) {
+                TextButton(onClick = { scope.launch { permissionManager.grant(request.id) } }) {
                     Text("Allow")
                 }
             },
             dismissButton = {
-                TextButton(onClick = { permissionManager.deny(request.id) }) {
+                TextButton(onClick = { scope.launch { permissionManager.deny(request.id) } }) {
                     Text("Deny")
                 }
             }

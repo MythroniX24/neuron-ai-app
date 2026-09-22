@@ -149,7 +149,7 @@ class ProviderRepository(
             if (file.exists()) {
                 val raw = file.readText()
                 if (raw.isNotBlank()) {
-                    _configs.value = json.decodeFromString(raw)
+                    _configs.value = json.decodeFromString<List<ProviderConfig>>(raw)
                 }
             }
         }.onFailure { logger.w("Provider", "Could not load provider configs", it) }
@@ -157,7 +157,7 @@ class ProviderRepository(
 
     private fun persist() {
         runCatching {
-            file.writeText(json.encodeToString(_configs.value))
+            file.writeText(json.encodeToString<List<ProviderConfig>>(_configs.value))
         }.onFailure { logger.w("Provider", "Could not save provider configs", it) }
     }
 }

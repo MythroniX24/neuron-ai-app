@@ -17,7 +17,7 @@ sealed class MdBlock {
 
     data class Quote(val text: String) : MdBlock()
 
-    data class HorizontalRule : MdBlock()
+    data object HorizontalRule : MdBlock()
 
     data class ListBlock(
         val items: List<String>,
@@ -86,10 +86,11 @@ object MarkdownParser {
             }
 
             // Heading.
-            headingRegex.find(line)?.let { match ->
+            val heading = headingRegex.find(line)
+            if (heading != null) {
                 blocks += MdBlock.Heading(
-                    level = match.groupValues[1].length,
-                    text = match.groupValues[2].trim()
+                    level = heading.groupValues[1].length,
+                    text = heading.groupValues[2].trim()
                 )
                 i++
                 continue
@@ -103,8 +104,9 @@ object MarkdownParser {
             }
 
             // Quote.
-            quoteRegex.find(line)?.let { match ->
-                val quote = StringBuilder(match.groupValues[1])
+            val quoteStart = quoteRegex.find(line)
+            if (quoteStart != null) {
+                val quote = StringBuilder(quoteStart.groupValues[1])
                 i++
                 while (i < lines.size) {
                     val continuation = quoteRegex.find(lines[i]) ?: break
@@ -131,14 +133,15 @@ object MarkdownParser {
             // Lists.
             val bullet = bulletRegex.find(line)
             val ordered = orderedRegex.find(line)
-            if (bullet != null || ordered != null) {
+            val listStart = ordered ?: bullet
+            if (listStart != null) {
                 val isOrdered = ordered != null
-                val items = mutableListOf((ordered ?: bullet).groupValues[1])
+                val items = mutableListOf(listStart.groupValues[1])
                 i++
                 while (i < lines.size) {
                     val next = bulletRegex.find(lines[i]) ?: orderedRegex.find(lines[i]) ?: break
                     // A different list kind breaks the group.
-                    if ((next == ordered) != isOrdered) break
+                    if (orderedRegex.matches(lines[i]) != isOrdered) break
                     items += next.groupValues[1]
                     i++
                 }
