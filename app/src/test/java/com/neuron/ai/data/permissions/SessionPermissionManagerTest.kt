@@ -43,7 +43,7 @@ class SessionPermissionManagerTest {
 
         assertFalse(decision.await())
         assertFalse(manager.isGranted(Capability.NETWORK))
-        assertTrue(manager.pendingRequests.value.isEmpty())
+        assertTrue(manager.pendingRequests.first().isEmpty())
     }
 
     @Test
