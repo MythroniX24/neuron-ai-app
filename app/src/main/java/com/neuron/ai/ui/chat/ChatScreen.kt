@@ -22,6 +22,7 @@ import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.ErrorOutline
+import androidx.compose.material.icons.outlined.Menu
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -66,7 +67,8 @@ private const val EMPTY_HINT =
 fun ChatScreen(
     container: AppContainer,
     conversationId: String,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    onOpenMenu: () -> Unit = {}
 ) {
     val viewModel: ChatViewModel = viewModel(
         factory = ChatViewModelFactory(container, conversationId)
@@ -114,6 +116,7 @@ fun ChatScreen(
             modelOptions = viewModel.modelOptions.collectAsStateWithLifecycle().value,
             selectedModelId = conversation?.modelId,
             onSelectModel = { providerId, modelId -> viewModel.setModel(providerId, modelId) },
+            onOpenMenu = onOpenMenu,
             onBack = onBack
         )
 
@@ -154,7 +157,9 @@ fun ChatScreen(
 
                 is GenerationState.Failed -> item {
                     ErrorBanner(
-                        message = gen.error.userMessage,
+                        // error.message carries the provider-specific reason;
+                        // userMessage would collapse everything to one generic line.
+                        message = gen.error.message,
                         onRetry = { viewModel.retry() },
                         onDismiss = { viewModel.clearError() }
                     )
@@ -217,6 +222,7 @@ private fun ChatTopBar(
     modelOptions: List<ModelOption>,
     selectedModelId: String?,
     onSelectModel: (providerId: String, modelId: String) -> Unit,
+    onOpenMenu: () -> Unit,
     onBack: () -> Unit
 ) {
     var showPicker by remember { mutableStateOf(false) }
@@ -235,10 +241,10 @@ private fun ChatTopBar(
             }
         },
         navigationIcon = {
-            IconButton(onClick = onBack) {
+            IconButton(onClick = onOpenMenu) {
                 Icon(
-                    imageVector = Icons.AutoMirrored.Outlined.ArrowBack,
-                    contentDescription = "Back"
+                    imageVector = Icons.Outlined.Menu,
+                    contentDescription = "Open menu"
                 )
             }
         },

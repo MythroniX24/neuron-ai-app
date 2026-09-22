@@ -1,5 +1,6 @@
 package com.neuron.ai.core.agent
 
+import com.neuron.ai.core.provider.ChatMessage
 import kotlinx.coroutines.flow.Flow
 
 /**
@@ -18,7 +19,9 @@ interface Agent {
 data class AgentGoal(
     val instruction: String,
     val conversationId: String,
-    val allowedTools: Set<String> = emptySet()
+    val allowedTools: Set<String> = emptySet(),
+    /** Prior conversation turns (oldest first) so multi-turn chat has context. */
+    val history: List<ChatMessage> = emptyList()
 )
 
 /** One visible step of agent work, e.g. "✓ Searching web". */

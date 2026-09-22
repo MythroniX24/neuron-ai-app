@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Code
+import androidx.compose.material.icons.outlined.Menu
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.MoreVert
@@ -52,7 +53,8 @@ fun HomeScreen(
     container: AppContainer,
     onOpenChat: (String) -> Unit,
     onOpenSettings: () -> Unit,
-    onOpenConversations: () -> Unit = {}
+    onOpenConversations: () -> Unit = {},
+    onOpenMenu: () -> Unit = {}
 ) {
     val viewModel: HomeViewModel = viewModel(factory = HomeViewModelFactory(container))
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -73,6 +75,14 @@ fun HomeScreen(
                     Text(
                         "Neuron-AI",
                         style = MaterialTheme.typography.titleMedium
+                    )
+                }
+            },
+            navigationIcon = {
+                IconButton(onClick = onOpenMenu) {
+                    Icon(
+                        imageVector = Icons.Outlined.Menu,
+                        contentDescription = "Open menu"
                     )
                 }
             },

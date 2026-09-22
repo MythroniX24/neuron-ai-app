@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      Dark bootstrap theme: used while the OS is in dark mode before Compose
+      draws. Prevents the white window flash on launch in dark mode.
+    -->
+    <style name="Theme.NeuronAI" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/neuron_window_background</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+</resources>
