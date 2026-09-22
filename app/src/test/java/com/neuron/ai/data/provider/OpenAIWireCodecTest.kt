@@ -7,9 +7,13 @@ import com.neuron.ai.core.provider.Model
 import com.neuron.ai.core.provider.StreamEvent
 import com.neuron.ai.core.provider.ToolSpec
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.add
+import kotlinx.serialization.json.buildJsonArray
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
@@ -124,8 +128,11 @@ class OpenAIWireCodecTest {
     fun `parser assembles tool call fragments across chunks`() {
         val parser = SseChunkParser(json)
 
-        parser.parse("""{"choices":[{"delta":{"tool_calls":[{"index":"0","id":"call-9","function":{"name":"math.evaluate","arguments":"{\"expr"}}]}}]}""")
-        parser.parse("""{"choices":[{"delta":{"tool_calls":[{"index":"0","function":{"arguments":"ession\":\"1+2\"}}}]}}]}""")
+        // Built programmatically so the JSON escaping of embedded argument
+        // fragments is guaranteed correct — the concatenation below must
+        // yield the arguments string {"expression":"1+2"}.
+        parser.parse(toolCallChunk(callId = "call-9", name = "math.evaluate", arguments = "{\"expr"))
+        parser.parse(toolCallChunk(callId = null, name = null, arguments = "ession\":\"1+2}"))
         val events = parser.parse("""{"choices":[{"delta":{},"finish_reason":"tool_calls"}]}""")
 
         val call = events.filterIsInstance<StreamEvent.ToolCallRequested>().single()
@@ -135,6 +142,29 @@ class OpenAIWireCodecTest {
         val parsed = json.parseToJsonElement(call.argumentsJson).jsonObject
         assertEquals("1+2", parsed["expression"]?.jsonPrimitive?.content)
     }
+
+    private fun toolCallChunk(
+        callId: String?,
+        name: String?,
+        arguments: String
+    ): String = buildJsonObject {
+        put("choices", buildJsonArray {
+            add(buildJsonObject {
+                put("delta", buildJsonObject {
+                    put("tool_calls", buildJsonArray {
+                        add(buildJsonObject {
+                            put("index", "0")
+                            callId?.let { put("id", it) }
+                            put("function", buildJsonObject {
+                                name?.let { put("name", it) }
+                                put("arguments", arguments)
+                            })
+                        })
+                    })
+                })
+            })
+        })
+    }.toString()
 
     @Test
     fun `parser emits Completed on DONE sentinel`() {
