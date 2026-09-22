@@ -4,6 +4,7 @@ import com.neuron.ai.core.conversation.Attachment
 import com.neuron.ai.core.conversation.Conversation
 import com.neuron.ai.core.conversation.Message
 import com.neuron.ai.core.conversation.MessageMetadata
+import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
 /** JSON codec for the blobs stored inside message rows. */
