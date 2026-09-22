@@ -87,14 +87,22 @@ class SafeToolsTest {
     }
 
     @Test
-    fun `file read resolves traversal attempts to null`() {
-        val tool = SafeTools.FileRead(tmp.newFolder("workspace"))
+    fun `file read resolves traversal attempts outside workspace to null`() {
+        val workspace = tmp.newFolder("workspace")
+        val tool = SafeTools.FileRead(workspace)
 
         assertNull(tool.resolve("../outside.txt"))
         assertNull(tool.resolve("nested/../../etc/passwd"))
-        assertNull(tool.resolve("/absolute/escape"))
 
-        assertNotNull(tool.resolve("valid/relative.txt"))
+        // A leading slash is treated as relative to the workspace root,
+        // so it must still resolve INSIDE the sandbox.
+        val absolute = tool.resolve("/absolute/escape")
+        assertNotNull(absolute)
+        assertTrue(absolute!!.canonicalPath.startsWith(workspace.canonicalPath))
+
+        val valid = tool.resolve("valid/relative.txt")
+        assertNotNull(valid)
+        assertTrue(valid!!.canonicalPath.startsWith(workspace.canonicalPath))
     }
 
     @Test
