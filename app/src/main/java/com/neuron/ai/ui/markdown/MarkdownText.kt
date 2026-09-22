@@ -56,7 +56,7 @@ fun MarkdownText(
 private fun BlockView(block: MdBlock) {
     when (block) {
         is MdBlock.Heading -> Text(
-            text = InlineMarkdown.toAnnotatedString(stripInline(block.text)),
+            text = InlineMarkdown.toAnnotatedString(block.text),
             style = when (block.level) {
                 1 -> MaterialTheme.typography.headlineSmall
                 2 -> MaterialTheme.typography.titleLarge
@@ -241,7 +241,7 @@ private fun LatexText(
     val drawable = remember(latex) {
         runCatching {
             ru.noties.jlatexmath.JLatexMathDrawable.builder(latex)
-                .textSize(44)
+                .textSize(44f)
                 .padding(8)
                 .build()
         }.getOrNull()

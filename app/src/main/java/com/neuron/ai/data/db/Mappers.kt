@@ -10,14 +10,15 @@ import kotlinx.serialization.json.Json
 internal class MessageCodec(private val json: Json) {
 
     fun encodeAttachments(attachments: List<Attachment>): String =
-        if (attachments.isEmpty()) "[]" else json.encodeToString(attachments)
+        if (attachments.isEmpty()) "[]"
+        else json.encodeToString<List<Attachment>>(attachments)
 
     fun decodeAttachments(raw: String?): List<Attachment> = runCatching {
         if (raw.isNullOrBlank()) emptyList() else json.decodeFromString<List<Attachment>>(raw)
     }.getOrDefault(emptyList())
 
     fun encodeMetadata(metadata: MessageMetadata?): String? =
-        metadata?.let { runCatching { json.encodeToString(it) }.getOrNull() }
+        metadata?.let { runCatching { json.encodeToString<MessageMetadata>(it) }.getOrNull() }
 
     fun decodeMetadata(raw: String?): MessageMetadata? = runCatching {
         raw?.takeIf { it.isNotBlank() }?.let { json.decodeFromString<MessageMetadata>(it) }
