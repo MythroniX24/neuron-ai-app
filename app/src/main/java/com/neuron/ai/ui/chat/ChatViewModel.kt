@@ -121,6 +121,36 @@ class ChatViewModel(
         return config to modelId
     }
 
+    /**
+     * Builds the multi-turn context for the model: everything before the
+     * current user message, oldest first. TOOL rows are skipped — their
+     * assistant tool-call parents are not persisted, and dangling tool rows
+     * are rejected by several providers. Capped to keep requests sane.
+     */
+    private suspend fun buildHistory(): List<ChatMessage> {
+        val all = conversations.messagesOf(conversationId).first()
+        // Drop trailing non-user rows: the just-appended prompt (and any
+        // partial assistant text from a stopped previous attempt).
+        var end = all.size
+        while (end > 0 && all[end - 1].role != Message.Role.USER) end--
+        val prior = all.subList(0, maxOf(0, end - 1))
+        return prior
+            .filter { it.role != Message.Role.TOOL && it.metadata?.isError != true }
+            .takeLast(30)
+            .map { msg ->
+                ChatMessage(
+                    role = when (msg.role) {
+                        Message.Role.USER -> ChatMessage.Role.USER
+                        Message.Role.ASSISTANT -> ChatMessage.Role.ASSISTANT
+                        Message.Role.SYSTEM -> ChatMessage.Role.SYSTEM
+                        Message.Role.TOOL -> ChatMessage.Role.TOOL
+                    },
+                    content = msg.content,
+                    attachments = msg.attachments
+                )
+            }
+    }
+
     fun setModel(providerId: String, modelId: String) {
         viewModelScope.launch(dispatchers.io) {
             conversations.setConversationModel(conversationId, providerId, modelId)
@@ -233,7 +263,10 @@ class ChatViewModel(
         val selection = resolveSelection()
         if (selection == null) {
             _generation.value = GenerationState.Failed(
-                NeuronError.Provider("No AI provider configured. Add one in Settings → AI Providers.")
+                NeuronError.Provider(
+                    "No model selected. Tap the model name in the top bar to pick one, " +
+                        "or edit your provider and use \"Load models\"."
+                )
             )
             return
         }
@@ -260,8 +293,13 @@ class ChatViewModel(
         )
 
         try {
-            agent.run(AgentGoal(instruction = prompt, conversationId = conversationId))
-                .collect { event ->
+            agent.run(
+                AgentGoal(
+                    instruction = prompt,
+                    conversationId = conversationId,
+                    history = buildHistory()
+                )
+            ).collect { event ->
                     when (event) {
                         is AgentEvent.ActivityStarted -> {
                             _activity.value = _activity.value + AgentActivityUi(

@@ -45,8 +45,15 @@ class ToolUsingAgent(
 
     override fun run(goal: AgentGoal): Flow<AgentEvent> = channelFlow {
         val history = mutableListOf<ChatMessage>(
-            ChatMessage(role = ChatMessage.Role.USER, content = goal.instruction)
+            ChatMessage(
+                role = ChatMessage.Role.SYSTEM,
+                content = "You are Neuron, a helpful AI assistant running on the user's phone. " +
+                    "Answer clearly and concisely; use Markdown for structure and code."
+            )
         )
+        // Prior turns give the model real multi-turn context.
+        history.addAll(goal.history)
+        history += ChatMessage(role = ChatMessage.Role.USER, content = goal.instruction)
 
         var step = 0
         while (step < maxSteps) {

@@ -1,24 +1,32 @@
 package com.neuron.ai.ui.providers
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBarsPadding
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material3.AssistChip
+import androidx.compose.material3.Button
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -28,28 +36,38 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.neuron.ai.data.provider.ProviderPresets
 import com.neuron.ai.di.AppContainer
-import com.neuron.ai.ui.components.PrimaryButton
 import com.neuron.ai.ui.theme.Spacing
 
 /**
- * Add/edit provider form. The API key field is write-only: existing keys are
- * never echoed back. "Test connection" performs a live /models call.
+ * Add/edit provider. New providers start from a preset (OpenAI, Gemini, Groq,
+ * xAI…); models can be loaded straight from the endpoint and picked as chips.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ProviderEditScreen(
     container: AppContainer,
     providerId: String?,
+    presetId: String? = null,
     onBack: () -> Unit
 ) {
     val viewModel: ProvidersViewModel =
         viewModel(factory = ProvidersViewModelFactory(container))
     val form by viewModel.form.collectAsStateWithLifecycle()
 
-    LaunchedEffect(providerId) { viewModel.loadForEdit(providerId) }
+    LaunchedEffect(providerId, presetId) {
+        if (providerId != null) {
+            viewModel.loadForEdit(providerId)
+        } else if (presetId != null) {
+            viewModel.applyPreset(presetId)
+        } else {
+            viewModel.loadForEdit(null)
+        }
+    }
     LaunchedEffect(form.saved) { if (form.saved) onBack() }
 
     Column(
@@ -85,11 +103,46 @@ fun ProviderEditScreen(
                 .padding(horizontal = Spacing.lg),
             verticalArrangement = Arrangement.spacedBy(Spacing.md)
         ) {
+            // ---- Preset picker (new providers only) ------------------------------
+            if (providerId == null) {
+                Text(
+                    text = "Choose a provider",
+                    style = MaterialTheme.typography.titleSmall
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(Spacing.xs)
+                ) {
+                    listOf("openai", "gemini", "groq").forEach { id ->
+                        PresetChip(
+                            label = ProviderPresets.byId(id)!!.displayName,
+                            selected = form.presetId == id,
+                            onClick = { viewModel.applyPreset(id) },
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(Spacing.xs)
+                ) {
+                    listOf("xai", "openrouter", "ollama").forEach { id ->
+                        PresetChip(
+                            label = ProviderPresets.byId(id)!!.displayName
+                                .substringBefore(" ("),
+                            selected = form.presetId == id,
+                            onClick = { viewModel.applyPreset(id) },
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                }
+                HorizontalDivider(modifier = Modifier.padding(vertical = Spacing.xs))
+            }
+
             OutlinedTextField(
                 value = form.name,
                 onValueChange = { value -> viewModel.updateForm { it.copy(name = value) } },
                 label = { Text("Provider name") },
-                placeholder = { Text("e.g. OpenAI, Groq, OpenRouter") },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth()
             )
@@ -113,15 +166,89 @@ fun ProviderEditScreen(
                 modifier = Modifier.fillMaxWidth()
             )
 
+            // ---- Load models -------------------------------------------------------
+            Surface(
+                shape = MaterialTheme.shapes.medium,
+                color = MaterialTheme.colorScheme.surfaceVariant,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(Modifier.padding(Spacing.md)) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(Spacing.md)
+                    ) {
+                        Button(
+                            onClick = viewModel::loadModels,
+                            enabled = !form.isLoadingModels && form.baseUrl.isNotBlank()
+                        ) {
+                            Text(if (form.isLoadingModels) "Loading…" else "Load models")
+                        }
+                        if (form.isLoadingModels) {
+                            CircularProgressIndicator(modifier = Modifier.size(18.dp))
+                        }
+                        form.discoveredModels.takeIf { it.isNotEmpty() }?.let { models ->
+                            Text(
+                                text = "${models.size} found — tap to select",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+
+                    form.modelsError?.let { message ->
+                        Text(
+                            text = message,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.padding(top = Spacing.sm)
+                        )
+                    }
+
+                    if (form.discoveredModels.isNotEmpty()) {
+                        // Plain Column: this card sits inside a verticalScroll
+                        // parent, where a LazyColumn would crash on infinite height.
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = Spacing.sm),
+                            verticalArrangement = Arrangement.spacedBy(Spacing.xs)
+                        ) {
+                            form.discoveredModels.forEach { modelId ->
+                                ListItem(
+                                    headlineContent = { Text(modelId) },
+                                    leadingContent = {
+                                        Checkbox(
+                                            checked = modelId in form.selectedModels,
+                                            onCheckedChange = { viewModel.toggleModel(modelId) }
+                                        )
+                                    },
+                                    modifier = Modifier.clickable {
+                                        viewModel.toggleModel(modelId)
+                                    }
+                                )
+                            }
+                        }
+                        if (form.selectedModels.isNotEmpty()) {
+                            Text(
+                                text = "${form.selectedModels.size} selected — they will be saved as this provider's models",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.padding(top = Spacing.xs)
+                            )
+                        }
+                    }
+                }
+            }
+
             OutlinedTextField(
                 value = form.modelIdsText,
                 onValueChange = { value ->
                     viewModel.updateForm { it.copy(modelIdsText = value) }
                 },
-                label = { Text("Model IDs") },
+                label = { Text("Model IDs (manual)") },
                 placeholder = { Text("gpt-4o-mini, llama-3.1-70b (comma separated)") },
                 supportingText = {
-                    Text("Leave empty to discover models from the provider.")
+                    Text("Optional if you selected models above.")
                 },
                 minLines = 1,
                 maxLines = 3,
@@ -164,7 +291,7 @@ fun ProviderEditScreen(
                         ProviderFormState.TestResult.SUCCESS ->
                             "✓ Connection successful"
                         ProviderFormState.TestResult.FAILURE ->
-                            "✕ Connection failed — check URL, key and network"
+                            "✕ " + (form.testMessage ?: "Connection failed")
                     },
                     style = MaterialTheme.typography.bodyMedium,
                     color = if (result == ProviderFormState.TestResult.SUCCESS) {
@@ -181,24 +308,44 @@ fun ProviderEditScreen(
                     .padding(vertical = Spacing.lg),
                 horizontalArrangement = Arrangement.spacedBy(Spacing.md)
             ) {
-                androidx.compose.material3.OutlinedButton(
+                OutlinedButton(
                     onClick = viewModel::testConnection,
                     enabled = !form.isTesting && form.baseUrl.isNotBlank(),
                     modifier = Modifier.weight(1f)
                 ) {
                     Text(if (form.isTesting) "Testing…" else "Test connection")
                 }
-                PrimaryButton(
-                    text = if (form.isSaving) "Saving…" else "Save",
+                androidx.compose.material3.Button(
                     onClick = { viewModel.save(providerId) },
                     enabled = !form.isSaving &&
                         form.name.isNotBlank() &&
                         form.baseUrl.isNotBlank(),
                     modifier = Modifier.weight(1f)
-                )
+                ) {
+                    Text(if (form.isSaving) "Saving…" else "Save")
+                }
             }
         }
     }
+}
+
+@Composable
+private fun PresetChip(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    AssistChip(
+        onClick = onClick,
+        label = { Text(label, maxLines = 1) },
+        leadingIcon = if (selected) {
+            { Text("✓", style = MaterialTheme.typography.labelMedium) }
+        } else {
+            null
+        },
+        modifier = modifier
+    )
 }
 
 @Composable

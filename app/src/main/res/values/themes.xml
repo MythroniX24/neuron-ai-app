@@ -5,7 +5,7 @@
       Light-first: the light Material theme is the base; dark handling happens in Compose.
     -->
     <style name="Theme.NeuronAI" parent="android:Theme.Material.Light.NoActionBar">
-        <item name="android:windowBackground">@android:color/white</item>
+        <item name="android:windowBackground">@color/neuron_window_background</item>
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
         <item name="android:windowLightStatusBar">true</item>
