@@ -33,8 +33,8 @@ class SessionPermissionManager : PermissionManager {
         capability: Capability,
         reason: String,
         requestedBy: String
-    ): Boolean = mutex.withLock {
-        if (capability in _granted.value) return@withLock true
+    ): Boolean {
+        if (capability in _granted.value) return true
 
         val request = PermissionRequest(
             id = "perm-" + UUID.randomUUID().toString().take(8),
@@ -42,15 +42,24 @@ class SessionPermissionManager : PermissionManager {
             reason = reason,
             requestedBy = requestedBy
         )
-        _pending.value = _pending.value + request
         val waiter = CompletableDeferred<Boolean>()
-        waiters[request.id] = waiter
+
+        // Register the request WITHOUT holding the mutex while waiting —
+        // grant()/deny() must be able to acquire it to resolve us, otherwise
+        // awaiting inside withLock would deadlock the whole permission flow.
+        mutex.withLock {
+            if (capability in _granted.value) return true
+            _pending.value = _pending.value + request
+            waiters[request.id] = waiter
+        }
 
         try {
-            waiter.await()
+            return waiter.await()
         } finally {
-            _pending.value = _pending.value.filterNot { it.id == request.id }
-            waiters.remove(request.id)
+            mutex.withLock {
+                _pending.value = _pending.value.filterNot { it.id == request.id }
+                waiters.remove(request.id)
+            }
         }
     }
 

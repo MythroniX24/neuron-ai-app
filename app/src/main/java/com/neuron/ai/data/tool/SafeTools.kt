@@ -61,7 +61,15 @@ object SafeTools {
                 ?: return ToolResult.Failure("Missing required argument: expression")
             return try {
                 val value = ArithmeticEvaluator.evaluate(expression)
-                ToolResult.Success("$expression = $value")
+                // Integral results read better in chat ("20", not "20.0").
+                val text = if (value == Math.floor(value) && !value.isInfinite() &&
+                    Math.abs(value) < 1e15
+                ) {
+                    value.toLong().toString()
+                } else {
+                    value.toString()
+                }
+                ToolResult.Success("$expression = $text")
             } catch (t: Throwable) {
                 ToolResult.Failure("Could not evaluate expression: ${t.message}")
             }

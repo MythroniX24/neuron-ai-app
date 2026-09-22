@@ -176,14 +176,14 @@ class RoomConversationRepositoryTest {
         val repo = repository()
         val conversation = repo.createConversation("Chat")
         val first = repo.appendMessage(conversation.id, Message.Role.USER, "first")
-        repo.appendMessage(conversation.id, Message.Role.ASSISTANT, "second")
+        val second = repo.appendMessage(conversation.id, Message.Role.ASSISTANT, "second")
         val third = repo.appendMessage(conversation.id, Message.Role.USER, "third")
         repo.appendMessage(conversation.id, Message.Role.ASSISTANT, "fourth")
 
         repo.deleteMessagesFrom(conversation.id, third.id)
 
         val remaining = repo.messagesOf(conversation.id).first()
-        assertEquals(listOf(first.id), remaining.map { it.id })
+        assertEquals(listOf(first.id, second.id), remaining.map { it.id })
     }
 
     @Test
