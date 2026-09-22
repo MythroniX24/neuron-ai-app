@@ -125,7 +125,7 @@ class OpenAIWireCodecTest {
         val parser = SseChunkParser(json)
 
         parser.parse("""{"choices":[{"delta":{"tool_calls":[{"index":"0","id":"call-9","function":{"name":"math.evaluate","arguments":"{\"expr"}}]}}]}""")
-        parser.parse("""{"choices":[{"delta":{"tool_calls":[{"index":"0","function":{"arguments":"ession\":\"1+2\"}\"}}]}}]}""")
+        parser.parse("""{"choices":[{"delta":{"tool_calls":[{"index":"0","function":{"arguments":"ession\":\"1+2\"}}}]}}]}""")
         val events = parser.parse("""{"choices":[{"delta":{},"finish_reason":"tool_calls"}]}""")
 
         val call = events.filterIsInstance<StreamEvent.ToolCallRequested>().single()
