@@ -163,11 +163,16 @@ class AgentToolLoopIntegrationTest {
     @Test
     fun `permission denial feeds structured error to model, no crash`() = runTest {
         val provider = ScriptedProvider()
-        provider.script.add(toolRequestEvent("math.evaluate", "{\"expression\":\"1+1\"}"))
+        // fs.read requires FILESYSTEM_READ — a permission the fake denies.
+        provider.script.add(toolRequestEvent("fs.read", "{\"path\":\"notes.txt\"}"))
         provider.script.add(StreamEvent.Delta("Understood, no permission."))
 
+        val workspace = java.io.File(
+            System.getProperty("java.io.tmpdir"),
+            "neuron-denial-test-" + System.nanoTime()
+        ).apply { mkdirs() }
         val registry = InMemoryToolRegistry()
-        registry.register(SafeTools.Calculator())
+        registry.register(SafeTools.FileRead(workspace))
         val executor = DefaultToolExecutor(registry, AutoDenyPermissions(), logger = null)
         val agent = ToolUsingAgent(
             provider = provider,
@@ -178,10 +183,11 @@ class AgentToolLoopIntegrationTest {
         )
 
         val events = withTimeout(5_000) {
-            collect(agent, AgentGoal(instruction = "calc", conversationId = "c1"))
+            collect(agent, AgentGoal(instruction = "read file", conversationId = "c1"))
         }
 
-        // The model still received the structured denial as a tool result.
+        // The model received the structured denial as a tool result — and the
+        // tool itself NEVER executed (no file access happened).
         val toolRow = provider.requests[1].filter { it.role == ChatMessage.Role.TOOL }
         assertEquals(1, toolRow.size)
         assertTrue(toolRow.single().content.startsWith("Error:"))
