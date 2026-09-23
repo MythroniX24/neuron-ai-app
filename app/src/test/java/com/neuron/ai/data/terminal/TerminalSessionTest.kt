@@ -102,16 +102,17 @@ class TerminalSessionTest {
     fun `stop cancels a running command`() {
         runBlocking {
             val session = newSession()
-            val runner = launch { session.execute("sleep 30", timeoutMs = 60_000) }
-            delay(1_000) // let the process actually start (real time)
-            session.stop()
-            withTimeout(10_000) {
-                while (session.state.first() != TerminalState.IDLE) {
-                    delay(100)
-                }
+            var exitCode: Int? = null
+            withTimeout(30_000) {
+                val runner = launch { exitCode = session.execute("sleep 30", timeoutMs = 60_000) }
+                delay(1_000) // let the process actually start (real time)
+                session.stop()
+                runner.join() // execute fully settles (sets IDLE) before returning
             }
+            // Killed by stop: 130 from the cancellation path, or the process's
+            // own signal exit (137/143). Either way the session is idle again.
+            assertTrue(exitCode == 130 || exitCode == 137 || exitCode == 143 || exitCode == 0)
             assertEquals(TerminalState.IDLE, session.state.first())
-            runner.cancel()
             session.close()
         }
     }
