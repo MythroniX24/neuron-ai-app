@@ -89,11 +89,17 @@ class TerminalSessionTest {
     }
 
     @Test
-    fun `timeout kills the process with exit 124`() {
+    fun `timeout kills the process and returns quickly with exit 124`() {
         runBlocking {
             val session = newSession()
+            val started = System.currentTimeMillis()
             val code = session.execute("sleep 30", timeoutMs = 1_500)
+            val elapsed = System.currentTimeMillis() - started
             assertEquals(124, code)
+            // Must settle promptly — an orphaned `sleep` holding the output
+            // pipes open must never keep execute() hanging ~30s.
+            assertTrue("execute took ${elapsed}ms to settle", elapsed < 10_000)
+            assertEquals(TerminalState.IDLE, session.state.first())
             session.close()
         }
     }
@@ -104,14 +110,22 @@ class TerminalSessionTest {
             val session = newSession()
             var exitCode: Int? = null
             withTimeout(30_000) {
-                val runner = launch { exitCode = session.execute("sleep 30", timeoutMs = 60_000) }
+                val runner = launch {
+                    // stop() cancels execute() — a cancelled run maps to 130,
+                    // the same code the session uses for user stops.
+                    exitCode = try {
+                        session.execute("sleep 30", timeoutMs = 60_000)
+                    } catch (_: kotlinx.coroutines.CancellationException) {
+                        130
+                    }
+                }
                 delay(1_000) // let the process actually start (real time)
                 session.stop()
                 runner.join() // execute fully settles (sets IDLE) before returning
             }
             // Killed by stop: 130 from the cancellation path, or the process's
             // own signal exit (137/143). Either way the session is idle again.
-            assertTrue(exitCode == 130 || exitCode == 137 || exitCode == 143 || exitCode == 0)
+            assertTrue("exit was $exitCode", exitCode == 130 || exitCode == 137 || exitCode == 143)
             assertEquals(TerminalState.IDLE, session.state.first())
             session.close()
         }

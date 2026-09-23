@@ -12,9 +12,11 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
@@ -114,13 +116,22 @@ class TerminalSession internal constructor(
                     .start()
                 activeProcess = process
 
-                val stdoutJob = launch { drain(process.inputStream, TerminalLine.Stream.STDOUT) }
-                val stderrJob = launch { drain(process.errorStream, TerminalLine.Stream.STDERR) }
+                // Daemon threads, NOT coroutines: a killed `sh -c "sleep 30"` leaves
+            // the orphaned `sleep` holding our stdout/stderr pipes open for its
+            // full duration. Waiting for stream EOF would hang execution; daemon
+            // readers take everything available and die silently afterwards
+            // (trailing output after a kill may be truncated — acceptable).
+            val stdoutThread = drainThread(process.inputStream, TerminalLine.Stream.STDOUT)
+            val stderrThread = drainThread(process.errorStream, TerminalLine.Stream.STDERR)
+            stdoutThread.start()
+            stderrThread.start()
 
-                val code = process.waitFor()
-                stdoutJob.join()
-                stderrJob.join()
-                exitDeferred.complete(code)
+            val code = process.waitFor()
+            // Normal exit: brief, BOUNDED flush window (EOF arrives as soon as
+            // every writer dies — this only guards the last lines).
+            stdoutThread.join(2_000)
+            stderrThread.join(2_000)
+            exitDeferred.complete(code)
             } catch (cancelled: CancellationException) {
                 activeProcess?.destroyForcibly()
                 emit(TerminalLine.system(id, "^C stopped"))
@@ -141,9 +152,14 @@ class TerminalSession internal constructor(
             currentCoroutineContext().ensureActive()
             activeProcess?.destroyForcibly()
             emit(TerminalLine.system(id, "timed out after ${timeoutMs / 1000}s"))
+            // Same settle semantics as stop(): the job must not linger on
+            // orphaned pipe readers after a timeout kill.
+            job.cancel()
             124
         }
-        job.join()
+        // stop()/cancel paths settle via CancellationException; never block
+        // unboundedly on the job here.
+        withTimeoutOrNull(2_000) { job.join() }
         _lastExitCode.value = exitCode
         _state.value = TerminalState.IDLE
         val elapsed = System.currentTimeMillis() - started
@@ -179,14 +195,25 @@ class TerminalSession internal constructor(
             if (File("/system/bin/sh").exists()) "/system/bin/sh" else "/bin/sh"
     }
 
-    private suspend fun drain(stream: java.io.InputStream, streamKind: TerminalLine.Stream) {
-        stream.bufferedReader().useLines { lines ->
-            lines.forEach { line -> emit(TerminalLine(id, line, streamKind, System.currentTimeMillis())) }
-        }
-    }
+    private fun drainThread(stream: java.io.InputStream, streamKind: TerminalLine.Stream): Thread =
+        Thread {
+            try {
+                stream.bufferedReader().useLines { lines ->
+                    lines.forEach { line ->
+                        emit(TerminalLine(id, line, streamKind, System.currentTimeMillis()))
+                    }
+                }
+            } catch (_: Exception) {
+                // Pipe broken by a process kill — nothing more to read.
+            }
+        }.apply { isDaemon = true }
 
     private fun emit(line: TerminalLine) {
-        _output.value = (_output.value + line).let { if (it.size > outputLimit) it.takeLast(outputLimit) else it }
+        // Atomic CAS update — drain threads and the executor coroutine emit concurrently.
+        _output.update { list ->
+            val next = list + line
+            if (next.size > outputLimit) next.takeLast(outputLimit) else next
+        }
     }
 
     private fun trim() {
