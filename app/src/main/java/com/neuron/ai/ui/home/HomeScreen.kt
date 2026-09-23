@@ -15,8 +15,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Code
 import androidx.compose.material.icons.outlined.Menu
 import androidx.compose.material.icons.outlined.Folder
-import androidx.compose.material.icons.outlined.History
-import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.Public
 import androidx.compose.material.icons.outlined.Terminal
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -86,20 +84,8 @@ fun HomeScreen(
                     )
                 }
             },
-            actions = {
-                IconButton(onClick = onOpenConversations) {
-                    Icon(
-                        imageVector = Icons.Outlined.History,
-                        contentDescription = "Conversations"
-                    )
-                }
-                IconButton(onClick = onOpenSettings) {
-                    Icon(
-                        imageVector = Icons.Outlined.MoreVert,
-                        contentDescription = "Settings"
-                    )
-                }
-            },
+            // History and settings live in the sidebar drawer; the top bar stays clean.
+            actions = {},
             colors = TopAppBarDefaults.topAppBarColors(
                 containerColor = MaterialTheme.colorScheme.background
             )
@@ -180,7 +166,8 @@ fun HomeScreen(
                 val text = draft.trim()
                 if (text.isNotEmpty() && !uiState.isCreatingChat) {
                     draft = ""
-                    viewModel.startNewChat { conversationId ->
+                    // The typed text becomes the new chat's first message.
+                    viewModel.startNewChat(text) { conversationId ->
                         onOpenChat(conversationId)
                     }
                 }

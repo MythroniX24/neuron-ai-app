@@ -11,9 +11,12 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.outlined.KeyboardArrowDown
+import androidx.compose.material.icons.outlined.KeyboardArrowUp
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
@@ -34,6 +37,9 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -69,6 +75,9 @@ fun ProviderEditScreen(
         }
     }
     LaunchedEffect(form.saved) { if (form.saved) onBack() }
+
+    // Discovered-model list starts collapsed; the header row toggles it.
+    var modelsExpanded by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
@@ -166,7 +175,8 @@ fun ProviderEditScreen(
                 modifier = Modifier.fillMaxWidth()
             )
 
-            // ---- Load models -------------------------------------------------------
+            // ---- Load models (collapsible; collapsed by default so the
+            //      long model list never floods the form) --------------------------
             Surface(
                 shape = MaterialTheme.shapes.medium,
                 color = MaterialTheme.colorScheme.surfaceVariant,
@@ -175,7 +185,8 @@ fun ProviderEditScreen(
                 Column(Modifier.padding(Spacing.md)) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(Spacing.md)
+                        horizontalArrangement = Arrangement.spacedBy(Spacing.md),
+                        modifier = Modifier.fillMaxWidth()
                     ) {
                         Button(
                             onClick = viewModel::loadModels,
@@ -186,12 +197,33 @@ fun ProviderEditScreen(
                         if (form.isLoadingModels) {
                             CircularProgressIndicator(modifier = Modifier.size(18.dp))
                         }
-                        form.discoveredModels.takeIf { it.isNotEmpty() }?.let { models ->
+                        Spacer(Modifier.weight(1f))
+                        // Expand/collapse toggle — only when there is a list to show.
+                        if (form.discoveredModels.isNotEmpty()) {
                             Text(
-                                text = "${models.size} found — tap to select",
+                                text = "${form.discoveredModels.size} found" +
+                                    if (form.selectedModels.isNotEmpty()) {
+                                        " · ${form.selectedModels.size} selected"
+                                    } else {
+                                        ""
+                                    },
                                 style = MaterialTheme.typography.labelMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
+                            IconButton(onClick = { modelsExpanded = !modelsExpanded }) {
+                                Icon(
+                                    imageVector = if (modelsExpanded) {
+                                        Icons.Outlined.KeyboardArrowUp
+                                    } else {
+                                        Icons.Outlined.KeyboardArrowDown
+                                    },
+                                    contentDescription = if (modelsExpanded) {
+                                        "Collapse model list"
+                                    } else {
+                                        "Expand model list"
+                                    }
+                                )
+                            }
                         }
                     }
 
@@ -204,7 +236,7 @@ fun ProviderEditScreen(
                         )
                     }
 
-                    if (form.discoveredModels.isNotEmpty()) {
+                    if (modelsExpanded && form.discoveredModels.isNotEmpty()) {
                         // Plain Column: this card sits inside a verticalScroll
                         // parent, where a LazyColumn would crash on infinite height.
                         Column(
