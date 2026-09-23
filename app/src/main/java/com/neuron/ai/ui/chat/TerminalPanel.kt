@@ -107,11 +107,13 @@ fun TerminalPanel(
                         .pointerInput(Unit) {
                             detectVerticalDragGestures(
                                 onDragEnd = {
-                                    heightFraction = if (heightFraction > 0.72f) 0.85f
-                                    else if (heightFraction < 0.38f) {
-                                        onDismiss()
-                                    } else {
-                                        0.5f
+                                    when {
+                                        heightFraction > 0.72f -> heightFraction = 0.85f
+                                        heightFraction < 0.38f -> {
+                                            heightFraction = 0.5f
+                                            onDismiss()
+                                        }
+                                        else -> heightFraction = 0.5f
                                     }
                                     panelState = if (heightFraction > 0.6f) PanelState.EXPANDED else PanelState.HALF
                                 }
