@@ -43,9 +43,9 @@ class DefaultToolExecutorTest {
     }
 
     private class FakeTool(
-        private val block: suspend (String) -> ToolResult,
         override val riskLevel: RiskLevel = RiskLevel.SAFE,
-        override val timeoutMs: Long = 5_000
+        override val timeoutMs: Long = 5_000,
+        private val block: suspend (String) -> ToolResult
     ) : Tool {
         override val id = "fake.tool"
         override val title = "Fake tool"
