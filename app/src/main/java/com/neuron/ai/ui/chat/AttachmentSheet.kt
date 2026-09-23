@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.Photo
@@ -92,7 +93,7 @@ private fun SheetOption(
 ) {
     Surface(
         onClick = onClick,
-        shape = MaterialTheme.shapes.small.copy(all = Radius.lg),
+        shape = RoundedCornerShape(Radius.lg),
         color = MaterialTheme.colorScheme.surfaceVariant,
         modifier = Modifier.size(width = 96.dp, height = 84.dp)
     ) {

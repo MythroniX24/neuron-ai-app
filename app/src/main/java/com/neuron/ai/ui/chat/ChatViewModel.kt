@@ -71,7 +71,7 @@ class ChatViewModel(
     private val defaultModelId: String?,
     private val toolIdsProvider: suspend () -> Set<String>,
     private val importAttachmentFn: suspend (android.net.Uri) -> com.neuron.ai.core.conversation.Attachment?,
-    private val importCaptureFn: (java.io.File) -> com.neuron.ai.core.conversation.Attachment?
+    private val importCaptureFn: suspend (java.io.File) -> com.neuron.ai.core.conversation.Attachment?
 ) : ViewModel() {
 
     val messages: StateFlow<List<Message>> =
