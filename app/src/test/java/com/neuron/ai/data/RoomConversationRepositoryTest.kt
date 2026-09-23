@@ -61,6 +61,18 @@ class RoomConversationRepositoryTest {
             }
         }
 
+        override suspend fun setConversationWorkspace(id: String, workspaceId: String?) {
+            conversations.value = conversations.value.map {
+                if (it.id == id) it.copy(workspaceId = workspaceId) else it
+            }
+        }
+
+        override suspend fun setTerminalEnabled(id: String, enabled: Boolean) {
+            conversations.value = conversations.value.map {
+                if (it.id == id) it.copy(terminalEnabled = enabled) else it
+            }
+        }
+
         override suspend fun setConversationModel(
             id: String,
             providerId: String?,
