@@ -4,7 +4,7 @@ import kotlinx.coroutines.flow.Flow
 
 /**
  * A unit of user-visible work that may outlive a single chat turn.
- * Phase 2 turns this into true background execution; Phase 0 fixes the model.
+ * Tasks mirror agent runs; Milestone 2 adds background persistence.
  */
 data class Task(
     val id: String,
@@ -12,12 +12,24 @@ data class Task(
     val status: Status,
     val conversationId: String?,
     val createdAtEpochMs: Long,
-    val updatedAtEpochMs: Long
+    val updatedAtEpochMs: Long,
+    /** Latest one-line activity, e.g. "Reading file: notes.md". */
+    val activity: String? = null,
+    /** Number of completed agent steps, when known. */
+    val completedSteps: Int? = null,
+    val totalSteps: Int? = null,
+    val error: String? = null
 ) {
-    enum class Status { QUEUED, RUNNING, PAUSED, DONE, FAILED, CANCELLED }
+    enum class Status { QUEUED, RUNNING, WAITING_FOR_PERMISSION, DONE, FAILED, CANCELLED }
+
+    val isFinished: Boolean
+        get() = this == Status.DONE || this == Status.FAILED || this == Status.CANCELLED
+
+    val isTerminalFailure: Boolean
+        get() = this == Status.FAILED
 }
 
-/** Creates and observes tasks. */
+/** Creates, launches, observes and cancels tasks. */
 interface TaskManager {
     val tasks: Flow<List<Task>>
     suspend fun create(title: String, conversationId: String?): Task

@@ -100,7 +100,11 @@ fun TasksScreen(
                 verticalArrangement = Arrangement.spacedBy(Spacing.xs)
             ) {
                 items(tasks, key = { it.id }) { task ->
-                    TaskRow(task = task, onStop = { viewModel.stop(task.id) })
+                    TaskRow(
+                        task = task,
+                        onStop = { viewModel.stop(task.id) },
+                        onRetry = { viewModel.retry(task.id) }
+                    )
                 }
             }
         }
@@ -113,7 +117,7 @@ private val Task.Status.isFinished: Boolean
         this == Task.Status.CANCELLED
 
 @Composable
-private fun TaskRow(task: Task, onStop: () -> Unit) {
+private fun TaskRow(task: Task, onStop: () -> Unit, onRetry: () -> Unit) {
     ListItem(
         headlineContent = {
             Text(
@@ -124,28 +128,65 @@ private fun TaskRow(task: Task, onStop: () -> Unit) {
             )
         },
         supportingContent = {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
-            ) {
-                if (task.status == Task.Status.RUNNING) {
-                    LinearProgressIndicator(
-                        modifier = Modifier.size(width = 48.dp, height = 3.dp)
+            Column {
+                task.activity?.let { activity ->
+                    Text(
+                        text = activity,
+                        style = MaterialTheme.typography.bodySmall,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
-                Text(
-                    text = DateFormat.getTimeInstance(DateFormat.SHORT)
-                        .format(Date(task.updatedAtEpochMs)),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                task.error?.let { error ->
+                    Text(
+                        text = error,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
+                ) {
+                    when (task.status) {
+                        Task.Status.RUNNING -> LinearProgressIndicator(
+                            modifier = Modifier.size(width = 48.dp, height = 3.dp)
+                        )
+                        Task.Status.WAITING_FOR_PERMISSION -> Text(
+                            "Waiting for permission",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.tertiary
+                        )
+                        else -> Unit
+                    }
+                    if (task.completedSteps != null) {
+                        Text(
+                            text = if (task.totalSteps != null) {
+                                "${task.completedSteps}/${task.totalSteps} steps"
+                            } else {
+                                "${task.completedSteps} steps"
+                            },
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Text(
+                        text = DateFormat.getTimeInstance(DateFormat.SHORT)
+                            .format(Date(task.updatedAtEpochMs)),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
         },
         leadingContent = {
             Icon(
                 imageVector = when (task.status) {
-                    Task.Status.QUEUED, Task.Status.PAUSED -> Icons.Outlined.Schedule
+                    Task.Status.QUEUED -> Icons.Outlined.Schedule
                     Task.Status.RUNNING -> Icons.Outlined.Schedule
+                    Task.Status.WAITING_FOR_PERMISSION -> Icons.Outlined.Schedule
                     Task.Status.DONE -> Icons.Outlined.CheckCircle
                     Task.Status.FAILED -> Icons.Outlined.ErrorOutline
                     Task.Status.CANCELLED -> Icons.Outlined.Cancel
@@ -160,8 +201,12 @@ private fun TaskRow(task: Task, onStop: () -> Unit) {
             )
         },
         trailingContent = {
-            if (task.status == Task.Status.RUNNING || task.status == Task.Status.QUEUED) {
-                TextButton(onClick = onStop) { Text("Stop") }
+            when {
+                task.status == Task.Status.RUNNING || task.status == Task.Status.QUEUED ->
+                    TextButton(onClick = onStop) { Text("Stop") }
+                task.status == Task.Status.FAILED ->
+                    TextButton(onClick = onRetry) { Text("Retry") }
+                else -> Unit
             }
         },
         colors = ListItemDefaults.colors(

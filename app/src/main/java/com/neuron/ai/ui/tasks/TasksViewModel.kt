@@ -23,6 +23,11 @@ class TasksViewModel(
         viewModelScope.launch(dispatchers.io) { taskManager.cancel(taskId) }
     }
 
+    /** Re-queues and re-runs a FAILED task. */
+    fun retry(taskId: String) {
+        viewModelScope.launch(dispatchers.io) { taskManager.retry(taskId) { } }
+    }
+
     fun clearFinished() {
         viewModelScope.launch(dispatchers.io) { taskManager.clearFinished() }
     }

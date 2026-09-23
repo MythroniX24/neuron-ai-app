@@ -200,15 +200,28 @@ class ChatViewModel(
     }
 
     /**
-     * Names the chat after its first user message (2–3 words), like mainstream
-     * chat apps. Fires once, in the background; never blocks or fails the send.
+     * Names the chat with an AI-generated 2-3 word title from the first user
+     * message, like mainstream chat apps. Fires once, in the background;
+     * falls back to the offline heuristic; never blocks or fails the send.
      */
     private suspend fun maybeAutoTitle(prompt: String) {
         val conversation = _conversation.value ?: return
         val isUntitled = conversation.title == "New chat" || conversation.title.isBlank()
         if (!isUntitled || prompt.isBlank()) return
 
-        val title = deriveChatTitle(prompt)
+        val selection = resolveSelection()
+        val title = if (selection != null) {
+            val (config, modelId) = selection
+            val provider = providers.provider(config.id)
+            if (provider != null) {
+                AiNaming.generate(prompt, provider, modelId)
+            } else {
+                null
+            }
+        } else {
+            null
+        } ?: deriveChatTitle(prompt)
+
         runCatching { conversations.renameConversation(conversationId, title) }
             .onSuccess {
                 // Keep the local state in sync — the top bar and drawer read it.

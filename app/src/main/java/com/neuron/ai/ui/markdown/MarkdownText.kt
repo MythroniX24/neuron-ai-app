@@ -189,7 +189,7 @@ private fun TableView(table: MdBlock.Table) {
         Row(Modifier.background(MaterialTheme.colorScheme.surfaceVariant)) {
             table.headers.forEach { header ->
                 Text(
-                    text = header,
+                    text = InlineMarkdown.toAnnotatedString(header),
                     style = MaterialTheme.typography.labelMedium,
                     fontWeight = FontWeight.SemiBold,
                     modifier = Modifier
@@ -202,7 +202,7 @@ private fun TableView(table: MdBlock.Table) {
             Row {
                 row.forEach { cell ->
                     Text(
-                        text = cell,
+                        text = InlineMarkdown.toAnnotatedString(cell),
                         style = MaterialTheme.typography.bodySmall,
                         modifier = Modifier
                             .padding(Spacing.sm)

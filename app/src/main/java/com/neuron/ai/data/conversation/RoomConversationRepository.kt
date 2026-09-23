@@ -61,6 +61,9 @@ class RoomConversationRepository(
             dao.renameConversation(conversationId, title.ifBlank { "Untitled" }, clock())
         }
 
+    override suspend fun setConversationPinned(conversationId: String, pinned: Boolean) =
+        withContext(io) { dao.setPinned(conversationId, pinned) }
+
     override suspend fun setConversationModel(
         conversationId: String,
         providerId: String?,

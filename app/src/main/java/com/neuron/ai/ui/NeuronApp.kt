@@ -1,5 +1,10 @@
 package com.neuron.ai.ui
 
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.core.tween
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ModalNavigationDrawer
@@ -71,7 +76,15 @@ fun NeuronApp(container: AppContainer) {
         PermissionDialogHost(container.permissionManager) {
             NavHost(
                 navController = navController,
-                startDestination = Routes.HOME
+                startDestination = Routes.HOME,
+                enterTransition = {
+                    fadeIn(tween(220)) + slideInHorizontally(tween(260)) { it / 10 }
+                },
+                exitTransition = { fadeOut(tween(160)) },
+                popEnterTransition = { fadeIn(tween(220)) },
+                popExitTransition = {
+                    fadeOut(tween(160)) + slideOutHorizontally(tween(260)) { it / 10 }
+                }
             ) {
                 composable(Routes.HOME) {
                     HomeScreen(
@@ -91,8 +104,7 @@ fun NeuronApp(container: AppContainer) {
                     ChatScreen(
                         container = container,
                         conversationId = conversationId,
-                        onOpenMenu = openDrawer,
-                        onBack = { navController.popBackStack() }
+                        onOpenMenu = openDrawer
                     )
                 }
 

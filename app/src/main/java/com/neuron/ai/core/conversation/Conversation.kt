@@ -43,7 +43,9 @@ data class Conversation(
     val updatedAtEpochMs: Long,
     /** Provider/model this conversation is bound to (null = app default). */
     val providerId: String? = null,
-    val modelId: String? = null
+    val modelId: String? = null,
+    /** Pinned chats float to the top of drawer/search lists. */
+    val pinned: Boolean = false
 )
 
 /** A message inside a [Conversation]. */
@@ -72,6 +74,7 @@ interface ConversationRepository {
     ): Conversation
 
     suspend fun renameConversation(conversationId: String, title: String)
+    suspend fun setConversationPinned(conversationId: String, pinned: Boolean)
     suspend fun setConversationModel(conversationId: String, providerId: String?, modelId: String?)
 
     suspend fun appendMessage(

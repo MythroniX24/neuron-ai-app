@@ -4,6 +4,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -13,6 +14,7 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBarsPadding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -20,17 +22,19 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.ErrorOutline
+import androidx.compose.material.icons.outlined.KeyboardArrowDown
 import androidx.compose.material.icons.outlined.Menu
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material3.AssistChip
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -46,6 +50,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -67,7 +72,6 @@ private const val EMPTY_HINT =
 fun ChatScreen(
     container: AppContainer,
     conversationId: String,
-    onBack: () -> Unit,
     onOpenMenu: () -> Unit = {}
 ) {
     val viewModel: ChatViewModel = viewModel(
@@ -111,13 +115,12 @@ fun ChatScreen(
             .imePadding()
     ) {
         ChatTopBar(
-            title = conversation?.title ?: "Chat",
             modelName = conversation?.modelId,
             modelOptions = viewModel.modelOptions.collectAsStateWithLifecycle().value,
             selectedModelId = conversation?.modelId,
+            selectedProviderId = conversation?.providerId,
             onSelectModel = { providerId, modelId -> viewModel.setModel(providerId, modelId) },
-            onOpenMenu = onOpenMenu,
-            onBack = onBack
+            onOpenMenu = onOpenMenu
         )
 
         LazyColumn(
@@ -143,7 +146,8 @@ fun ChatScreen(
             }
 
             items(messages, key = { it.id }) { message ->
-                MessageRow(message)
+                // Subtle entrance for new rows; cheap on scrolling performance.
+                Box(Modifier.animateItem()) { MessageRow(message) }
             }
 
             if (activity.isNotEmpty()) {
@@ -217,27 +221,42 @@ fun ChatScreen(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ChatTopBar(
-    title: String,
     modelName: String?,
     modelOptions: List<ModelOption>,
     selectedModelId: String?,
+    selectedProviderId: String?,
     onSelectModel: (providerId: String, modelId: String) -> Unit,
-    onOpenMenu: () -> Unit,
-    onBack: () -> Unit
+    onOpenMenu: () -> Unit
 ) {
-    var showPicker by remember { mutableStateOf(false) }
+    var menuExpanded by remember { mutableStateOf(false) }
 
     TopAppBar(
         title = {
-            Column(modifier = Modifier.clickable(enabled = modelOptions.isNotEmpty()) {
-                showPicker = true
-            }) {
-                Text(title, style = MaterialTheme.typography.titleMedium)
+            Column(
+                modifier = Modifier.clickable(enabled = modelOptions.isNotEmpty()) {
+                    menuExpanded = true
+                }
+            ) {
                 Text(
                     text = modelName ?: "Select a model",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    style = MaterialTheme.typography.titleMedium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.widthIn(max = 220.dp)
                 )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = "Tap to switch",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Icon(
+                        imageVector = Icons.Outlined.KeyboardArrowDown,
+                        contentDescription = "Switch model",
+                        modifier = Modifier.size(16.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
         },
         navigationIcon = {
@@ -253,40 +272,53 @@ private fun ChatTopBar(
         )
     )
 
-    if (showPicker) {
-        androidx.compose.material3.AlertDialog(
-            onDismissRequest = { showPicker = false },
-            title = { Text("Choose model", style = MaterialTheme.typography.titleMedium) },
-            text = {
-                Column {
-                    if (modelOptions.isEmpty()) {
-                        Text(
-                            "No models yet. Add a provider in Settings → AI Providers.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    } else {
-                        modelOptions.forEach { option ->
-                            val selected = option.modelId == selectedModelId
-                            ListItem(
-                                headlineContent = { Text(option.modelId) },
-                                supportingContent = { Text(option.providerName) },
-                                leadingContent = {
-                                    RadioButton(selected = selected, onClick = null)
-                                },
-                                modifier = Modifier.clickable {
-                                    onSelectModel(option.providerId, option.modelId)
-                                    showPicker = false
-                                }
+    DropdownMenu(
+        expanded = menuExpanded,
+        onDismissRequest = { menuExpanded = false }
+    ) {
+        if (modelOptions.isEmpty()) {
+            DropdownMenuItem(
+                text = {
+                    Text(
+                        "No models yet — add a provider in Settings → AI Providers",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                },
+                onClick = {}
+            )
+        } else {
+            modelOptions.forEach { option ->
+                val selected = option.modelId == selectedModelId &&
+                    (selectedProviderId == null || option.providerId == selectedProviderId)
+                DropdownMenuItem(
+                    text = {
+                        Column {
+                            Text(option.modelId, style = MaterialTheme.typography.bodyMedium)
+                            Text(
+                                option.providerName,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
+                    },
+                    trailingIcon = {
+                        if (selected) {
+                            Icon(
+                                Icons.Outlined.Check,
+                                contentDescription = "Selected",
+                                modifier = Modifier.size(18.dp),
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    },
+                    onClick = {
+                        onSelectModel(option.providerId, option.modelId)
+                        menuExpanded = false
                     }
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = { showPicker = false }) { Text("Close") }
+                )
             }
-        )
+        }
     }
 }
 

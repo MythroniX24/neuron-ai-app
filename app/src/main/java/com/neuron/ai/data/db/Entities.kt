@@ -11,7 +11,9 @@ data class ConversationEntity(
     val createdAtEpochMs: Long,
     val updatedAtEpochMs: Long,
     val providerId: String?,
-    val modelId: String?
+    val modelId: String?,
+    /** Pinned chats float to the top of every list. */
+    val pinned: Boolean = false
 )
 
 @Entity(
@@ -28,4 +30,22 @@ data class MessageEntity(
     val attachmentsJson: String,
     /** JSON-encoded MessageMetadata, or null. */
     val metadataJson: String?
+)
+
+/**
+ * Persisted task rows so running/finished work survives process death.
+ * Status is stored by enum name; unknown names decode to FAILED.
+ */
+@Entity(tableName = "tasks")
+data class TaskEntity(
+    @PrimaryKey val id: String,
+    val title: String,
+    val status: String,
+    val conversationId: String?,
+    val activity: String?,
+    val completedSteps: Int?,
+    val totalSteps: Int?,
+    val error: String?,
+    val createdAtEpochMs: Long,
+    val updatedAtEpochMs: Long
 )
