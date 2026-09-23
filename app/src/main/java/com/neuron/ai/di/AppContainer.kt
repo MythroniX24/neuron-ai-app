@@ -14,10 +14,12 @@ import com.neuron.ai.core.security.SecureCredentialStoreFactory
 import com.neuron.ai.core.settings.SettingsRepository
 import com.neuron.ai.core.settings.SettingsRepositoryImpl
 import com.neuron.ai.core.task.TaskManager
+import com.neuron.ai.data.agent.DefaultAgentRuntime
 import com.neuron.ai.data.agent.DefaultToolExecutor
 import com.neuron.ai.data.attachment.AttachmentStore
 import com.neuron.ai.data.conversation.RoomConversationRepository
 import com.neuron.ai.data.db.NeuronDatabase
+import com.neuron.ai.data.db.RoomTaskRecordStore
 import com.neuron.ai.data.permissions.SessionPermissionManager
 import com.neuron.ai.data.provider.ProviderRepository
 import com.neuron.ai.data.task.DefaultTaskManager
@@ -29,9 +31,9 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 
 /**
- * Phase 1 dependency container. Hand-rolled on purpose: one explicit place
- * where every collaborator is created, zero reflection, trivially inspectable.
- * If the graph grows beyond this, migrate to Hilt without changing call sites.
+ * Hand-rolled dependency container: one explicit place where every
+ * collaborator is created. Milestone 1 adds task persistence, the agent
+ * runtime and a risk-aware tool executor.
  */
 class AppContainer(context: Context) {
 
@@ -65,13 +67,18 @@ class AppContainer(context: Context) {
     val toolExecutor: ToolExecutor =
         DefaultToolExecutor(toolRegistry, permissionManager, logger)
 
-    val taskManager: TaskManager = DefaultTaskManager(dispatchers)
+    val agentRuntime: DefaultAgentRuntime = DefaultAgentRuntime(dispatchers)
+
+    val taskManager: TaskManager = DefaultTaskManager(
+        dispatchers,
+        RoomTaskRecordStore(database.taskDao())
+    )
 
     private val initScope = CoroutineScope(SupervisorJob() + dispatchers.io)
 
     init {
-        // Phase 1 foundational tools — registration only, no UI coupling.
         initScope.launch {
+            taskManager.restore()
             toolRegistry.register(SafeTools.CurrentTime())
             toolRegistry.register(SafeTools.Calculator())
             toolRegistry.register(SafeTools.TextStats())

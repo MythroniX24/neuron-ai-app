@@ -1,6 +1,7 @@
 package com.neuron.ai.data.agent
 
 import com.neuron.ai.core.agent.AgentEvent
+import com.neuron.ai.core.agent.RiskLevel
 import com.neuron.ai.core.agent.AgentGoal
 import com.neuron.ai.core.agent.AgentActivity
 import com.neuron.ai.core.agent.Agent
@@ -124,7 +125,11 @@ class ToolUsingAgent(
                 val tool = toolRegistry.find(call.toolId)
                 val activity = AgentActivity(
                     stepId = call.callId,
-                    title = tool?.title ?: call.toolId,
+                    title = when (tool?.riskLevel) {
+                        RiskLevel.DESTRUCTIVE -> "Confirming ${tool.title.lowercase()}"
+                        RiskLevel.ELEVATED -> "Running ${tool.title.lowercase()}"
+                        else -> tool?.title ?: call.toolId
+                    },
                     state = AgentActivity.State.RUNNING
                 )
                 send(AgentEvent.ActivityStarted(activity))
