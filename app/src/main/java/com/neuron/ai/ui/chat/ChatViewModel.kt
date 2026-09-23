@@ -104,7 +104,23 @@ class ChatViewModel(
     fun loadConversation() {
         viewModelScope.launch(dispatchers.io) {
             _conversation.value = conversations.getConversation(conversationId)
+            autoRespondIfPending()
         }
+    }
+
+    /**
+     * A chat opened from Home carries the user's first message already
+     * persisted. If the last message is still an unanswered USER message and
+     * nothing is streaming, kick off the response automatically — the home
+     * composer must feel like a real send, not a message that vanished.
+     */
+    private suspend fun autoRespondIfPending() {
+        if (_generation.value !is GenerationState.Idle) return
+        val last = conversations.messagesOf(conversationId).first().lastOrNull() ?: return
+        if (last.role != Message.Role.USER) return
+        lastUserPrompt = last.content
+        lastUserAttachments = last.attachments
+        runAgentTurn(last.content)
     }
 
     // ---- Model selection ------------------------------------------------------------

@@ -13,6 +13,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.Chat
 import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -21,9 +22,13 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.NavigationDrawerItem
 import androidx.compose.material3.NavigationDrawerItemDefaults
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
@@ -48,6 +53,15 @@ fun AppDrawer(
 ) {
     val conversations by container.conversationRepository.conversations
         .collectAsStateWithLifecycle(initialValue = emptyList())
+
+    // Instant title filter — chat titles derive from their first message, so
+    // this doubles as content search for finding older chats.
+    var query by remember { mutableStateOf("") }
+    val filtered = if (query.isBlank()) {
+        conversations
+    } else {
+        conversations.filter { it.title.contains(query, ignoreCase = true) }
+    }
 
     ModalDrawerSheet(
         drawerContainerColor = MaterialTheme.colorScheme.background
@@ -82,6 +96,19 @@ fun AppDrawer(
 
             HorizontalDivider(modifier = Modifier.padding(vertical = Spacing.sm))
 
+            OutlinedTextField(
+                value = query,
+                onValueChange = { query = it },
+                placeholder = { Text("Search chats") },
+                leadingIcon = {
+                    Icon(Icons.Outlined.Search, contentDescription = null)
+                },
+                singleLine = true,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = Spacing.md)
+            )
+
             Text(
                 text = "Chats",
                 style = MaterialTheme.typography.labelMedium,
@@ -90,7 +117,17 @@ fun AppDrawer(
             )
 
             LazyColumn(modifier = Modifier.weight(1f)) {
-                items(conversations, key = { it.id }) { conversation ->
+                if (filtered.isEmpty() && query.isNotBlank()) {
+                    item {
+                        Text(
+                            text = "No chats match \"$query\"",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = Spacing.lg, vertical = Spacing.md)
+                        )
+                    }
+                }
+                items(filtered, key = { it.id }) { conversation ->
                     NavigationDrawerItem(
                         icon = {
                             Icon(Icons.AutoMirrored.Outlined.Chat, contentDescription = null)

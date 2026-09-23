@@ -338,7 +338,13 @@ private fun MessageRow(message: Message) {
             }
         }
 
-        Message.Role.ASSISTANT -> Column(Modifier.fillMaxWidth()) {
+        Message.Role.ASSISTANT -> Column(
+            // Subtle inset so AI text never touches the screen edges; no
+            // visible border, just breathing room.
+            Modifier
+                .fillMaxWidth()
+                .padding(start = Spacing.sm, end = Spacing.sm)
+        ) {
             MarkdownText(markdown = message.content)
         }
 
@@ -348,7 +354,11 @@ private fun MessageRow(message: Message) {
 
 @Composable
 private fun StreamingBubble(text: String) {
-    Column(Modifier.fillMaxWidth()) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .padding(start = Spacing.sm, end = Spacing.sm)
+    ) {
         MarkdownText(markdown = text)
     }
 }
