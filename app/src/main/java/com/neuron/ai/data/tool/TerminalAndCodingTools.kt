@@ -125,7 +125,7 @@ object CodingTools {
                         if (ws.writeText(path, updated)) {
                             ToolResult.Success(
                                 "Edited $path.\n" + DiffEngine.unifiedDiff(path, original, updated).take(4_000)
-                            }
+                            )
                         } else {
                             ToolResult.Failure("Could not write: $path")
                         }
@@ -169,7 +169,7 @@ object CodingTools {
                 if (ws.writeText(path, updated)) {
                     ToolResult.Success(
                         "Patched $path.\n" + DiffEngine.unifiedDiff(path, original, updated).take(4_000)
-                    }
+                    )
                 } else {
                     ToolResult.Failure("Could not write: $path")
                 }
