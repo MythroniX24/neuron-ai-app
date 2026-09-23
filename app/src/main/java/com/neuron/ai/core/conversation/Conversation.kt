@@ -77,6 +77,15 @@ interface ConversationRepository {
         modelId: String? = null
     ): Conversation
 
+    /**
+     * Creates a conversation with a caller-chosen id (unified new-chat
+     * surface) — same contract as [createConversation] otherwise.
+     */
+    suspend fun createConversation(
+        title: String,
+        id: String
+    ): Conversation
+
     suspend fun renameConversation(conversationId: String, title: String)
     suspend fun setConversationPinned(conversationId: String, pinned: Boolean)
     suspend fun setConversationModel(conversationId: String, providerId: String?, modelId: String?)

@@ -3,6 +3,10 @@ package com.neuron.ai.ui.chat
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -52,6 +56,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -66,6 +72,16 @@ import kotlinx.coroutines.launch
 private const val EMPTY_HINT =
     "Start the conversation. Your messages stay on this device."
 
+internal fun greeting(): String {
+    val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+    return when (hour) {
+        in 5..11 -> "Good morning"
+        in 12..16 -> "Good afternoon"
+        in 17..21 -> "Good evening"
+        else -> "Working late"
+    }
+}
+
 /**
  * Phase 1 chat: persistent conversation with streaming responses, markdown,
  * LaTeX, attachments, model selector and agent activity.
@@ -75,7 +91,9 @@ private const val EMPTY_HINT =
 fun ChatScreen(
     container: AppContainer,
     conversationId: String,
-    onOpenMenu: () -> Unit = {}
+    onOpenMenu: () -> Unit = {},
+    onOpenSettings: () -> Unit = {},
+    onOpenConversations: () -> Unit = {}
 ) {
     val viewModel: ChatViewModel = viewModel(
         factory = ChatViewModelFactory(container, conversationId)
@@ -92,6 +110,9 @@ fun ChatScreen(
 
     LaunchedEffect(viewModel) { viewModel.loadConversation() }
 
+    // First send on a brand-new chat: swap this entry for the real
+    // conversation — the SAME ChatScreen composable renders it, so the user
+    // never lands on a "different screen" mid-conversation.
     // Follow the stream: scroll when message count or streaming text changes.
     val streamingText = (generation as? GenerationState.Streaming)?.buffer.orEmpty()
     LaunchedEffect(messages.size, streamingText.length, activity.size) {
@@ -215,15 +236,28 @@ fun ChatScreen(
         ) {
             if (messages.isEmpty() && generation is GenerationState.Idle) {
                 item {
-                    Text(
-                        text = EMPTY_HINT,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        textAlign = TextAlign.Center,
+                    // Unified-surface greeting: same calm hero the old Home had,
+                    // now inline in the one-and-only chat screen.
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(vertical = Spacing.xxl)
-                    )
+                            .padding(top = Spacing.xxl)
+                    ) {
+                        Text(
+                            text = greeting(),
+                            style = MaterialTheme.typography.headlineMedium,
+                            color = MaterialTheme.colorScheme.onBackground,
+                            textAlign = TextAlign.Center
+                        )
+                        Spacer(Modifier.height(Spacing.sm))
+                        Text(
+                            text = "What can I help you with?",
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center
+                        )
+                    }
                 }
             }
 
@@ -290,7 +324,9 @@ fun ChatScreen(
             onStop = viewModel::stop,
             onRegenerate = viewModel::regenerate,
             isStreaming = isStreaming,
-            canRegenerate = messages.any { it.role == Message.Role.ASSISTANT },
+            // The + attach control is part of the composer on EVERY surface —
+            // a new chat included. It no longer "appears after the first
+            // message" because it never disappeared in the first place.
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(Spacing.lg)
@@ -406,51 +442,90 @@ private fun ChatTopBar(
         )
     )
 
-    DropdownMenu(
-        expanded = menuExpanded,
-        onDismissRequest = { menuExpanded = false }
-    ) {
-        if (modelOptions.isEmpty()) {
-            DropdownMenuItem(
-                text = {
+    if (menuExpanded) {
+        // Custom dropdown card — anchored so its top-left sits directly under
+        // the title block ("header ke niche"), NOT a generic menu floating
+        // over the composer. Own surface, own shapes, own scrolling.
+        androidx.compose.ui.window.Popup(
+            alignment = Alignment.BottomStart,
+            onDismissRequest = { menuExpanded = false },
+            properties = androidx.compose.ui.window.PopupProperties(focusable = true)
+        ) {
+            Surface(
+                shape = RoundedCornerShape(16.dp),
+                color = MaterialTheme.colorScheme.surface,
+                tonalElevation = 3.dp,
+                shadowElevation = 12.dp,
+                border = androidx.compose.foundation.BorderStroke(
+                    1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.4f)
+                ),
+                modifier = Modifier
+                    .padding(start = Spacing.xl, top = 2.dp)
+                    .widthIn(min = 240.dp, max = 320.dp)
+            ) {
+                Column(Modifier.padding(vertical = Spacing.sm)) {
                     Text(
-                        "No models yet — add a provider in Settings → AI Providers",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        text = "Select model",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = Spacing.lg, vertical = Spacing.xs)
                     )
-                },
-                onClick = {}
-            )
-        } else {
-            modelOptions.forEach { option ->
-                val selected = option.modelId == selectedModelId &&
-                    (selectedProviderId == null || option.providerId == selectedProviderId)
-                DropdownMenuItem(
-                    text = {
-                        Column {
-                            Text(option.modelId, style = MaterialTheme.typography.bodyMedium)
-                            Text(
-                                option.providerName,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+                    if (modelOptions.isEmpty()) {
+                        Text(
+                            "No models yet — add a provider in Settings → AI Providers",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = Spacing.lg, vertical = Spacing.sm)
+                        )
+                    } else {
+                        Column(
+                            modifier = Modifier
+                                .heightIn(max = 340.dp)
+                                .verticalScroll(rememberScrollState())
+                        ) {
+                            modelOptions.forEach { option ->
+                                val selected = option.modelId == selectedModelId &&
+                                    (selectedProviderId == null || option.providerId == selectedProviderId)
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable {
+                                            onSelectModel(option.providerId, option.modelId)
+                                            menuExpanded = false
+                                        }
+                                        .background(
+                                            if (selected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)
+                                            else Color.Transparent
+                                        )
+                                        .padding(horizontal = Spacing.lg, vertical = Spacing.sm)
+                                ) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text(
+                                            option.modelId,
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        Text(
+                                            option.providerName,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                    if (selected) {
+                                        Icon(
+                                            Icons.Outlined.Check,
+                                            contentDescription = "Selected",
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                }
+                            }
                         }
-                    },
-                    trailingIcon = {
-                        if (selected) {
-                            Icon(
-                                Icons.Outlined.Check,
-                                contentDescription = "Selected",
-                                modifier = Modifier.size(18.dp),
-                                tint = MaterialTheme.colorScheme.primary
-                            )
-                        }
-                    },
-                    onClick = {
-                        onSelectModel(option.providerId, option.modelId)
-                        menuExpanded = false
                     }
-                )
+                }
             }
         }
     }
@@ -543,7 +618,6 @@ private fun ComposerBar(
     onStop: () -> Unit,
     onRegenerate: () -> Unit,
     isStreaming: Boolean,
-    canRegenerate: Boolean,
     modifier: Modifier = Modifier
 ) {
     Surface(
@@ -558,10 +632,13 @@ private fun ComposerBar(
             modifier = Modifier.padding(horizontal = Spacing.md, vertical = Spacing.xs),
             verticalAlignment = Alignment.CenterVertically
         ) {
+            // The + control is a PERMANENT part of the composer: attach, work-
+            // space, terminal toggles live here on every screen state — new chat
+            // included. Streaming only disables it, it never hides it.
             IconButton(onClick = onAttach, enabled = !isStreaming) {
                 Icon(
                     imageVector = Icons.Outlined.Add,
-                    contentDescription = "Attach file",
+                    contentDescription = "Attach and capabilities",
                     tint = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
@@ -580,28 +657,24 @@ private fun ComposerBar(
                 ),
                 textStyle = MaterialTheme.typography.bodyLarge
             )
-            when {
-                isStreaming -> IconButton(onClick = onStop) {
+            // Right slot: streaming → Stop; otherwise → Send. The + control
+            // stays on the left the whole time, so the composer never changes
+            // shape between "new chat" and "conversation" states.
+            if (isStreaming) {
+                IconButton(onClick = onStop) {
                     Icon(
                         imageVector = Icons.Outlined.Close,
                         contentDescription = "Stop generating",
                         tint = MaterialTheme.colorScheme.error
                     )
                 }
-
-                draft.isNotBlank() -> IconButton(onClick = onSend) {
+            } else {
+                IconButton(onClick = onSend, enabled = draft.isNotBlank()) {
                     Icon(
                         imageVector = Icons.AutoMirrored.Filled.Send,
                         contentDescription = "Send",
-                        tint = MaterialTheme.colorScheme.primary
-                    )
-                }
-
-                canRegenerate -> IconButton(onClick = onRegenerate) {
-                    Icon(
-                        imageVector = Icons.Outlined.Refresh,
-                        contentDescription = "Regenerate",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        tint = if (draft.isNotBlank()) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.outline
                     )
                 }
             }

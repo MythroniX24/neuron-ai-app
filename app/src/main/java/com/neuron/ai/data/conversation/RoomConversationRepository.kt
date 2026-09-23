@@ -56,6 +56,21 @@ class RoomConversationRepository(
         conversation
     }
 
+    override suspend fun createConversation(
+        title: String,
+        id: String
+    ): Conversation = withContext(io) {
+        val now = clock()
+        val conversation = Conversation(
+            id = id,
+            title = title.ifBlank { "New chat" },
+            createdAtEpochMs = now,
+            updatedAtEpochMs = now
+        )
+        dao.upsertConversation(conversation.toEntity())
+        conversation
+    }
+
     override suspend fun renameConversation(conversationId: String, title: String) =
         withContext(io) {
             dao.renameConversation(conversationId, title.ifBlank { "Untitled" }, clock())

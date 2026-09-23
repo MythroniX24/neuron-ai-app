@@ -115,6 +115,17 @@ internal class OpenAIWireCodec(private val json: Json) {
     }
 
     companion object {
+        /**
+         * Reads a primitive string from a JSON element WITHOUT the kotlinx
+         * gotcha where `JsonNull.content` returns the literal string "null".
+         * A model's tool-call deltas carry "content": null — naive parsing
+         * used to stream the word "null" into the chat.
+         */
+        fun safeContent(element: kotlinx.serialization.json.JsonElement?): String? {
+            if (element == null || element is kotlinx.serialization.json.JsonNull) return null
+            return runCatching { element.jsonPrimitive.content }.getOrNull()
+        }
+
         /** Maps an HTTP failure to a user-presentable [NeuronError]. */
         fun mapHttpError(body: String?, code: Int?): NeuronError {
             val json = Json { ignoreUnknownKeys = true }
@@ -170,29 +181,29 @@ internal class SseChunkParser(private val json: Json) {
         val events = mutableListOf<com.neuron.ai.core.provider.StreamEvent>()
 
         choice["delta"]?.jsonObject?.get("content")?.let { content ->
-            val text = runCatching { content.jsonPrimitive.content }.getOrNull()
+            val text = safeContent(content)
             if (!text.isNullOrEmpty()) events += com.neuron.ai.core.provider.StreamEvent.Delta(text)
         }
 
         choice["delta"]?.jsonObject?.get("tool_calls")?.let { calls ->
             runCatching { calls.jsonArray }.getOrNull()?.forEach { element ->
                 val call = element.jsonObject
-                val index = call["index"]?.jsonPrimitive?.content ?: "0"
+                val index = safeContent(call["index"]) ?: "0"
                 val buffer = toolCallBuffers.getOrPut(index) {
                     ToolCallBuffer(
-                        call["id"]?.jsonPrimitive?.content
+                        safeContent(call["id"])
                             ?: "call-" + UUID.randomUUID().toString().take(8)
                     )
                 }
-                call["id"]?.jsonPrimitive?.content?.let { buffer.callId = it }
+                safeContent(call["id"])?.let { buffer.callId = it }
                 call["function"]?.jsonObject?.let { fn ->
-                    fn["name"]?.jsonPrimitive?.content?.let { buffer.name = it }
-                    fn["arguments"]?.jsonPrimitive?.content?.let { buffer.arguments.append(it) }
+                    safeContent(fn["name"])?.let { buffer.name = it }
+                    safeContent(fn["arguments"])?.let { buffer.arguments.append(it) }
                 }
             }
         }
 
-        val finish = choice["finish_reason"]?.jsonPrimitive?.content
+        val finish = safeContent(choice["finish_reason"])
         if (finish != null && !sawFinish) {
             sawFinish = true
             toolCallBuffers.values.forEach { buffer ->
