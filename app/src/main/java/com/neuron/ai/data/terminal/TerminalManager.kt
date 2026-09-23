@@ -51,17 +51,17 @@ class TerminalSession internal constructor(
     outputBufferLimit: Int = 2_000
 ) {
     private val _workingDir = MutableStateFlow(workingDir ?: File("/"))
-    val workingDirFlow: Flow<File> = _workingDir.asStateFlow()
+    val workingDirFlow: kotlinx.coroutines.flow.StateFlow<File> = _workingDir.asStateFlow()
 
     private val _state = MutableStateFlow(TerminalState.IDLE)
-    val state: Flow<TerminalState> = _state.asStateFlow()
+    val state: kotlinx.coroutines.flow.StateFlow<TerminalState> = _state.asStateFlow()
 
     private val _output = MutableStateFlow<List<TerminalLine>>(emptyList())
-    val output: Flow<List<TerminalLine>> = _output.asStateFlow()
+    val output: kotlinx.coroutines.flow.StateFlow<List<TerminalLine>> = _output.asStateFlow()
 
     /** Exit code of the last completed command, if any. */
     private val _lastExitCode = MutableStateFlow<Int?>(null)
-    val lastExitCode: Flow<Int?> = _lastExitCode.asStateFlow()
+    val lastExitCode: kotlinx.coroutines.flow.StateFlow<Int?> = _lastExitCode.asStateFlow()
 
     private var outputLimit = outputBufferLimit
     private val history = mutableListOf<String>()

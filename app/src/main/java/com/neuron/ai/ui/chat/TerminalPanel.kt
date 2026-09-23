@@ -67,7 +67,7 @@ fun TerminalPanel(
     onDismiss: () -> Unit
 ) {
     var panelState by remember { mutableStateOf(PanelState.HALF) }
-    var heightFraction by remember { mutableFloatStateOf(0.5f) }
+    var heightFraction: Float by remember { mutableStateOf(0.5f) }
     var command by remember { mutableStateOf("") }
     val output by session.output.collectAsStateWithLifecycle()
     val state by session.state.collectAsStateWithLifecycle()

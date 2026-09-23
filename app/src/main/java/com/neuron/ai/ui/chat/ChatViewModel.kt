@@ -178,8 +178,13 @@ class ChatViewModel(
 
     /** Terminal session for the panel; bound to this conversation. */
     suspend fun terminalSession(): com.neuron.ai.data.terminal.TerminalSession {
-        val wsId = _conversation.value?.workspaceId
-        val root = wsId?.let { id -> workspaces.get(id)?.rootPath?.let(::java.io.File) }
+        val wsId: String? = _conversation.value?.workspaceId
+        val root: java.io.File? = if (wsId != null) {
+            val path: String? = workspaces.get(wsId)?.rootPath
+            path?.let { java.io.File(it) }
+        } else {
+            null
+        }
         return terminalManager.sessionFor(conversationId, wsId, root)
     }
 
