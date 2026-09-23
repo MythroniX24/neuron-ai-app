@@ -31,7 +31,12 @@ class RoomConversationRepositoryTest {
         val messages = MutableStateFlow<List<MessageEntity>>(emptyList())
 
         override fun observeConversations(): Flow<List<ConversationEntity>> =
-            conversations.map { list -> list.sortedByDescending { it.updatedAtEpochMs } }
+            conversations.map { list ->
+                list.sortedWith(
+                    compareByDescending<ConversationEntity> { it.pinned }
+                        .thenByDescending { it.updatedAtEpochMs }
+                )
+            }
 
         override suspend fun getConversation(id: String): ConversationEntity? =
             conversations.value.find { it.id == id }
@@ -47,6 +52,12 @@ class RoomConversationRepositoryTest {
         override suspend fun renameConversation(id: String, title: String, updatedAt: Long) {
             conversations.value = conversations.value.map {
                 if (it.id == id) it.copy(title = title, updatedAtEpochMs = updatedAt) else it
+            }
+        }
+
+        override suspend fun setPinned(id: String, pinned: Boolean) {
+            conversations.value = conversations.value.map {
+                if (it.id == id) it.copy(pinned = pinned) else it
             }
         }
 
