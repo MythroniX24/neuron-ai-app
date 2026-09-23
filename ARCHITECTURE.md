@@ -250,6 +250,46 @@ Deliberate decisions that keep the codebase open:
   stop for active work; agent activity shows ✓/✗/⟳ step states without
   exposing chain-of-thought.
 
+## Phase 2 — Milestone 2 implementation status (Workspace · Terminal · Coding)
+
+**Product rule: there is ONE chat.** Coding, terminal and filesystem are
+capabilities of the same `AgentRuntime` inside the normal conversation — no
+coding chat, no terminal chat, no separate runtimes.
+
+- **Workspace system:** `WorkspaceManager` owns workspaces rooted under
+  `filesDir/workspaces/<id>` — app-private by construction, so the device
+  filesystem is never wholesale-exposed. `WorkspaceContext` performs every
+  file operation with canonical-path validation; `../` traversal and
+  absolute escapes are rejected. Conversations bind at most one workspace
+  (`Conversation.workspaceId`); workspaces are context, not conversations.
+- **Filesystem tools:** list/read/write/mkdir/rename/move/copy/delete/
+  search/metadata — each validates arguments, resolves the workspace,
+  canonicalizes the path, enforces the boundary, then executes. Search caps
+  scanned files, skips binary/large files, supports extension filters.
+  Destructive ops carry `FILESYSTEM_DELETE` and always re-prompt.
+- **Terminal infrastructure:** `TerminalManager`/`TerminalSession` run real
+  `/system/bin/sh -c` processes with streaming stdout/stderr, exit codes,
+  working directory, per-command timeouts (exit 124) and cooperative
+  cancellation (SIGKILL → exit 130). The user panel and AI tools share the
+  SAME session per conversation — one infrastructure, no duplicate stack.
+- **Terminal capability:** OFF by default per conversation
+  (`Conversation.terminalEnabled`). Toggled via + → Terminal. When disabled,
+  `terminal.run` refuses with guidance — the agent can never silently enable
+  it. Enabling still routes every command through the permission system
+  (EXECUTE + TERMINAL, ELEVATED risk).
+- **Terminal panel:** draggable bottom sheet over the chat (half-screen
+  default, drag to expand/dismiss), monospace output with stdout/stderr
+  distinction, history, clear, copy, stop, keyboard-aware input. It is a
+  panel, not a chat — closing it never touches the conversation.
+- **Coding tools:** `code.edit` (exact-unique replacement), `code.patch`
+  (conflict detection: rejects when the file changed since the agent read
+  it — no blind overwrites), `code.diff`, `code.build`/`code.test` via
+  `BuildDetector` (gradle/maven/npm/make/cargo/pip). All loop through the
+  normal chat's agent with step budgets preventing infinite iterations.
+- **Isolation:** terminal sessions, tasks and tool results are keyed by
+  conversation id; two chats sharing a workspace share files only — never
+  session state.
+
 ## Key technical decisions
 
 | Decision                          | Reasoning                                                        |
