@@ -174,6 +174,54 @@ class OpenAIWireCodecTest {
     }
 
     @Test
+    fun `JSON null content is never streamed as the literal word null`() {
+        val parser = SseChunkParser(json)
+        // Real-world tool-call turn: the model streams "content": null
+        // alongside tool_calls. JsonNull.content returns the literal string
+        // "null" — the old parser streamed it into the chat.
+        val payload = buildJsonObject {
+            put("choices", buildJsonArray {
+                add(buildJsonObject {
+                    put("delta", buildJsonObject {
+                        put("content", kotlinx.serialization.json.JsonNull)
+                        put("tool_calls", buildJsonArray {
+                            add(buildJsonObject {
+                                put("index", "0")
+                                put("id", "call-nullcheck")
+                                put("function", buildJsonObject {
+                                    put("name", "time.now")
+                                    put("arguments", "{}")
+                                })
+                            })
+                        })
+                    })
+                })
+            })
+        }.toString()
+
+        val events = parser.parse(payload)
+        val deltas = events.filterIsInstance<StreamEvent.Delta>()
+        assertTrue("no text deltas may be emitted for JSON null content", deltas.isEmpty())
+        assertTrue(events.any { it is StreamEvent.ToolCallRequested })
+    }
+
+    @Test
+    fun `non-null content still streams normally next to tool calls`() {
+        val parser = SseChunkParser(json)
+        val payload = buildJsonObject {
+            put("choices", buildJsonArray {
+                add(buildJsonObject {
+                    put("delta", buildJsonObject {
+                        put("content", "thinking aloud")
+                    })
+                })
+            })
+        }.toString()
+        val events = parser.parse(payload)
+        assertEquals(1, events.filterIsInstance<StreamEvent.Delta>().size)
+    }
+
+    @Test
     fun `parser surfaces provider error objects as Failed events`() {
         val parser = SseChunkParser(json)
         val events = parser.parse("""{"error":{"message":"quota exceeded"}}""")

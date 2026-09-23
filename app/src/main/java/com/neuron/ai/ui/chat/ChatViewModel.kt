@@ -92,6 +92,15 @@ class ChatViewModel(
     private val _conversation = MutableStateFlow<Conversation?>(null)
     val conversation: StateFlow<Conversation?> = _conversation.asStateFlow()
 
+    /**
+     * Set once the backing conversation for a brand-new chat is actually
+     * created (on first send / first capability change). The screen uses it
+     * to swap the navigation entry to the real conversation — same UI, no
+     * second screen.
+     */
+    private val _createdConversationId = MutableStateFlow<String?>(null)
+    val createdConversationId: StateFlow<String?> = _createdConversationId.asStateFlow()
+
     /** All (provider, model) pairs offered by enabled providers. */
     val modelOptions: StateFlow<List<ModelOption>> = providers.configs
         .map { configs ->
@@ -112,8 +121,25 @@ class ChatViewModel(
     fun loadConversation() {
         viewModelScope.launch(dispatchers.io) {
             _conversation.value = conversations.getConversation(conversationId)
-            autoRespondIfPending()
+            // A brand-new chat has no backing conversation yet — it is created
+            // lazily on first send (see [ensureConversation]), never eagerly.
+            if (_conversation.value != null) autoRespondIfPending()
         }
+    }
+
+    /**
+     * Creates the backing conversation for a new chat using THIS screen's id,
+     * so the message flow, tool environment and terminal session — all bound
+     * to the same key — stay valid without any re-wiring.
+     */
+    private suspend fun ensureConversation() {
+        if (_conversation.value != null) return
+        val created = conversations.createConversation(
+            title = "New chat",
+            id = conversationId
+        )
+        _conversation.value = created
+        _createdConversationId.value = created.id
     }
 
     /**
@@ -144,6 +170,7 @@ class ChatViewModel(
     /** Creates a workspace, binds it to this chat and returns its id. */
     fun createWorkspace(name: String, onCreated: (String) -> Unit) {
         viewModelScope.launch(dispatchers.io) {
+            ensureConversation()
             val ws = workspaces.create(name)
             conversations.setConversationWorkspace(conversationId, ws.id)
             _conversation.value = conversations.getConversation(conversationId)
@@ -154,6 +181,7 @@ class ChatViewModel(
     /** Binds an existing workspace to this chat. */
     fun attachWorkspace(workspaceId: String) {
         viewModelScope.launch(dispatchers.io) {
+            ensureConversation()
             workspaces.open(workspaceId)
             conversations.setConversationWorkspace(conversationId, workspaceId)
             _conversation.value = conversations.getConversation(conversationId)
@@ -163,6 +191,7 @@ class ChatViewModel(
     /** Detaches the workspace from this chat (workspace itself is kept). */
     fun detachWorkspace() {
         viewModelScope.launch(dispatchers.io) {
+            ensureConversation()
             conversations.setConversationWorkspace(conversationId, null)
             _conversation.value = conversations.getConversation(conversationId)
         }
@@ -171,6 +200,7 @@ class ChatViewModel(
     /** Per-conversation Terminal toggle (+ → Terminal). */
     fun setTerminalEnabled(enabled: Boolean) {
         viewModelScope.launch(dispatchers.io) {
+            ensureConversation()
             conversations.setConversationTerminal(conversationId, enabled)
             _conversation.value = conversations.getConversation(conversationId)
         }
@@ -213,6 +243,7 @@ class ChatViewModel(
 
     fun setModel(providerId: String, modelId: String) {
         viewModelScope.launch(dispatchers.io) {
+            ensureConversation()
             conversations.setConversationModel(conversationId, providerId, modelId)
             _conversation.value = conversations.getConversation(conversationId)
         }
@@ -267,6 +298,7 @@ class ChatViewModel(
         lastUserAttachments = attachments
 
         job = viewModelScope.launch(dispatchers.io) {
+            ensureConversation()
             conversations.appendMessage(
                 conversationId,
                 Message.Role.USER,

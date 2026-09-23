@@ -103,7 +103,7 @@ class OpenAICompatibleProvider(
         val data = root["data"]?.jsonArray ?: emptyList()
         data.mapNotNull { element ->
             val obj = runCatching { element.jsonObject }.getOrNull() ?: return@mapNotNull null
-            val modelId = obj["id"]?.jsonPrimitive?.content ?: return@mapNotNull null
+            val modelId = OpenAIWireCodec.safeContent(obj["id"]) ?: return@mapNotNull null
             Model(id = modelId, displayName = modelId)
         }
     }.getOrDefault(emptyList())
@@ -134,8 +134,9 @@ class OpenAICompatibleProvider(
                 ?.let { it.jsonObject }
         }.getOrNull() ?: throw ProviderException(NeuronError.Provider("Malformed response from provider."))
 
-        val content = choice["message"]?.jsonObject?.get("content")
-            ?.let { runCatching { it.jsonPrimitive.content }.getOrNull() } ?: ""
+        val content = OpenAIWireCodec.safeContent(
+            choice["message"]?.jsonObject?.get("content")
+        ) ?: ""
 
         return Completion(
             message = ChatMessage(role = ChatMessage.Role.ASSISTANT, content = content),

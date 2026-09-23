@@ -11,6 +11,7 @@ import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -22,7 +23,6 @@ import com.neuron.ai.di.AppContainer
 import com.neuron.ai.ui.chat.ChatScreen
 import com.neuron.ai.ui.conversations.ConversationsScreen
 import com.neuron.ai.ui.drawer.AppDrawer
-import com.neuron.ai.ui.home.HomeScreen
 import com.neuron.ai.ui.navigation.Routes
 import com.neuron.ai.ui.permissions.PermissionDialogHost
 import com.neuron.ai.ui.providers.ProvidersScreen
@@ -59,7 +59,13 @@ fun NeuronApp(container: AppContainer) {
                 closeDrawerAnd(Runnable { navController.navigate(Routes.chat(conversationId)) })
             },
             onNewChat = {
-                closeDrawerAnd(Runnable { navController.navigate(Routes.HOME) })
+                closeDrawerAnd(Runnable {
+                    // Drop the old HOME entry (and anything above it) so a new
+                    // chat starts fresh — no stacked screens, a brand-new
+                    // conversation id each time.
+                    navController.popBackStack(Routes.HOME, inclusive = true)
+                    navController.navigate(Routes.HOME) { launchSingleTop = true }
+                })
             },
             onOpenSettings = {
                 closeDrawerAnd(Runnable { navController.navigate(Routes.SETTINGS) })
@@ -87,12 +93,16 @@ fun NeuronApp(container: AppContainer) {
                 }
             ) {
                 composable(Routes.HOME) {
-                    HomeScreen(
+                    // Unified chat surface: "Home" IS the chat screen. A fresh
+                    // conversation id is minted per visit; the ViewModel lazily
+                    // creates the backing conversation with THIS id on first
+                    // send or capability change. One screen — the composer (+
+                    // icon included) is identical from the very first frame.
+                    val newChatId = remember { java.util.UUID.randomUUID().toString() }
+                    ChatScreen(
                         container = container,
+                        conversationId = newChatId,
                         onOpenMenu = openDrawer,
-                        onOpenChat = { conversationId ->
-                            navController.navigate(Routes.chat(conversationId))
-                        },
                         onOpenSettings = { navController.navigate(Routes.SETTINGS) },
                         onOpenConversations = { navController.navigate(Routes.CONVERSATIONS) }
                     )
@@ -104,7 +114,9 @@ fun NeuronApp(container: AppContainer) {
                     ChatScreen(
                         container = container,
                         conversationId = conversationId,
-                        onOpenMenu = openDrawer
+                        onOpenMenu = openDrawer,
+                        onOpenSettings = { navController.navigate(Routes.SETTINGS) },
+                        onOpenConversations = { navController.navigate(Routes.CONVERSATIONS) }
                     )
                 }
 
