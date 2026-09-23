@@ -105,7 +105,7 @@ class TerminalSession internal constructor(
         val job = scope.launch {
             try {
                 val dir = _workingDir.value.takeIf { it.isDirectory } ?: File("/").takeIf { it.canRead() }
-                val process = ProcessBuilder("/system/bin/sh", "-c", command)
+                val process = ProcessBuilder(shellPath(), "-c", command)
                     .apply {
                         directory(dir)
                         environment().putAll(env)
@@ -171,6 +171,12 @@ class TerminalSession internal constructor(
     internal fun close() {
         stop()
         _state.value = TerminalState.CLOSED
+    }
+
+    companion object {
+        /** Android ships /system/bin/sh; JVM/desktop environments use /bin/sh. */
+        internal fun shellPath(): String =
+            if (File("/system/bin/sh").exists()) "/system/bin/sh" else "/bin/sh"
     }
 
     private suspend fun drain(stream: java.io.InputStream, streamKind: TerminalLine.Stream) {
