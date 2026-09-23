@@ -69,7 +69,7 @@ class AppContainer(context: Context) {
 
     val agentRuntime: DefaultAgentRuntime = DefaultAgentRuntime(dispatchers)
 
-    val taskManager: TaskManager = DefaultTaskManager(
+    val taskManager: DefaultTaskManager = DefaultTaskManager(
         dispatchers,
         RoomTaskRecordStore(database.taskDao())
     )

@@ -384,6 +384,11 @@ class ChatViewModel(
                         is AgentEvent.Failed -> {
                             streamError = NeuronError.Provider(event.message)
                         }
+
+                        // Permission pauses surface via the permission dialog host;
+                        // nothing extra to render in the chat stream itself.
+                        is AgentEvent.PermissionRequested -> Unit
+                        is AgentEvent.PermissionResolved -> Unit
                     }
                 }
         } catch (cancelled: kotlinx.coroutines.CancellationException) {
