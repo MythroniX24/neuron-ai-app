@@ -64,6 +64,12 @@ class RoomConversationRepository(
     override suspend fun setConversationPinned(conversationId: String, pinned: Boolean) =
         withContext(io) { dao.setPinned(conversationId, pinned) }
 
+    override suspend fun setConversationWorkspace(conversationId: String, workspaceId: String?) =
+        withContext(io) { dao.setConversationWorkspace(conversationId, workspaceId) }
+
+    override suspend fun setConversationTerminal(conversationId: String, enabled: Boolean) =
+        withContext(io) { dao.setTerminalEnabled(conversationId, enabled) }
+
     override suspend fun setConversationModel(
         conversationId: String,
         providerId: String?,

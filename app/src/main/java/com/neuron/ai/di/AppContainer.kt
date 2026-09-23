@@ -23,8 +23,10 @@ import com.neuron.ai.data.db.RoomTaskRecordStore
 import com.neuron.ai.data.permissions.SessionPermissionManager
 import com.neuron.ai.data.provider.ProviderRepository
 import com.neuron.ai.data.task.DefaultTaskManager
+import com.neuron.ai.data.terminal.TerminalManager
 import com.neuron.ai.data.tool.InMemoryToolRegistry
 import com.neuron.ai.data.tool.SafeTools
+import com.neuron.ai.data.workspace.WorkspaceManagerImpl
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
@@ -68,6 +70,10 @@ class AppContainer(context: Context) {
         DefaultToolExecutor(toolRegistry, permissionManager, logger)
 
     val agentRuntime: DefaultAgentRuntime = DefaultAgentRuntime(dispatchers)
+
+    val workspaceManager: WorkspaceManagerImpl = WorkspaceManagerImpl(context.filesDir, dispatchers)
+
+    val terminalManager: TerminalManager = TerminalManager(dispatchers)
 
     val taskManager: DefaultTaskManager = DefaultTaskManager(
         dispatchers,

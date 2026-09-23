@@ -9,7 +9,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
     entities = [ConversationEntity::class, MessageEntity::class, TaskEntity::class],
-    version = 2,
+    version = 3,
     exportSchema = false
 )
 abstract class NeuronDatabase : RoomDatabase() {
@@ -43,6 +43,18 @@ abstract class NeuronDatabase : RoomDatabase() {
             }
         }
 
+        /** v2 → v3: workspace binding + terminal capability on conversations. */
+        private val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "ALTER TABLE conversations ADD COLUMN workspaceId TEXT DEFAULT NULL"
+                )
+                db.execSQL(
+                    "ALTER TABLE conversations ADD COLUMN terminalEnabled INTEGER NOT NULL DEFAULT 0"
+                )
+            }
+        }
+
         fun get(context: Context): NeuronDatabase =
             instance ?: synchronized(this) {
                 instance ?: Room.databaseBuilder(
@@ -50,7 +62,7 @@ abstract class NeuronDatabase : RoomDatabase() {
                     NeuronDatabase::class.java,
                     "neuron.db"
                 )
-                    .addMigrations(MIGRATION_1_2)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                     .build()
                     .also { instance = it }
             }

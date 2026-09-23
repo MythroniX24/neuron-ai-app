@@ -33,7 +33,9 @@ internal fun ConversationEntity.toDomain(): Conversation = Conversation(
     updatedAtEpochMs = updatedAtEpochMs,
     providerId = providerId,
     modelId = modelId,
-    pinned = pinned
+    pinned = pinned,
+    workspaceId = workspaceId,
+    terminalEnabled = terminalEnabled
 )
 
 internal fun Conversation.toEntity(): ConversationEntity = ConversationEntity(
@@ -43,7 +45,9 @@ internal fun Conversation.toEntity(): ConversationEntity = ConversationEntity(
     updatedAtEpochMs = updatedAtEpochMs,
     providerId = providerId,
     modelId = modelId,
-    pinned = pinned
+    pinned = pinned,
+    workspaceId = workspaceId,
+    terminalEnabled = terminalEnabled
 )
 
 internal fun MessageEntity.toDomain(codec: MessageCodec): Message = Message(
