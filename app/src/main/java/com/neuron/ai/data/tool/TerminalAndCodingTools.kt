@@ -28,7 +28,7 @@ class TerminalTool(
             "(workspace working directory). Requires Terminal capability enabled."
     override val requiredCapabilities = setOf(Capability.TERMINAL, Capability.EXECUTE)
     override val riskLevel = RiskLevel.ELEVATED
-    override val timeoutMs = 180_000
+    override val timeoutMs = 180_000L
     override val parametersSchemaJson =
         """{"type":"object","properties":{"command":{"type":"string"},"timeoutSec":{"type":"integer"}},"required":["command"]}"""
 
@@ -60,7 +60,7 @@ class TerminalTool(
             command = command,
             timeoutMs = timeoutSec.coerceIn(5, 600) * 1_000
         )
-        val output = kotlinx.coroutines.flow.first(session.output)
+        val output = session.output.first()
             .takeLast(100)
             .joinToString("\n") { line ->
                 when (line.stream) {
@@ -205,7 +205,7 @@ object CodingTools {
             "Detects the project type and runs its build in the workspace terminal."
         override val requiredCapabilities = setOf(Capability.TERMINAL, Capability.EXECUTE)
         override val riskLevel = RiskLevel.ELEVATED
-        override val timeoutMs = 300_000
+        override val timeoutMs = 300_000L
         override val parametersSchemaJson = """{"type":"object","properties":{}}"""
 
         override suspend fun execute(argumentsJson: String): ToolResult {
@@ -228,7 +228,7 @@ object CodingTools {
             "Detects the project type and runs its test suite in the workspace terminal."
         override val requiredCapabilities = setOf(Capability.TERMINAL, Capability.EXECUTE)
         override val riskLevel = RiskLevel.ELEVATED
-        override val timeoutMs = 300_000
+        override val timeoutMs = 300_000L
         override val parametersSchemaJson = """{"type":"object","properties":{}}"""
 
         override suspend fun execute(argumentsJson: String): ToolResult {

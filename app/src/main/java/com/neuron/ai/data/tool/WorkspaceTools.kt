@@ -41,9 +41,12 @@ object WorkspaceTools {
         arg(args, key)?.takeIf { it.isNotBlank() }
 
     private fun stringList(args: String, key: String): List<String> = runCatching {
-        json.parseToJsonElement(args).jsonObject[key]?.let { el ->
-            kotlinx.serialization.json.jsonArray(el)
-                .map { it.jsonPrimitive.content }
+        val element = json.parseToJsonElement(args).jsonObject[key]
+        element?.let { el ->
+            (el as? kotlinx.serialization.json.JsonArray)
+                ?.mapNotNull { item ->
+                    runCatching { item.jsonPrimitive.content }.getOrNull()
+                }
         }
     }.getOrNull() ?: emptyList()
 
