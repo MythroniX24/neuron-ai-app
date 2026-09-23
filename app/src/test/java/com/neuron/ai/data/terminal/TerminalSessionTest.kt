@@ -94,9 +94,15 @@ class TerminalSessionTest {
     fun `stop cancels a running command`() = runTest {
         val session = newSession()
         val runner = launch { session.execute("sleep 30", timeoutMs = 60_000) }
-        kotlinx.coroutines.delay(800)
+        // Real-time wait: let the process actually start before stopping.
+        kotlinx.coroutines.withContext(Dispatchers.IO) { delay(1_000) }
         session.stop()
-        kotlinx.coroutines.delay(800)
+        // Real-time poll: the cancelled job settles the session back to IDLE.
+        kotlinx.coroutines.withTimeout(10_000) {
+            while (session.state.first() != TerminalState.IDLE) {
+                kotlinx.coroutines.withContext(Dispatchers.IO) { delay(100) }
+            }
+        }
         assertEquals(TerminalState.IDLE, session.state.first())
         runner.cancel()
         session.close()
