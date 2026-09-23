@@ -64,7 +64,9 @@ class WorkspaceTest {
 
         assertNull(context.resolve("../outside.txt"))
         assertNull(context.resolve("../../etc/passwd"))
-        assertNull(context.resolve("/data/local/tmp/evil"))
+        // Absolute paths are re-rooted INTO the workspace (never the device root).
+        val absolute = context.resolve("/data/local/tmp/evil")
+        assertTrue(absolute == null || absolute.path.startsWith(context.root.path))
         // Inside paths resolve fine.
         assertNotNull(context.resolve("src/Main.kt"))
         assertNotNull(context.resolve("./notes.md"))
