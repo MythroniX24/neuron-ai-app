@@ -181,29 +181,29 @@ internal class SseChunkParser(private val json: Json) {
         val events = mutableListOf<com.neuron.ai.core.provider.StreamEvent>()
 
         choice["delta"]?.jsonObject?.get("content")?.let { content ->
-            val text = safeContent(content)
+            val text = OpenAIWireCodec.safeContent(content)
             if (!text.isNullOrEmpty()) events += com.neuron.ai.core.provider.StreamEvent.Delta(text)
         }
 
         choice["delta"]?.jsonObject?.get("tool_calls")?.let { calls ->
             runCatching { calls.jsonArray }.getOrNull()?.forEach { element ->
                 val call = element.jsonObject
-                val index = safeContent(call["index"]) ?: "0"
+                val index = OpenAIWireCodec.safeContent(call["index"]) ?: "0"
                 val buffer = toolCallBuffers.getOrPut(index) {
                     ToolCallBuffer(
-                        safeContent(call["id"])
+                        OpenAIWireCodec.safeContent(call["id"])
                             ?: "call-" + UUID.randomUUID().toString().take(8)
                     )
                 }
-                safeContent(call["id"])?.let { buffer.callId = it }
+                OpenAIWireCodec.safeContent(call["id"])?.let { buffer.callId = it }
                 call["function"]?.jsonObject?.let { fn ->
-                    safeContent(fn["name"])?.let { buffer.name = it }
-                    safeContent(fn["arguments"])?.let { buffer.arguments.append(it) }
+                    OpenAIWireCodec.safeContent(fn["name"])?.let { buffer.name = it }
+                    OpenAIWireCodec.safeContent(fn["arguments"])?.let { buffer.arguments.append(it) }
                 }
             }
         }
 
-        val finish = safeContent(choice["finish_reason"])
+        val finish = OpenAIWireCodec.safeContent(choice["finish_reason"])
         if (finish != null && !sawFinish) {
             sawFinish = true
             toolCallBuffers.values.forEach { buffer ->
