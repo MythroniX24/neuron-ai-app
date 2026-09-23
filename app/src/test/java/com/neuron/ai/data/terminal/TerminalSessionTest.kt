@@ -29,7 +29,7 @@ class TerminalSessionTest {
     private fun newSession(dir: File? = null): TerminalSession =
         TerminalManager(realDispatchers()).sessionFor("test-${System.nanoTime()}", null, dir)
 
-    private fun awaitExit(session: TerminalSession, previous: Int?): Int {
+    private suspend fun awaitExit(session: TerminalSession, previous: Int?): Int {
         withTimeout(30_000) {
             while (session.lastExitCode.first() == previous) {
                 delay(50)
