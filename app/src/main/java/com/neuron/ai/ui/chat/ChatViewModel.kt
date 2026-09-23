@@ -552,4 +552,25 @@ class ChatViewModel(
             _generation.value = GenerationState.Idle
         }
     }
+
+    /**
+     * ViewModel cleared (chat closed / process finishing): stop a live agent
+     * turn so no generation continues for a chat nobody is viewing, and mark
+     * the mirrored task CANCELLED — the UI must never claim activity after
+     * its owner is gone.
+     */
+    override fun onCleared() {
+        if (_generation.value is GenerationState.Streaming || _generation.value is GenerationState.Failed) {
+            job?.cancel()
+        }
+        currentTaskId?.let { id ->
+            viewModelScope.launch(dispatchers.io) {
+                val task = kotlinx.coroutines.flow.first(tasks.tasks).find { it.id == id }
+                if (task != null && !task.isFinished) {
+                    tasks.updateStatus(id, com.neuron.ai.core.task.Task.Status.CANCELLED)
+                }
+            }
+        }
+        super.onCleared()
+    }
 }

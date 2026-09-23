@@ -55,10 +55,29 @@ class WorkspaceContext(
     suspend fun readText(path: String, maxBytes: Long = 1_000_000): String? = withIo {
         val file = resolve(path) ?: return@withIo null
         if (!file.isFile) return@withIo null
-        val bytes = file.readBytes()
-        val truncated = bytes.size > maxBytes
-        val text = String(bytes, 0, minOf(bytes.size.toLong(), maxBytes).toInt(), Charsets.UTF_8)
+        // Bounded read: never materialize a whole huge file in memory —
+        // read at most maxBytes, then stop pulling from the stream.
+        val buffer = java.io.ByteArrayOutputStream()
+        file.inputStream().use { input ->
+            val chunk = ByteArray(8_192)
+            var total = 0L
+            while (total < maxBytes) {
+                val toRead = minOf(chunk.size.toLong(), maxBytes - total).toInt()
+                val read = input.read(chunk, 0, toRead)
+                if (read < 0) break
+                buffer.write(chunk, 0, read)
+                total += read
+            }
+        }
+        val truncated = file.length() > maxBytes
+        val text = buffer.toString("UTF-8")
         if (truncated) text + "\n\n… [truncated]" else text
+    }
+
+    /** True when the file exceeds the safe edit size (tools refuse to edit it). */
+    suspend fun isOversized(path: String, limitBytes: Long = 2_000_000): Boolean = withIo {
+        val file = resolve(path) ?: return@withIo false
+        file.isFile && file.length() > limitBytes
     }
 
     suspend fun writeText(path: String, content: String): Boolean = withIo {
@@ -77,8 +96,12 @@ class WorkspaceContext(
         if (!source.exists()) return@withIo false
         // Destination stays inside the source's parent directory.
         val target = File(source.parentFile, toName.trim().removePrefix("/"))
-        val inside = target.canonicalFile.path.startsWith(root.path)
+        val inside = target.canonicalFile.path.let { p ->
+            p == root.path || p.startsWith(root.path + File.separator)
+        }
         if (!inside) return@withIo false
+        // Never rename/replace the workspace root itself.
+        if (source.path == root.path) return@withIo false
         runCatching { source.renameTo(target) }.getOrDefault(false)
     }
 
@@ -103,6 +126,8 @@ class WorkspaceContext(
     suspend fun delete(path: String): Boolean = withIo {
         val file = resolve(path) ?: return@withIo false
         if (!file.exists()) return@withIo false
+        // The workspace root itself is never deletable through this context.
+        if (file.path == root.path) return@withIo false
         runCatching { file.deleteRecursively() }.getOrDefault(false)
     }
 

@@ -12,6 +12,26 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
 /**
+ * Last-resort guard for obviously catastrophic commands coming from the model.
+ * The REAL authority remains the permission system (ELEVATED risk + user
+ * approval); sh is not statically analyzable, so this is defense-in-depth
+ * against device-bricking patterns only — not a general sandbox.
+ */
+object CommandGuard {
+    private val catastrophic = listOf(
+        Regex("\\brm\\s+(-\\S+\\s+)+/\\s*$"),                     // rm -rf / (any flags)
+        Regex("\\brm\\s+(-\\S+\\s+)+/\\*\\s*$"),                 // rm -rf /*
+        Regex("\\bmkfs(\\\.\\w+)?\\b"),                            // format filesystem
+        Regex("\\bdd\\b[^|;&]*\\bof=/dev/(block|mmcblk|sd[a-z])"),  // raw device write
+        Regex(":\\(\\)\\s*\\{\\s*:\\|:&\\s*\\};:"),                  // fork bomb
+        Regex("\\bchmod\\s+(-\\S+\\s+)*0?0?0\\s+/\\s*$")                   // chmod 000 /
+    )
+
+    fun isCatastrophic(command: String): Boolean =
+        catastrophic.any { it.containsMatchIn(command) }
+}
+
+/**
  * AI Terminal tool — uses the SAME TerminalManager/session as the user's
  * terminal panel. Gated by the per-conversation Terminal capability: when
  * disabled the tool fails with guidance instead of executing.
@@ -37,14 +57,27 @@ class TerminalTool(
             Json.parseToJsonElement(argumentsJson).jsonObject["command"]?.jsonPrimitive?.content
         }.getOrNull()
             ?: return ToolResult.Failure("Missing required argument: command")
+        // Model may send the timeout as JSON integer or string — accept both.
         val timeoutSec = runCatching {
-            Json.parseToJsonElement(argumentsJson).jsonObject["timeoutSec"]?.jsonPrimitive?.content?.toLong()
+            val el = Json.parseToJsonElement(argumentsJson).jsonObject["timeoutSec"]
+            when {
+                el == null -> null
+                el is kotlinx.serialization.json.JsonPrimitive && el.isString -> el.content.toLong()
+                else -> (el as kotlinx.serialization.json.JsonPrimitive).content.toLong()
+            }
         }.getOrNull() ?: 120L
         return runCommand(command, timeoutSec)
     }
 
     /** Shared execution path for the AI tool and build/test tools. */
     suspend fun runCommand(command: String, timeoutSec: Long): ToolResult {
+        // Last-resort guard: refuse obviously device-destroying commands outright.
+        if (CommandGuard.isCatastrophic(command)) {
+            return ToolResult.Failure(
+                "Command refused: this pattern can destroy the device's filesystem. " +
+                    "Run it manually if you truly intend it."
+            )
+        }
         // Capability gate FIRST — never silently enabled.
         if (!env.terminalEnabled()) {
             return ToolResult.Failure(
@@ -56,11 +89,18 @@ class TerminalTool(
         val workspace = env.activeWorkspace()
 
         val session = terminalManager.sessionFor(contextKey, workspace?.workspace?.id, workspace?.root)
+        // Snapshot the buffer before running so the model only sees output
+        // produced by THIS command, not the session's whole history.
+        val linesBefore = session.output.first().size
         val exitCode = session.execute(
             command = command,
-            timeoutMs = timeoutSec.coerceIn(5, 600) * 1_000
+            timeoutMs = timeoutSec.coerceIn(5, 600) * 1_000,
+            // AI runs are pinned to the workspace root: the user panel's `cd`
+            // must never redirect where the agent executes commands.
+            workingDir = workspace?.root
         )
         val output = session.output.first()
+            .drop(linesBefore)
             .takeLast(100)
             .joinToString("\n") { line ->
                 when (line.stream) {
@@ -72,7 +112,9 @@ class TerminalTool(
         return if (exitCode == 0) {
             ToolResult.Success("exit=$exitCode\n$output")
         } else {
-            ToolResult.Failure("exit=$exitCode\n$output")
+            // Structured failure so the model can read the output and react
+            // (read the error, fix code, retry) instead of dead-ending.
+            ToolResult.Failure("exit=$exitCode\n$output\n(command failed — inspect [err] lines above)")
         }
     }
 }
@@ -110,6 +152,13 @@ object CodingTools {
                 ?: return ToolResult.Failure("Missing required argument: newText")
 
             return WorkspaceTools.withWorkspace(env) { ws ->
+                // Refuse to edit oversized files: a truncated read followed by a
+                // write would silently corrupt the tail of the file.
+                if (ws.isOversized(path)) {
+                    return@withWorkspace ToolResult.Failure(
+                        "$path is too large to edit safely (limit 2 MB). Edit it in smaller parts."
+                    )
+                }
                 val original = ws.readText(path, maxBytes = 2_000_000)
                     ?: return@withWorkspace ToolResult.Failure("File not found: $path")
                 val matches = countOccurrences(original, oldText)
@@ -156,13 +205,25 @@ object CodingTools {
                 ?: return ToolResult.Failure("Missing required argument: replacement")
 
             return WorkspaceTools.withWorkspace(env) { ws ->
+                if (ws.isOversized(path)) {
+                    return@withWorkspace ToolResult.Failure(
+                        "$path is too large to edit safely (limit 2 MB). Edit it in smaller parts."
+                    )
+                }
                 val original = ws.readText(path, maxBytes = 2_000_000)
                     ?: return@withWorkspace ToolResult.Failure("File not found: $path")
-                // Conflict detection: expectedText must still be present.
-                if (!original.contains(expectedText)) {
-                    return@withWorkspace ToolResult.Failure(
+                // Conflict detection: the expected anchor must exist EXACTLY once —
+                // 0 matches means the file changed since it was read (never blind-
+                // overwrite), >1 means the anchor is ambiguous. An empty anchor is
+                // always rejected: replaceFirst("") would prepend and corrupt the file.
+                val anchorCount = countOccurrences(original, expectedText)
+                when {
+                    anchorCount == 0 -> return@withWorkspace ToolResult.Failure(
                         "Conflict: $path changed since it was read — expectedText not found. " +
                             "Re-read the file and retry."
+                    )
+                    anchorCount > 1 -> return@withWorkspace ToolResult.Failure(
+                        "expectedText matches $anchorCount places in $path — add more surrounding context to make it unique."
                     )
                 }
                 val updated = original.replaceFirst(expectedText, replacement)

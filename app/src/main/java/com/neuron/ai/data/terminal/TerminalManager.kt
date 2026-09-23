@@ -93,7 +93,8 @@ class TerminalSession internal constructor(
     suspend fun execute(
         command: String,
         timeoutMs: Long = 120_000,
-        env: Map<String, String> = emptyMap()
+        env: Map<String, String> = emptyMap(),
+        workingDir: File? = null
     ): Int = withContext(io) {
         if (_state.value == TerminalState.RUNNING) {
             emit(TerminalLine.system(id, "A command is already running in this session."))
@@ -106,7 +107,11 @@ class TerminalSession internal constructor(
         val exitDeferred = CompletableDeferred<Int>()
         val job = scope.launch {
             try {
-                val dir = _workingDir.value.takeIf { it.isDirectory } ?: File("/").takeIf { it.canRead() }
+                // Per-command override (AI tools pin the workspace root);
+                // falls back to the session's working directory (user panel).
+                val dir = workingDir?.takeIf { it.isDirectory }
+                    ?: _workingDir.value.takeIf { it.isDirectory }
+                    ?: File("/").takeIf { it.canRead() }
                 val process = ProcessBuilder(shellPath(), "-c", command)
                     .apply {
                         directory(dir)
@@ -246,6 +251,21 @@ class TerminalManager(private val dispatchers: DispatcherProvider) {
 
     fun closeSession(contextKey: String) {
         sessions.remove(contextKey)?.close()
+    }
+
+    /** True while any session in [contextKey] has a live process. */
+    fun hasRunningProcess(contextKey: String): Boolean {
+        val session = sessions[contextKey] ?: return false
+        val state = session.state.value
+        return state == TerminalState.RUNNING || state == TerminalState.STOPPING
+    }
+
+    /** Closes a session only when idle; returns false if a process is live. */
+    fun closeIfIdle(contextKey: String): Boolean {
+        val session = sessions[contextKey] ?: return true
+        if (hasRunningProcess(contextKey)) return false
+        closeSession(contextKey)
+        return true
     }
 
     fun closeAll() {
