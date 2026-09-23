@@ -139,25 +139,47 @@ class AgentToolLoopIntegrationTest {
         assertTrue(events.filterIsInstance<AgentEvent.Finished>().isNotEmpty())
     }
 
+    /** Synchronous auto-deny permission manager — deterministic, no races. */
+    private class AutoDenyPermissions : com.neuron.ai.core.permissions.PermissionManager {
+        override val pendingRequests: Flow<List<com.neuron.ai.core.permissions.PermissionRequest>> =
+            kotlinx.coroutines.flow.MutableStateFlow(emptyList())
+        override val granted: Flow<Set<Capability>> =
+            kotlinx.coroutines.flow.MutableStateFlow(emptySet())
+        override val decisions: Flow<List<com.neuron.ai.core.permissions.PermissionDecision>> =
+            kotlinx.coroutines.flow.MutableStateFlow(emptyList())
+        override suspend fun request(
+            capability: Capability,
+            reason: String,
+            requestedBy: String
+        ): Boolean = false
+        override suspend fun grant(requestId: String) {}
+        override suspend fun deny(requestId: String) {}
+        override suspend fun decide(requestId: String, granted: Boolean, scope: com.neuron.ai.core.permissions.DecisionScope) {}
+        override suspend fun revoke(capability: Capability) {}
+        override suspend fun isGranted(capability: Capability): Boolean = false
+        override suspend fun resetDecisions() {}
+    }
+
     @Test
     fun `permission denial feeds structured error to model, no crash`() = runTest {
         val provider = ScriptedProvider()
         provider.script.add(toolRequestEvent("math.evaluate", "{\"expression\":\"1+1\"}"))
         provider.script.add(StreamEvent.Delta("Understood, no permission."))
 
-        val permissions = SessionPermissionManager()
-        // Auto-deny every request without a dialog.
-        val observer = launch {
-            permissions.pendingRequests.collect { pending ->
-                pending.forEach { permissions.deny(it.id) }
-            }
-        }
+        val registry = InMemoryToolRegistry()
+        registry.register(SafeTools.Calculator())
+        val executor = DefaultToolExecutor(registry, AutoDenyPermissions(), logger = null)
+        val agent = ToolUsingAgent(
+            provider = provider,
+            model = Model(id = "test-model", displayName = "test"),
+            toolRegistry = registry,
+            toolExecutor = executor,
+            logger = null
+        )
 
-        val (agent, _) = buildAgent(provider, permissions)
         val events = withTimeout(5_000) {
             collect(agent, AgentGoal(instruction = "calc", conversationId = "c1"))
         }
-        observer.cancelAndJoin()
 
         // The model still received the structured denial as a tool result.
         val toolRow = provider.requests[1].filter { it.role == ChatMessage.Role.TOOL }
