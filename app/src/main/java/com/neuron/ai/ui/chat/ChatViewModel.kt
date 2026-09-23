@@ -565,7 +565,7 @@ class ChatViewModel(
         }
         currentTaskId?.let { id ->
             viewModelScope.launch(dispatchers.io) {
-                val task = kotlinx.coroutines.flow.first(tasks.tasks).find { it.id == id }
+                val task = tasks.tasks.first().find { it.id == id }
                 if (task != null && !task.isFinished) {
                     tasks.updateStatus(id, com.neuron.ai.core.task.Task.Status.CANCELLED)
                 }
