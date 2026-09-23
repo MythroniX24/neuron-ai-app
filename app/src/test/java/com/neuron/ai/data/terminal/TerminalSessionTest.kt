@@ -3,6 +3,8 @@ package com.neuron.ai.data.terminal
 import com.neuron.ai.core.coroutines.DispatcherProvider
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
@@ -91,7 +93,7 @@ class TerminalSessionTest {
     @Test
     fun `stop cancels a running command`() = runTest {
         val session = newSession()
-        val runner = kotlinx.coroutines.launch { session.execute("sleep 30", timeoutMs = 60_000) }
+        val runner = launch { session.execute("sleep 30", timeoutMs = 60_000) }
         kotlinx.coroutines.delay(800)
         session.stop()
         kotlinx.coroutines.delay(800)

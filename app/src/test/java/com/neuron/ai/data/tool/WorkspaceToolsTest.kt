@@ -27,10 +27,10 @@ class WorkspaceToolsTest {
         override suspend fun terminalSessionKey(): String? = "test-session"
     }
 
-    private fun TestScope.dispatchers() = object : DispatcherProvider {
-        override val main: CoroutineDispatcher = StandardTestDispatcher(testScheduler)
+    private fun dispatchers() = object : DispatcherProvider {
+        override val main: CoroutineDispatcher = Dispatchers.Default
         override val io: CoroutineDispatcher = Dispatchers.IO
-        override val default: CoroutineDispatcher = StandardTestDispatcher(testScheduler)
+        override val default: CoroutineDispatcher = Dispatchers.Default
     }
 
     private fun newContext(dir: File): WorkspaceContext =
