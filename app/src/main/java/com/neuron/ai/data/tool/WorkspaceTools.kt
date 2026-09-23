@@ -230,7 +230,7 @@ object WorkspaceTools {
         override val description =
             "Searches workspace file names and contents. Optional extensions filter like [\"kt\",\"java\"]."
         override val requiredCapabilities = setOf(Capability.FILESYSTEM_READ)
-        override val timeoutMs = 30_000
+        override val timeoutMs = 30_000L
         override val parametersSchemaJson =
             """{"type":"object","properties":{"query":{"type":"string"},"extensions":{"type":"array","items":{"type":"string"}}},"required":["query"]}"""
 
