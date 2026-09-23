@@ -45,7 +45,11 @@ data class Conversation(
     val providerId: String? = null,
     val modelId: String? = null,
     /** Pinned chats float to the top of drawer/search lists. */
-    val pinned: Boolean = false
+    val pinned: Boolean = false,
+    /** Workspace attached to this conversation (null = none). */
+    val workspaceId: String? = null,
+    /** Per-conversation AI Terminal capability — OFF by default. */
+    val terminalEnabled: Boolean = false
 )
 
 /** A message inside a [Conversation]. */
@@ -76,6 +80,12 @@ interface ConversationRepository {
     suspend fun renameConversation(conversationId: String, title: String)
     suspend fun setConversationPinned(conversationId: String, pinned: Boolean)
     suspend fun setConversationModel(conversationId: String, providerId: String?, modelId: String?)
+
+    /** Binds/unbinds a workspace to this conversation. */
+    suspend fun setConversationWorkspace(conversationId: String, workspaceId: String?)
+
+    /** Enables/disables the AI Terminal capability for this conversation. */
+    suspend fun setConversationTerminal(conversationId: String, enabled: Boolean)
 
     suspend fun appendMessage(
         conversationId: String,

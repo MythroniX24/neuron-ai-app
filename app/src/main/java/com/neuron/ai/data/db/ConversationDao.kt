@@ -44,6 +44,12 @@ interface ConversationDao {
     @Query("UPDATE conversations SET pinned = :pinned WHERE id = :id")
     suspend fun setPinned(id: String, pinned: Boolean)
 
+    @Query("UPDATE conversations SET workspaceId = :workspaceId WHERE id = :id")
+    suspend fun setConversationWorkspace(id: String, workspaceId: String?)
+
+    @Query("UPDATE conversations SET terminalEnabled = :enabled WHERE id = :id")
+    suspend fun setTerminalEnabled(id: String, enabled: Boolean)
+
     @Query("DELETE FROM conversations WHERE id = :id")
     suspend fun deleteConversation(id: String)    @Query("SELECT DISTINCT conversations.* FROM conversations " +
             "JOIN messages ON messages.conversationId = conversations.id " +

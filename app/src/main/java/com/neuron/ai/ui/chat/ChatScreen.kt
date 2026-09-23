@@ -27,6 +27,7 @@ import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.KeyboardArrowDown
 import androidx.compose.material.icons.outlined.Menu
+import androidx.compose.material.icons.outlined.Terminal
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.DropdownMenu
@@ -46,6 +47,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -59,6 +61,7 @@ import com.neuron.ai.di.AppContainer
 import com.neuron.ai.ui.components.ChatComposer
 import com.neuron.ai.ui.markdown.MarkdownText
 import com.neuron.ai.ui.theme.Spacing
+import kotlinx.coroutines.launch
 
 private const val EMPTY_HINT =
     "Start the conversation. Your messages stay on this device."
@@ -99,6 +102,14 @@ fun ChatScreen(
     }
 
     val isStreaming = generation is GenerationState.Streaming
+
+    // ---- Terminal panel state -------------------------------------------------------
+    val workspaces by viewModel.workspaceList.collectAsStateWithLifecycle(initialValue = emptyList())
+    val terminalEnabled by viewModel.terminalEnabled.collectAsStateWithLifecycle()
+    val activeWorkspaceId = conversation?.workspaceId
+    var showTerminal by remember { mutableStateOf(false) }
+    var terminalSession by remember { mutableStateOf<com.neuron.ai.data.terminal.TerminalSession?>(null) }
+    val screenScope = rememberCoroutineScope()
 
     // ---- Attachment entry points (sheet: Camera / Photos / Files) ----------------
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -166,6 +177,7 @@ fun ChatScreen(
         }
     }
 
+    Box(Modifier.fillMaxSize()) {
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -178,7 +190,19 @@ fun ChatScreen(
             selectedModelId = conversation?.modelId,
             selectedProviderId = conversation?.providerId,
             onSelectModel = { providerId, modelId -> viewModel.setModel(providerId, modelId) },
-            onOpenMenu = onOpenMenu
+            onOpenMenu = onOpenMenu,
+            terminalEnabled = terminalEnabled,
+            onOpenTerminal = {
+                val existing = terminalSession
+                if (existing != null) {
+                    showTerminal = true
+                } else {
+                    screenScope.launch {
+                        terminalSession = viewModel.terminalSession()
+                        showTerminal = true
+                    }
+                }
+            }
         )
 
         LazyColumn(
@@ -284,8 +308,34 @@ fun ChatScreen(
                     )
                 )
             },
-            onFiles = { filePicker.launch(arrayOf("*/*")) }
+            onFiles = { filePicker.launch(arrayOf("*/*")) },
+            terminalEnabled = terminalEnabled,
+            onToggleTerminal = { viewModel.setTerminalEnabled(it) },
+            workspaces = workspaces,
+            activeWorkspaceId = activeWorkspaceId,
+            onAttachWorkspace = { viewModel.attachWorkspace(it) },
+            onDetachWorkspace = { viewModel.detachWorkspace() },
+            onCreateWorkspace = {
+                viewModel.createWorkspace("Workspace") { }
+            }
         )
+    }
+
+    // ---- Draggable terminal panel over the chat (inside the overlay Box) --------
+    terminalSession?.let { session ->
+        if (showTerminal) {
+            Box(
+                Modifier
+                    .align(androidx.compose.ui.Alignment.BottomCenter)
+                    .systemBarsPadding()
+            ) {
+                TerminalPanel(
+                    session = session,
+                    onDismiss = { showTerminal = false }
+                )
+            }
+        }
+    }
     }
 }
 
@@ -297,7 +347,9 @@ private fun ChatTopBar(
     selectedModelId: String?,
     selectedProviderId: String?,
     onSelectModel: (providerId: String, modelId: String) -> Unit,
-    onOpenMenu: () -> Unit
+    onOpenMenu: () -> Unit,
+    terminalEnabled: Boolean,
+    onOpenTerminal: () -> Unit
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
 
@@ -336,6 +388,17 @@ private fun ChatTopBar(
                     imageVector = Icons.Outlined.Menu,
                     contentDescription = "Open menu"
                 )
+            }
+        },
+        actions = {
+            // Terminal icon ONLY while the capability is enabled for this chat.
+            if (terminalEnabled) {
+                IconButton(onClick = onOpenTerminal) {
+                    Icon(
+                        imageVector = Icons.Outlined.Terminal,
+                        contentDescription = "Open terminal panel"
+                    )
+                }
             }
         },
         colors = TopAppBarDefaults.topAppBarColors(

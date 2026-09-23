@@ -71,7 +71,9 @@ class ChatViewModel(
     private val defaultModelId: String?,
     private val toolIdsProvider: suspend () -> Set<String>,
     private val importAttachmentFn: suspend (android.net.Uri) -> com.neuron.ai.core.conversation.Attachment?,
-    private val importCaptureFn: suspend (java.io.File) -> com.neuron.ai.core.conversation.Attachment?
+    private val importCaptureFn: suspend (java.io.File) -> com.neuron.ai.core.conversation.Attachment?,
+    private val workspaces: com.neuron.ai.data.workspace.WorkspaceManagerImpl,
+    private val terminalManager: com.neuron.ai.data.terminal.TerminalManager
 ) : ViewModel() {
 
     val messages: StateFlow<List<Message>> =
@@ -127,6 +129,58 @@ class ChatViewModel(
         lastUserPrompt = last.content
         lastUserAttachments = last.attachments
         runAgentTurn(last.content, currentTaskId)
+    }
+
+    // ---- Workspace & terminal capability (Milestone 2) ---------------------------
+
+    /** Workspaces for the + → Workspace picker. */
+    val workspaceList = workspaces.workspaces
+
+    /** Terminal capability state of THIS conversation. */
+    val terminalEnabled: StateFlow<Boolean> = _conversation
+        .map { it?.terminalEnabled ?: false }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
+    /** Creates a workspace, binds it to this chat and returns its id. */
+    fun createWorkspace(name: String, onCreated: (String) -> Unit) {
+        viewModelScope.launch(dispatchers.io) {
+            val ws = workspaces.create(name)
+            conversations.setConversationWorkspace(conversationId, ws.id)
+            _conversation.value = conversations.getConversation(conversationId)
+            onCreated(ws.id)
+        }
+    }
+
+    /** Binds an existing workspace to this chat. */
+    fun attachWorkspace(workspaceId: String) {
+        viewModelScope.launch(dispatchers.io) {
+            workspaces.open(workspaceId)
+            conversations.setConversationWorkspace(conversationId, workspaceId)
+            _conversation.value = conversations.getConversation(conversationId)
+        }
+    }
+
+    /** Detaches the workspace from this chat (workspace itself is kept). */
+    fun detachWorkspace() {
+        viewModelScope.launch(dispatchers.io) {
+            conversations.setConversationWorkspace(conversationId, null)
+            _conversation.value = conversations.getConversation(conversationId)
+        }
+    }
+
+    /** Per-conversation Terminal toggle (+ → Terminal). */
+    fun setTerminalEnabled(enabled: Boolean) {
+        viewModelScope.launch(dispatchers.io) {
+            conversations.setConversationTerminal(conversationId, enabled)
+            _conversation.value = conversations.getConversation(conversationId)
+        }
+    }
+
+    /** Terminal session for the panel; bound to this conversation. */
+    suspend fun terminalSession(): com.neuron.ai.data.terminal.TerminalSession {
+        val wsId = _conversation.value?.workspaceId
+        val root = wsId?.let { id -> workspaces.get(id)?.rootPath?.let(::java.io.File) }
+        return terminalManager.sessionFor(conversationId, wsId, root)
     }
 
     // ---- Model selection ------------------------------------------------------------

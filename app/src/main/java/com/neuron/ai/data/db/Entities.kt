@@ -13,7 +13,11 @@ data class ConversationEntity(
     val providerId: String?,
     val modelId: String?,
     /** Pinned chats float to the top of every list. */
-    val pinned: Boolean = false
+    val pinned: Boolean = false,
+    /** Workspace attached to this conversation (null = none). */
+    val workspaceId: String? = null,
+    /** Per-conversation Terminal capability (AI terminal access), default OFF. */
+    val terminalEnabled: Boolean = false
 )
 
 @Entity(
