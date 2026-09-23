@@ -150,10 +150,12 @@ class ToolUsingAgent(
                 val finalState = when (result) {
                     is com.neuron.ai.core.agent.ToolResult.Success -> AgentActivity.State.DONE
                     is com.neuron.ai.core.agent.ToolResult.Failure -> AgentActivity.State.FAILED
+                    is com.neuron.ai.core.agent.ToolResult.TimedOut -> AgentActivity.State.FAILED
                 }
                 val detail = when (result) {
                     is com.neuron.ai.core.agent.ToolResult.Success -> result.output.take(4_000)
                     is com.neuron.ai.core.agent.ToolResult.Failure -> result.message
+                    is com.neuron.ai.core.agent.ToolResult.TimedOut -> result.message
                 }
                 send(AgentEvent.ActivityUpdated(activity.copy(state = finalState, detail = detail)))
 
@@ -162,6 +164,7 @@ class ToolUsingAgent(
                     content = when (result) {
                         is com.neuron.ai.core.agent.ToolResult.Success -> result.output
                         is com.neuron.ai.core.agent.ToolResult.Failure -> "Error: ${result.message}"
+                        is com.neuron.ai.core.agent.ToolResult.TimedOut -> "Error: ${result.message}"
                     },
                     toolCallId = call.callId
                 )

@@ -23,10 +23,10 @@ data class Task(
     enum class Status { QUEUED, RUNNING, WAITING_FOR_PERMISSION, DONE, FAILED, CANCELLED }
 
     val isFinished: Boolean
-        get() = this == Status.DONE || this == Status.FAILED || this == Status.CANCELLED
+        get() = status == Status.DONE || status == Status.FAILED || status == Status.CANCELLED
 
     val isTerminalFailure: Boolean
-        get() = this == Status.FAILED
+        get() = status == Status.FAILED
 }
 
 /** Creates, launches, observes and cancels tasks. */
