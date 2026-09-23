@@ -21,7 +21,7 @@ object CommandGuard {
     private val catastrophic = listOf(
         Regex("\\brm\\s+(-\\S+\\s+)+/\\s*$"),                     // rm -rf / (any flags)
         Regex("\\brm\\s+(-\\S+\\s+)+/\\*\\s*$"),                 // rm -rf /*
-        Regex("\\bmkfs(\\\.\\w+)?\\b"),                            // format filesystem
+        Regex("\\bmkfs\\b"),                                     // format filesystem (incl. mkfs.ext4)
         Regex("\\bdd\\b[^|;&]*\\bof=/dev/(block|mmcblk|sd[a-z])"),  // raw device write
         Regex(":\\(\\)\\s*\\{\\s*:\\|:&\\s*\\};:"),                  // fork bomb
         Regex("\\bchmod\\s+(-\\S+\\s+)*0?0?0\\s+/\\s*$")                   // chmod 000 /
