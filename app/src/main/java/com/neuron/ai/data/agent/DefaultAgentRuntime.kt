@@ -135,7 +135,11 @@ class DefaultAgentRuntime(
     private suspend fun update(runId: String, transform: (AgentRun) -> AgentRun) =
         mutex.withLock {
             _runs.value[runId]?.let { run ->
-                _runs.value = _runs.value + (runId to transform(run))
+                // State machine guard: terminal states are frozen — late
+                // cancellation/failure events can never resurrect a run.
+                if (!run.state.isTerminal) {
+                    _runs.value = _runs.value + (runId to transform(run))
+                }
             }
         }
 }

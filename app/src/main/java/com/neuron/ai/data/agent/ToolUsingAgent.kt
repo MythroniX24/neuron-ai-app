@@ -60,9 +60,11 @@ class ToolUsingAgent(
         while (step < maxSteps) {
             step++
 
-            // Strict allowlist: an empty set means tools are disabled for this run.
-            val availableTools = toolRegistry.tools.first()
-                .filter { it.id in goal.allowedTools }
+            // Policy-resolved allowlist: All exposes every registered tool,
+            // Only restricts to the intersection — empty Only disables tools.
+            val registered = toolRegistry.tools.first()
+            val allowedIds = goal.allowedToolIds(registered.map { it.id }.toSet())
+            val availableTools = registered.filter { it.id in allowedIds }
 
             val request = CompletionRequest(
                 model = model,
@@ -138,7 +140,17 @@ class ToolUsingAgent(
                     com.neuron.ai.core.agent.ToolResult.Failure("Unknown tool: ${call.toolId}")
                 } else {
                     try {
-                        toolExecutor.execute(call.toolId, call.argumentsJson)
+                        toolExecutor.execute(
+                            call.toolId,
+                            call.argumentsJson,
+                            onPermissionWait = { waiting ->
+                                if (waiting) {
+                                    send(AgentEvent.PermissionRequested(call.callId, tool.title))
+                                } else {
+                                    send(AgentEvent.PermissionResolved)
+                                }
+                            }
+                        )
                     } catch (cancelled: kotlinx.coroutines.CancellationException) {
                         throw cancelled
                     } catch (t: Throwable) {

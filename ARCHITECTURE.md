@@ -209,8 +209,9 @@ Deliberate decisions that keep the codebase open:
 - **Provider system:** `OpenAICompatibleProvider` (OkHttp + SSE streaming, tool-calling
   wire format, vision data-URLs) behind the `AIProvider` seam; `ProviderRepository`
   owns user configs, connection testing, and per-conversation model binding.
-- **Agent runtime:** `ToolUsingAgent` implements the streaming tool loop with a strict
-  `goal.allowedTools` allowlist, a step budget, and user-facing activity events only.
+- **Agent runtime:** `ToolUsingAgent` implements the streaming tool loop with a
+  `ToolPolicy`-resolved allowlist (`All` = every registered tool, `Only` = strict
+  intersection), a step budget, and user-facing activity events only.
 - **Tools:** time, calculator (recursive-descent evaluator — no `javax.script`), text
   stats, workspace file read/search. New tools register without touching the loop.
 - **Permissions:** `SessionPermissionManager` surfaces allow/deny decisions to the UI;
@@ -221,6 +222,33 @@ Deliberate decisions that keep the codebase open:
   storage with metadata blobs; provider configs persisted as JSON (keys excluded).
 - **Rendering:** hand-rolled Markdown (headings, lists, quotes, tables, code blocks
   with copy + basic highlighting) and LaTeX via `ru.noties:jlatexmath-android`.
+
+## Phase 2 — Milestone 1 implementation status (Advanced Agent Core)
+
+- **Agent runs:** `DefaultAgentRuntime` owns run lifecycles as observable
+  `AgentRun` state machines (QUEUED → RUNNING → WAITING_FOR_PERMISSION →
+  COMPLETED/FAILED/CANCELLED). Terminal states are frozen — late events cannot
+  resurrect a run. Sessions are cancellable and re-observable from any screen.
+- **Tool executor:** risk-aware permission scoping (SAFE/ELEVATED/DESTRUCTIVE),
+  per-tool timeout budget with a hard ceiling, bounded retry for transient
+  failures, and structured `ToolResult` values — including `TimedOut`.
+  `TimeoutCancellationException` is disambiguated from outer cancellation so
+  tool budgets never mask real cancellation.
+- **Permissions:** `SessionPermissionManager` supports ONCE / SESSION /
+  WORKSPACE / ALWAYS decisions with an inspectable decision log. DESTRUCTIVE
+  work (and anything carrying FILESYSTEM_DELETE) always re-prompts — grants are
+  never remembered for destructive operations.
+- **Tasks:** `DefaultTaskManager` persists every transition to Room (v2
+  `tasks` table) via `TaskRecordStore`; stale RUNNING/QUEUED rows are recovered
+  as FAILED on app restart. Tasks report live activity, step progress and
+  WAITING_FOR_PERMISSION state, mirrored from the chat's agent turns.
+- **Context management:** `buildChatContext` caps history (last 30 turns,
+  oldest→newest), drops trailing non-user rows and TOOL/error rows so
+  providers never receive dangling tool results.
+- **UI:** permission dialogs offer Allow/Deny once, for session, or always;
+  the Tasks screen shows status, activity, progress, retry for failures and
+  stop for active work; agent activity shows ✓/✗/⟳ step states without
+  exposing chain-of-thought.
 
 ## Key technical decisions
 

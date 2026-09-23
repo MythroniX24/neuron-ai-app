@@ -18,6 +18,7 @@ import com.neuron.ai.core.provider.ChatMessage
 import com.neuron.ai.core.provider.Model
 import com.neuron.ai.core.provider.ProviderConfig
 import com.neuron.ai.data.provider.ProviderRepository
+import com.neuron.ai.core.task.Task
 import com.neuron.ai.core.task.TaskManager
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -28,6 +29,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /** One selectable (provider, model) pair for the top-bar model switcher. */
 data class ModelOption(
@@ -62,7 +64,7 @@ class ChatViewModel(
     private val conversationId: String,
     private val conversations: ConversationRepository,
     private val providers: ProviderRepository,
-    private val tasks: TaskManager,
+    private val tasks: com.neuron.ai.data.task.DefaultTaskManager,
     private val dispatchers: DispatcherProvider,
     private val logger: Logger,
     private val agentFactory: (AIProvider, Model, Set<String>) -> Agent,
@@ -101,6 +103,9 @@ class ChatViewModel(
     private var lastUserPrompt: String? = null
     private var lastUserAttachments: List<Attachment> = emptyList()
 
+    /** Task-system mirror of the current agent turn (Milestone 1). */
+    private var currentTaskId: String? = null
+
     fun loadConversation() {
         viewModelScope.launch(dispatchers.io) {
             _conversation.value = conversations.getConversation(conversationId)
@@ -120,7 +125,7 @@ class ChatViewModel(
         if (last.role != Message.Role.USER) return
         lastUserPrompt = last.content
         lastUserAttachments = last.attachments
-        runAgentTurn(last.content)
+        runAgentTurn(last.content, currentTaskId)
     }
 
     // ---- Model selection ------------------------------------------------------------
@@ -195,7 +200,12 @@ class ChatViewModel(
             )
             _draftAttachments.value = emptyList()
             maybeAutoTitle(prompt)
-            runAgentTurn(prompt)
+            val task = tasks.create(
+                title = prompt.take(60).ifBlank { "Agent turn" },
+                conversationId = conversationId
+            )
+            currentTaskId = task.id
+            runAgentTurn(prompt, task.id)
         }
     }
 
@@ -232,15 +242,15 @@ class ChatViewModel(
     fun stop() {
         job?.cancel()
         job = null
-        // The cancelled turn persists its own partial text in its
-        // CancellationException handler — writing here too would duplicate it.
+        // Task CANCELLED status is set inside the turn's cancellation handler,
+        // where the scope is already cancelled — safe there via NonCancellable.
     }
 
     fun retry() {
         val prompt = lastUserPrompt ?: return
         if (_generation.value is GenerationState.Streaming) return
-        // The user message is already persisted; only the answer is re-run.
-        job = viewModelScope.launch(dispatchers.io) { runAgentTurn(prompt) }
+        // The user message is already persisted; only re-run the answer.
+        job = viewModelScope.launch(dispatchers.io) { runAgentTurn(prompt, currentTaskId) }
     }
 
     fun regenerate() {
@@ -254,7 +264,7 @@ class ChatViewModel(
 
             lastUserPrompt = lastUser.content
             lastUserAttachments = lastUser.attachments
-            runAgentTurn(lastUser.content)
+            runAgentTurn(lastUser.content, currentTaskId)
         }
     }
 
@@ -271,7 +281,7 @@ class ChatViewModel(
             )
             lastUserPrompt = newContent
             lastUserAttachments = original?.attachments ?: emptyList()
-            runAgentTurn(newContent)
+            runAgentTurn(newContent, currentTaskId)
         }
     }
 
@@ -284,10 +294,15 @@ class ChatViewModel(
 
     // ---- Core turn ------------------------------------------------------------------------
 
-    /** Runs one agent turn; the user message must already be persisted. */
-    private suspend fun runAgentTurn(prompt: String) {
+    /** Runs one agent turn; the user message must already be persisted.
+     *  [taskId] mirrors this turn onto the task system when provided. */
+    private suspend fun runAgentTurn(prompt: String, taskId: String?) {
         val selection = resolveSelection()
         if (selection == null) {
+            taskId?.let { tid ->
+                tasks.updateStatus(tid, Task.Status.FAILED)
+                tasks.reportError(tid, "No model selected")
+            }
             _generation.value = GenerationState.Failed(
                 NeuronError.Provider(
                     "No model selected. Tap the model name in the top bar to pick one, " +
@@ -298,11 +313,18 @@ class ChatViewModel(
         }
         val (config, modelId) = selection
         val provider = providers.provider(config.id) ?: run {
+            taskId?.let { tid ->
+                tasks.updateStatus(tid, Task.Status.FAILED)
+                tasks.reportError(tid, "Provider disabled")
+            }
             _generation.value = GenerationState.Failed(
                 NeuronError.Provider("Provider \"${config.displayName}\" is disabled.")
             )
             return
         }
+
+        // Mirror the turn onto the task system.
+        taskId?.let { tasks.updateStatus(it, Task.Status.RUNNING) }
 
         // The user's message is already in the conversation history.
         _activity.value = emptyList()
@@ -337,6 +359,17 @@ class ChatViewModel(
                         }
 
                         is AgentEvent.ActivityUpdated -> {
+                            taskId?.let { tid ->
+                                tasks.reportActivity(
+                                    tid,
+                                    (if (event.activity.state == com.neuron.ai.core.agent.AgentActivity.State.FAILED) "✗ " else "✓ ") +
+                                        event.activity.title
+                                )
+                                if (event.activity.state == com.neuron.ai.core.agent.AgentActivity.State.DONE) {
+                                    val current = _activity.value.size
+                                    tasks.reportProgress(tid, current, null)
+                                }
+                            }
                             _activity.value = _activity.value.map { item ->
                                 if (item.stepId == event.activity.stepId) {
                                     item.copy(
@@ -385,25 +418,33 @@ class ChatViewModel(
                             streamError = NeuronError.Provider(event.message)
                         }
 
-                        // Permission pauses surface via the permission dialog host;
-                        // nothing extra to render in the chat stream itself.
-                        is AgentEvent.PermissionRequested -> Unit
-                        is AgentEvent.PermissionResolved -> Unit
+                        // Permission pauses mirror onto the task system so the
+                        // Tasks screen shows the true state.
+                        is AgentEvent.PermissionRequested -> {
+                            taskId?.let { tasks.updateStatus(it, Task.Status.WAITING_FOR_PERMISSION) }
+                        }
+                        is AgentEvent.PermissionResolved -> {
+                            taskId?.let { tasks.updateStatus(it, Task.Status.RUNNING) }
+                        }
                     }
                 }
         } catch (cancelled: kotlinx.coroutines.CancellationException) {
-            // User stopped generation; keep partial text as a normal message.
-            if (assistantBuffer.isNotEmpty()) {
-                conversations.appendMessage(
-                    conversationId,
-                    Message.Role.ASSISTANT,
-                    assistantBuffer.toString(),
-                    metadata = MessageMetadata(
-                        providerId = config.id,
-                        modelId = modelId,
-                        generationMs = System.currentTimeMillis() - started
+            // User stopped generation; persist partial text + CANCELLED task
+            // inside NonCancellable — the scope is already cancelled here.
+            withContext(kotlinx.coroutines.NonCancellable) {
+                taskId?.let { tasks.updateStatus(it, Task.Status.CANCELLED) }
+                if (assistantBuffer.isNotEmpty()) {
+                    conversations.appendMessage(
+                        conversationId,
+                        Message.Role.ASSISTANT,
+                        assistantBuffer.toString(),
+                        metadata = MessageMetadata(
+                            providerId = config.id,
+                            modelId = modelId,
+                            generationMs = System.currentTimeMillis() - started
+                        )
                     )
-                )
+                }
             }
             _generation.value = GenerationState.Idle
             _activity.value = emptyList()

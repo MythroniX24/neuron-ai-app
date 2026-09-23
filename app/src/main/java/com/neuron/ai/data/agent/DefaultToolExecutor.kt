@@ -7,7 +7,10 @@ import com.neuron.ai.core.agent.ToolResult
 import com.neuron.ai.core.log.Logger
 import com.neuron.ai.core.permissions.PermissionManager
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withTimeout
 
 /**
@@ -15,6 +18,9 @@ import kotlinx.coroutines.withTimeout
  * workspace-scoped). Adds a timeout budget and bounded retry for transient
  * failures. Denials, unknown tools and crashes are failure values, not
  * exceptions — dangerous operations can never run silently.
+ *
+ * [onPermissionWait] lets an agent runtime observe permission pauses:
+ * called with `true` before the request suspends, `false` after it resolves.
  */
 class DefaultToolExecutor(
     private val registry: ToolRegistry,
@@ -27,17 +33,29 @@ class DefaultToolExecutor(
     private val timeoutCeilingMs: Long = 60_000
 ) : ToolExecutor {
 
-    override suspend fun execute(toolId: String, argumentsJson: String): ToolResult {
+    override suspend fun execute(toolId: String, argumentsJson: String): ToolResult =
+        execute(toolId, argumentsJson, onPermissionWait = null)
+
+    override suspend fun execute(
+        toolId: String,
+        argumentsJson: String,
+        onPermissionWait: (suspend (Boolean) -> Unit)?
+    ): ToolResult {
         val tool = registry.find(toolId)
             ?: return ToolResult.Failure("Unknown tool: $toolId")
 
         for (capability in tool.requiredCapabilities) {
-            val granted = permissions.request(
-                capability = capability,
-                reason = "${tool.title} needs this permission.",
-                requestedBy = tool.title,
-                riskLevel = tool.riskLevel
-            )
+            onPermissionWait?.invoke(true)
+            val granted = try {
+                permissions.request(
+                    capability = capability,
+                    reason = "${tool.title} needs this permission.",
+                    requestedBy = tool.title,
+                    riskLevel = tool.riskLevel
+                )
+            } finally {
+                onPermissionWait?.invoke(false)
+            }
             if (!granted) {
                 return ToolResult.Failure("Permission denied for ${tool.title}.")
             }
@@ -49,10 +67,13 @@ class DefaultToolExecutor(
             attempt++
             val result = try {
                 withTimeout(timeoutMs) { tool.execute(argumentsJson) }
+            } catch (timeout: TimeoutCancellationException) {
+                // Rethrow if an OUTER scope was cancelled; otherwise this is
+                // this tool's own budget expiring → structured TimedOut value.
+                currentCoroutineContext().ensureActive()
+                ToolResult.TimedOut(timeoutMs)
             } catch (cancelled: CancellationException) {
                 throw cancelled
-            } catch (timeout: kotlinx.coroutines.TimeoutCancellationException) {
-                ToolResult.TimedOut(timeoutMs)
             } catch (t: Throwable) {
                 logger?.w("Tool", "Tool $toolId failed (attempt $attempt)", t)
                 ToolResult.Failure("Tool error: ${t.message ?: "unknown"}")
