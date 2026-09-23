@@ -32,6 +32,46 @@ class AttachmentStore(
         return import(uri, name, mime)
     }
 
+    /**
+     * Creates a fresh capture file that the camera app writes into via a
+     * FileProvider URI. Lives under filesDir/captures — app-private.
+     */
+    fun createCaptureDestination(): File {
+        val dir = File(context.filesDir, "captures").apply { mkdirs() }
+        return File(dir, "capture_${System.currentTimeMillis()}.jpg")
+    }
+
+    /**
+     * Moves a completed camera capture into attachment storage as an IMAGE
+     * attachment and removes the temporary capture file.
+     */
+    suspend fun importCapture(captureFile: File): Attachment? = withContext(io) {
+        if (!captureFile.exists() || captureFile.length() == 0L) {
+            return@withContext null
+        }
+        try {
+            val attachmentId = "att-" + UUID.randomUUID().toString().take(8)
+            val target = File(root, "${attachmentId}_capture.jpg")
+            captureFile.inputStream().use { input ->
+                target.outputStream().use { output -> input.copyTo(output) }
+            }
+            captureFile.delete()
+            Attachment(
+                id = attachmentId,
+                displayName = "Camera " + java.text.SimpleDateFormat(
+                    "HH:mm:ss", java.util.Locale.getDefault()
+                ).format(java.util.Date()),
+                mimeType = "image/jpeg",
+                sizeBytes = target.length(),
+                localPath = target.relativeTo(context.filesDir).path,
+                kind = Attachment.Kind.IMAGE
+            )
+        } catch (t: Throwable) {
+            logger.w("Attachment", "Failed to import camera capture", t)
+            null
+        }
+    }
+
     private fun queryDisplayName(uri: Uri): String? = runCatching {
         context.contentResolver.query(
             uri,

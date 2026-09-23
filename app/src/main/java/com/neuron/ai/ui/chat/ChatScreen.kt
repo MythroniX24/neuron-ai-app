@@ -98,6 +98,13 @@ fun ChatScreen(
         }
     }
 
+    val isStreaming = generation is GenerationState.Streaming
+
+    // ---- Attachment entry points (sheet: Camera / Photos / Files) ----------------
+    val context = androidx.compose.ui.platform.LocalContext.current
+    var showAttachmentSheet by remember { mutableStateOf(false) }
+    var pendingCaptureFile by remember { mutableStateOf<java.io.File?>(null) }
+
     val filePicker = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument()
     ) { uri ->
@@ -106,7 +113,58 @@ fun ChatScreen(
         }
     }
 
-    val isStreaming = generation is GenerationState.Streaming
+    val photoPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.PickVisualMedia()
+    ) { uri ->
+        if (uri != null) {
+            viewModel.importAttachment(uri)
+        }
+    }
+
+    val cameraLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.TakePicture()
+    ) { captured ->
+        val file = pendingCaptureFile
+        if (captured && file != null) {
+            viewModel.importCameraCapture(file)
+        }
+        pendingCaptureFile = null
+    }
+
+    val cameraPermission = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        val file = pendingCaptureFile
+        if (granted && file != null) {
+            cameraLauncher.launch(
+                androidx.core.content.FileProvider.getUriForFile(
+                    context,
+                    context.packageName + ".fileprovider",
+                    file
+                )
+            )
+        }
+        pendingCaptureFile = null
+    }
+
+    val launchCamera: () -> Unit = {
+        val file = container.attachmentStore.createCaptureDestination()
+        pendingCaptureFile = file
+        val granted = androidx.core.content.ContextCompat.checkSelfPermission(
+            context, android.Manifest.permission.CAMERA
+        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        if (granted) {
+            cameraLauncher.launch(
+                androidx.core.content.FileProvider.getUriForFile(
+                    context,
+                    context.packageName + ".fileprovider",
+                    file
+                )
+            )
+        } else {
+            cameraPermission.launch(android.Manifest.permission.CAMERA)
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -200,9 +258,7 @@ fun ChatScreen(
         ComposerBar(
             draft = draft,
             onDraftChange = { draft = it },
-            onAttach = {
-                filePicker.launch(arrayOf("*/*"))
-            },
+            onAttach = { showAttachmentSheet = true },
             onSend = {
                 viewModel.send(draft)
                 draft = ""
@@ -214,6 +270,21 @@ fun ChatScreen(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(Spacing.lg)
+        )
+    }
+
+    if (showAttachmentSheet) {
+        AttachmentSheet(
+            onDismiss = { showAttachmentSheet = false },
+            onCamera = launchCamera,
+            onPhotos = {
+                photoPicker.launch(
+                    androidx.activity.result.PickVisualMediaRequest(
+                        ActivityResultContracts.PickVisualMedia.ImageOnly
+                    )
+                )
+            },
+            onFiles = { filePicker.launch(arrayOf("*/*")) }
         )
     }
 }

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- Camera captures live under filesDir/captures and are shared with the
+         camera app only via FileProvider content URIs. -->
+    <files-path name="captures" path="captures/" />
+</paths>

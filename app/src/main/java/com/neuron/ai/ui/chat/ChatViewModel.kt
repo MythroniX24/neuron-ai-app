@@ -70,7 +70,8 @@ class ChatViewModel(
     private val agentFactory: (AIProvider, Model, Set<String>) -> Agent,
     private val defaultModelId: String?,
     private val toolIdsProvider: suspend () -> Set<String>,
-    private val importAttachmentFn: suspend (android.net.Uri) -> com.neuron.ai.core.conversation.Attachment?
+    private val importAttachmentFn: suspend (android.net.Uri) -> com.neuron.ai.core.conversation.Attachment?,
+    private val importCaptureFn: (java.io.File) -> com.neuron.ai.core.conversation.Attachment?
 ) : ViewModel() {
 
     val messages: StateFlow<List<Message>> =
@@ -176,6 +177,21 @@ class ChatViewModel(
                 _draftAttachments.value = _draftAttachments.value + attachment
             } else {
                 logger.w("Chat", "Attachment import failed")
+            }
+        }
+    }
+
+    /**
+     * Imports a camera capture that has been written to [captureFile].
+     * The temporary capture file is consumed (moved) into attachment storage.
+     */
+    fun importCameraCapture(captureFile: java.io.File) {
+        viewModelScope.launch(dispatchers.io) {
+            val attachment = importCaptureFn(captureFile)
+            if (attachment != null) {
+                _draftAttachments.value = _draftAttachments.value + attachment
+            } else {
+                logger.w("Chat", "Camera capture import failed")
             }
         }
     }
