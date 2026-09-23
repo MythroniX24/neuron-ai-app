@@ -272,6 +272,10 @@ coding chat, no terminal chat, no separate runtimes.
   working directory, per-command timeouts (exit 124) and cooperative
   cancellation (SIGKILL → exit 130). The user panel and AI tools share the
   SAME session per conversation — one infrastructure, no duplicate stack.
+  Process kill semantics: `sh -c "sleep 30"` leaves the orphaned `sleep`
+  holding the output pipes open, so drain readers are daemon threads and
+  execution settles with a bounded join — an orphaned child can never hang
+  `execute()`; trailing output after a kill may be truncated.
 - **Terminal capability:** OFF by default per conversation
   (`Conversation.terminalEnabled`). Toggled via + → Terminal. When disabled,
   `terminal.run` refuses with guidance — the agent can never silently enable
