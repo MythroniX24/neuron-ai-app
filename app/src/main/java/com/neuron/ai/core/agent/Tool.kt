@@ -63,9 +63,18 @@ sealed class ToolResult {
 /**
  * Executes a registered tool after enforcing its permission requirements.
  * Returns failures as values; dangerous operations never run silently.
+ *
+ * The 3-arg variant reports permission pauses so runtimes can surface
+ * WAITING_FOR_PERMISSION state; the 2-arg form is a plain execution.
  */
 interface ToolExecutor {
     suspend fun execute(toolId: String, argumentsJson: String): ToolResult
+
+    suspend fun execute(
+        toolId: String,
+        argumentsJson: String,
+        onPermissionWait: (suspend (Boolean) -> Unit)?
+    ): ToolResult = execute(toolId, argumentsJson)
 }
 
 /** Observable registry of tools available to agents. */
