@@ -195,6 +195,7 @@ class OpenAIWireCodecTest {
                             })
                         })
                     })
+                    put("finish_reason", "tool_calls")
                 })
             })
         }.toString()
