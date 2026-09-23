@@ -34,7 +34,8 @@ class ChatViewModelFactory(
             },
             defaultModelId = container.providerRepository.defaultModelId.value,
             toolIdsProvider = { container.toolRegistry.tools.first().map { it.id }.toSet() },
-            importAttachmentFn = { uri -> container.attachmentStore.importFromUri(uri) }
+            importAttachmentFn = { uri -> container.attachmentStore.importFromUri(uri) },
+            importCaptureFn = { file -> container.attachmentStore.importCapture(file) }
         ) as T
     }
 }
