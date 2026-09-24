@@ -64,11 +64,22 @@ class MemoryManager(private val store: MemoryStore) {
      */
     class Tools(
         private val manager: MemoryManager,
+        /** Confirms destructive memory changes with the user (never silent). */
+        private val permissions: com.neuron.ai.core.permissions.PermissionManager,
         /** Resolves the active workspace id (or null) for PROJECT-scoped memory. */
         private val workspaceScopeProvider: suspend () -> String?
     ) {
 
         private val json = Json { ignoreUnknownKeys = true }
+
+        /** Always surfaces a dialog: DESTRUCTIVE decisions are never remembered. */
+        private suspend fun memoryPermissionRequest(reason: String): Boolean =
+            permissions.request(
+                capability = com.neuron.ai.core.permissions.Capability.MEMORY,
+                reason = reason,
+                requestedBy = "Memory",
+                riskLevel = RiskLevel.DESTRUCTIVE
+            )
 
         private fun str(parsed: kotlinx.serialization.json.JsonObject, k: String): String? =
             runCatching { (parsed[k] as JsonPrimitive).content }.getOrNull()
@@ -163,6 +174,13 @@ class MemoryManager(private val store: MemoryStore) {
             override suspend fun execute(argumentsJson: String): ToolResult {
                 val parsed = runCatching { json.parseToJsonElement(argumentsJson).jsonObject }.getOrNull()
                     ?: return ToolResult.Failure("Invalid arguments.")
+                // DESTRUCTIVE invariant: the user ALWAYS confirms memory
+                // deletion through an explicit dialog — never silently.
+                val approved = memoryPermissionRequest(
+                    if (str(parsed, "scope") == "all") "Delete ALL saved memory?"
+                    else "Delete the saved memory entry \"${str(parsed, "key") ?: ""}\"?"
+                )
+                if (!approved) return ToolResult.Denied("The user did not approve deleting memory.")
                 val scope = str(parsed, "scope")
                     ?: return ToolResult.Failure("Missing scope")
                 val key = str(parsed, "key")
@@ -193,6 +211,5 @@ class MemoryManager(private val store: MemoryStore) {
     }
 }
 
-/** USER_PREFERENCE memory lives in the shared global scope. */
 /** Scope id for user-global (non-workspace) memory; visible for wiring. */
 const val SCOPE_GLOBAL = "global"

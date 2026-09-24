@@ -95,7 +95,21 @@ class DefaultToolExecutorTest {
 
         val result = executor.execute(tool.id, "{}")
 
-        assertTrue(result is ToolResult.Failure)
+        assertTrue(result is ToolResult.Denied)
+        assertEquals(0, tool.executions)
+    }
+
+    @Test
+    fun `denied permission is terminal - never retried`() = runTest {
+        val tool = FakeTool { ToolResult.Success("ran") }
+        val permissions = FakePermissions(grant = false)
+        val executor = build(permissions, tool, maxRetries = 2)
+
+        val result = executor.execute(tool.id, "{}")
+
+        // Exactly ONE request for ONE refusal — no repeated dialogs.
+        assertEquals(1, permissions.requested.size)
+        assertTrue(result is ToolResult.Denied)
         assertEquals(0, tool.executions)
     }
 

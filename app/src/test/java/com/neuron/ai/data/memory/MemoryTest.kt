@@ -128,4 +128,71 @@ class MemoryTest {
         assertTrue(alpha.all { it.scopeId == "ws-alpha" || it.scopeId == "global" })
         assertEquals(1, alpha.size)
     }
+
+    @Test
+    fun `disabled memory recalls nothing`() = runTest {
+        val store = FakeMemoryStore()
+        val manager = MemoryManager(store)
+        manager.remember(MemoryType.USER_PREFERENCE, "global", "lang", "Kotlin")
+        store.setEnabled(false)
+        assertTrue(manager.relevant(MemoryType.USER_PREFERENCE, "global", 10).isEmpty())
+        assertNull(manager.recall(MemoryType.USER_PREFERENCE, "global", "lang"))
+    }
+
+    /** Permission double that REFUSES everything (audit: forget must ask). */
+    private class DenyingPermissions : com.neuron.ai.core.permissions.PermissionManager {
+        override val pendingRequests: Flow<List<com.neuron.ai.core.permissions.PermissionRequest>> =
+            MutableStateFlow(emptyList())
+        override val granted: Flow<Set<com.neuron.ai.core.permissions.Capability>> =
+            MutableStateFlow(emptySet())
+        override val decisions: Flow<List<com.neuron.ai.core.permissions.PermissionDecision>> =
+            MutableStateFlow(emptyList())
+        override suspend fun request(
+            capability: com.neuron.ai.core.permissions.Capability,
+            reason: String,
+            requestedBy: String
+        ): Boolean = false
+        override suspend fun grant(requestId: String) {}
+        override suspend fun deny(requestId: String) {}
+        override suspend fun decide(requestId: String, granted: Boolean, scope: com.neuron.ai.core.permissions.DecisionScope) {}
+        override suspend fun revoke(capability: com.neuron.ai.core.permissions.Capability) {}
+        override suspend fun isGranted(capability: com.neuron.ai.core.permissions.Capability): Boolean = false
+        override suspend fun resetDecisions() {}
+    }
+
+    /** Permission double that APPROVES everything. */
+    private class ApprovingPermissions : DenyingPermissions() {
+        override suspend fun request(
+            capability: com.neuron.ai.core.permissions.Capability,
+            reason: String,
+            requestedBy: String
+        ): Boolean = true
+    }
+
+    @Test
+    fun `forget tool asks first and denial prevents deletion`() = runTest {
+        val store = FakeMemoryStore()
+        val manager = MemoryManager(store)
+        manager.remember(MemoryType.USER_PREFERENCE, "global", "lang", "Kotlin")
+        val tools = MemoryManager.Tools(manager, DenyingPermissions()) { null }
+
+        val result = tools.all.first { it.id == "memory.forget" }.execute("""{"scope":"all"}""")
+
+        // A refusal is a distinct DENIAL and NOTHING was deleted.
+        assertTrue(result is com.neuron.ai.core.agent.ToolResult.Denied)
+        assertEquals(1, store.map.size)
+    }
+
+    @Test
+    fun `forget tool deletes after explicit approval`() = runTest {
+        val store = FakeMemoryStore()
+        val manager = MemoryManager(store)
+        manager.remember(MemoryType.USER_PREFERENCE, "global", "lang", "Kotlin")
+        val tools = MemoryManager.Tools(manager, ApprovingPermissions()) { null }
+
+        val result = tools.all.first { it.id == "memory.forget" }.execute("""{"scope":"all"}""")
+
+        assertTrue(result is com.neuron.ai.core.agent.ToolResult.Success)
+        assertTrue(store.map.isEmpty())
+    }
 }

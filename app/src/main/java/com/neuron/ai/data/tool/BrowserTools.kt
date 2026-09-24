@@ -55,7 +55,7 @@ object BrowserTools {
                 requestedBy = "Browser",
                 riskLevel = RiskLevel.SAFE
             )
-            if (!ok) return ToolResult.Failure("Browser access was not granted.")
+            if (!ok) return ToolResult.Denied("Browser access was not granted.")
         }
         return null
     }
@@ -269,7 +269,7 @@ object BrowserTools {
                 requestedBy = title,
                 riskLevel = RiskLevel.ELEVATED
             )
-            if (!granted) return ToolResult.Failure("The user did not approve this browser action.")
+            if (!granted) return ToolResult.Denied("The user did not approve this browser action.")
             val session = browserManager.sessionFor(contextKey)
             return when (val result = act(session, args)) {
                 is BrowserResult.Success -> ToolResult.Success(result.message ?: "Done.")

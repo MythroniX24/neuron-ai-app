@@ -177,11 +177,13 @@ class ToolUsingAgent(
                     is com.neuron.ai.core.agent.ToolResult.Success -> AgentActivity.State.DONE
                     is com.neuron.ai.core.agent.ToolResult.Failure -> AgentActivity.State.FAILED
                     is com.neuron.ai.core.agent.ToolResult.TimedOut -> AgentActivity.State.FAILED
+                    is com.neuron.ai.core.agent.ToolResult.Denied -> AgentActivity.State.FAILED
                 }
                 val detail = when (result) {
                     is com.neuron.ai.core.agent.ToolResult.Success -> result.output.take(4_000)
                     is com.neuron.ai.core.agent.ToolResult.Failure -> result.message
                     is com.neuron.ai.core.agent.ToolResult.TimedOut -> result.message
+                    is com.neuron.ai.core.agent.ToolResult.Denied -> result.message
                 }
                 send(AgentEvent.ActivityUpdated(activity.copy(state = finalState, detail = detail)))
 
@@ -191,7 +193,10 @@ class ToolUsingAgent(
                         is com.neuron.ai.core.agent.ToolResult.Success -> result.output
                         is com.neuron.ai.core.agent.ToolResult.Failure -> "Error: ${result.message}"
                         is com.neuron.ai.core.agent.ToolResult.TimedOut -> "Error: ${result.message}"
-                    },
+                        is com.neuron.ai.core.agent.ToolResult.Denied ->
+                            "Permission denied: ${result.message} Do not retry this action unless " +
+                                "the user explicitly changes their decision."
+                        },
                     toolCallId = call.callId
                 )
             }
