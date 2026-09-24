@@ -19,6 +19,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import androidx.core.net.toUri
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import android.webkit.WebResourceRequest
@@ -73,8 +74,8 @@ class WebViewBrowserSession(
                         // Block third-party requests lightly: same-host only,
                         // everything else (trackers/ads) is denied.
                         val reqHost = request?.url?.host
-                        val pageHost = view?.url?.host
-                            ?: webView?.url?.host
+                        val pageHost = view?.url?.toUri()?.host
+                            ?: webView?.url?.toUri()?.host
                         return if (reqHost != null && pageHost != null && reqHost != pageHost) {
                             WebResourceResponse("text/plain", "utf-8", java.io.ByteArrayInputStream(ByteArray(0)))
                         } else null

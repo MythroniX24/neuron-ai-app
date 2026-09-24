@@ -142,7 +142,7 @@ class ProviderRepository(
         ).apply { imageByteLoader = imageLoader }
 
     /** Wired by the DI layer so vision bytes come from the attachment store. */
-    var imageLoader: ((attachmentId: String) -> ByteArray?)? = null
+    var imageLoader: (suspend (attachmentId: String) -> ByteArray?)? = null
 
     private fun invalidate(providerId: String) {
         providers.remove(providerId)

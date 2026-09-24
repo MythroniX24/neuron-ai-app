@@ -6,6 +6,7 @@ import com.neuron.ai.core.web.PageFetcher
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import java.util.concurrent.TimeUnit
 
 /**
@@ -74,7 +75,7 @@ class HttpPageFetcher(
     }
 
     private fun String.toHttpUrlOrNull(): okhttp3.HttpUrl? =
-        runCatching { okhttp3.HttpUrl.Companion.get(this) }.getOrNull()
+        runCatching { this.toHttpUrl() }.getOrNull()
 
     companion object {
         private const val MAX_PAGE_BYTES = 512L * 1024L

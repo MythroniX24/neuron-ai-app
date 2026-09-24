@@ -7,6 +7,7 @@ import com.neuron.ai.core.integration.BrowserManager
 import com.neuron.ai.core.integration.BrowserResult
 import com.neuron.ai.core.permissions.Capability
 import com.neuron.ai.core.permissions.PermissionManager
+import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -170,7 +171,7 @@ object BrowserTools {
         override suspend fun execute(argumentsJson: String): ToolResult {
             gate(env, permissions)?.let { return it }
             val session = browserManager.sessionFor(contextKey)
-            val page = kotlinx.coroutines.flow.firstOrNull(session.page)
+            val page = session.page.firstOrNull()
                 ?: return ToolResult.Failure("No page is loaded — use browser.open first.")
             return ToolResult.Success(fence(page.links.take(60).joinToString("\n")))
         }
