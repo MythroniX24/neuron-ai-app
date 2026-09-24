@@ -38,7 +38,12 @@ class ToolUsingAgent(
     private val toolExecutor: ToolExecutor,
     private val json: Json = Json { ignoreUnknownKeys = true },
     private val logger: Logger? = null,
-    private val maxSteps: Int = 6
+    /**
+     * Generous-but-bounded step budget so cross-capability workflows
+     * (search → read → edit → build → test → fix) complete in one turn;
+     * still bounded to cap cost and runaway loops.
+     */
+    private val maxSteps: Int = 16
 ) : Agent {
 
     override val id: String = "agent.tool-using"
