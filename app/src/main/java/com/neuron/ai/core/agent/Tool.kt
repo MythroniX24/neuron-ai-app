@@ -58,6 +58,13 @@ sealed class ToolResult {
     data class TimedOut(val timeoutMs: Long) : ToolResult() {
         val message: String get() = "Timed out after ${timeoutMs / 1000}s."
     }
+
+    /**
+     * A user or policy REFUSAL (permission denied, action not approved).
+     * Unlike [Failure] this is TERMINAL: executors must not retry it —
+     * retrying would nag the user with repeated dialogs for one refusal.
+     */
+    data class Denied(val message: String) : ToolResult()
 }
 
 /**

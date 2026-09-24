@@ -35,6 +35,7 @@ object PermissionUiMapper {
         Capability.BROWSER -> "Browser control"
         Capability.TERMINAL -> "Terminal access"
         Capability.NOTIFICATIONS -> "Notifications"
+        Capability.MEMORY -> "Memory changes"
     }
 }
 

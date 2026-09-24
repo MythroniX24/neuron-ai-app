@@ -14,7 +14,9 @@ enum class Capability {
     NETWORK,
     BROWSER,
     TERMINAL,
-    NOTIFICATIONS
+    NOTIFICATIONS,
+    /** User-confirmed memory deletion (curated long-term data). */
+    MEMORY
 }
 
 /** How a capability may be granted. */

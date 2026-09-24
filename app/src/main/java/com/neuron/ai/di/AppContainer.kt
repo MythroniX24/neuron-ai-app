@@ -106,7 +106,9 @@ class AppContainer(context: Context) {
     val memoryManager: MemoryManager = MemoryManager(memoryStore)
 
     val memoryTools: List<com.neuron.ai.core.agent.Tool> =
-        MemoryManager.Tools(memoryManager) { memoryWorkspaceScopeProvider() }.all
+        MemoryManager.Tools(memoryManager, permissionManager) {
+            memoryWorkspaceScopeProvider()
+        }.all
 
     val taskManager: DefaultTaskManager = DefaultTaskManager(
         dispatchers,

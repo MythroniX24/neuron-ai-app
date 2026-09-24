@@ -57,7 +57,9 @@ class DefaultToolExecutor(
                 onPermissionWait?.invoke(false)
             }
             if (!granted) {
-                return ToolResult.Failure("Permission denied for ${tool.title}.")
+                // DENIAL is terminal — never retried, so one refusal never
+                // re-surfaces the same dialog within a turn.
+                return ToolResult.Denied("Permission denied for ${tool.title}.")
             }
         }
 
@@ -82,6 +84,7 @@ class DefaultToolExecutor(
             val retryable = when (result) {
                 is ToolResult.Success -> false
                 is ToolResult.TimedOut -> false // timeouts are a budget signal, not transient
+                is ToolResult.Denied -> false   // a refusal is never retried
                 is ToolResult.Failure -> attempt <= maxRetries
             }
             if (!retryable) return result

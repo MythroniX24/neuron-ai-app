@@ -113,7 +113,9 @@ class BrowserToolsTest {
         }
         val tool = BrowserTools.ClickElement(FakeEnv(browser = true), permissions, manager, "c1")
         val result = tool.execute("""{"description":"Submit"}""")
-        assertTrue(result is ToolResult.Failure)
+        // A refusal is a distinct DENIAL, not a transient failure — the
+        // executor must never retry it (no repeated dialogs for one No).
+        assertTrue(result is ToolResult.Denied)
         // The side effect must NOT have happened.
         assertTrue(!manager.session.clicked)
     }
