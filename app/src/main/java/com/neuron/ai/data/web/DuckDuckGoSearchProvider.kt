@@ -102,7 +102,9 @@ class DuckDuckGoSearchProvider(
             val title = HtmlText.extractText(match.groupValues[2], 300)
             val url = unwrap(rawHref) ?: continue
             if (!url.startsWith("http")) continue
-            if (!seen.add(url)) continue
+            // Dedup ignoring query/fragment — tracking params shouldn't
+            // produce duplicate hits.
+            if (!seen.add(url.substringBefore('?').substringBefore('#'))) continue
 
             // The snippet anchor (result__snippet) nearest after this title.
             val tail = html.substring(match.range.last + 1, minOf(html.length, match.range.last + 2_000))

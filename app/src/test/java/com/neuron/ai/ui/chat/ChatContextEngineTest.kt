@@ -66,16 +66,21 @@ class ChatContextEngineTest {
     @Test
     fun `budget trims oldest first and keeps tail intact`() = runTest {
         val engine = ChatContextEngine()
-        val big = "x".repeat(5_000)
+        val big = "x".repeat(20_000)
         val messages = buildList {
             add(msg(Message.Role.USER, big))
             add(msg(Message.Role.ASSISTANT, big))
-            add(msg(Message.Role.USER, "final question that must survive"))
+            add(msg(Message.Role.USER, "recent user message"))
         }
-        val out = engine.build(messages)
+        // The current send rides in via directUserText (as in the
+        // attachments-only path); the trailing USER row is context.
+        val out = engine.build(messages, directUserText = "final question that must survive")
         assertTrue(out.last().content.contains("final question that must survive"))
         val total = out.sumOf { it.content.length }
-        assertTrue("total=$total", total <= 24_000 + 5_000)
+        // Budget: the OLDEST message trims to ~400 chars first; the newer
+        // assistant message (tail) stays whole, as does the current send.
+        assertTrue("total=$total", total <= 24_000)
+        assertTrue("tail intact", out.any { it.content.length > 10_000 })
     }
 
     @Test
