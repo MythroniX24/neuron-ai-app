@@ -13,6 +13,7 @@ class SettingsViewModelFactory(private val container: AppContainer) : ViewModelP
         }
         return SettingsViewModel(
             settings = container.settingsRepository,
+            memoryManager = container.memoryManager,
             dispatchers = container.dispatchers
         ) as T
     }

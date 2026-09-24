@@ -8,14 +8,15 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
-    entities = [ConversationEntity::class, MessageEntity::class, TaskEntity::class],
-    version = 3,
+    entities = [ConversationEntity::class, MessageEntity::class, TaskEntity::class, MemoryEntryEntity::class],
+    version = 4,
     exportSchema = false
 )
 abstract class NeuronDatabase : RoomDatabase() {
 
     abstract fun conversationDao(): ConversationDao
     abstract fun taskDao(): TaskDao
+    abstract fun memoryDao(): MemoryDao
 
     companion object {
         @Volatile
@@ -55,6 +56,28 @@ abstract class NeuronDatabase : RoomDatabase() {
             }
         }
 
+        /** v3 → v4: browser capability + memory table (Milestone 3). */
+        private val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "ALTER TABLE conversations ADD COLUMN browserEnabled INTEGER NOT NULL DEFAULT 0"
+                )
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS memory (" +
+                        "id TEXT NOT NULL PRIMARY KEY, " +
+                        "type TEXT NOT NULL, " +
+                        "scopeId TEXT NOT NULL, " +
+                        "key TEXT NOT NULL, " +
+                        "value TEXT NOT NULL, " +
+                        "createdAtEpochMs INTEGER NOT NULL, " +
+                        "updatedAtEpochMs INTEGER NOT NULL)"
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_memory_type_scopeId ON memory (type, scopeId)"
+                )
+            }
+        }
+
         fun get(context: Context): NeuronDatabase =
             instance ?: synchronized(this) {
                 instance ?: Room.databaseBuilder(
@@ -62,7 +85,7 @@ abstract class NeuronDatabase : RoomDatabase() {
                     NeuronDatabase::class.java,
                     "neuron.db"
                 )
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
                     .build()
                     .also { instance = it }
             }

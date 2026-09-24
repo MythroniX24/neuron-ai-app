@@ -20,6 +20,8 @@ interface WorkspaceToolEnv {
     suspend fun activeWorkspace(): WorkspaceContext?
     /** Whether AI Terminal access is enabled for the current conversation. */
     suspend fun terminalEnabled(): Boolean
+    /** Whether AI Browser access is enabled for the current conversation (Milestone 3). */
+    suspend fun browserEnabled(): Boolean = false
     /** Stable session key (conversation id) for terminal session binding. */
     suspend fun terminalSessionKey(): String?
 }
