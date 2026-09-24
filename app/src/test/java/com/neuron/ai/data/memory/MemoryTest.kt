@@ -72,7 +72,11 @@ class MemoryTest {
         assertTrue(MemorySecretFilter.containsSecret("password=hunter2"))
         assertTrue(MemorySecretFilter.containsSecret("Authorization: Bearer abc.def.ghi"))
         assertTrue(MemorySecretFilter.containsSecret("token: ghp_0123456789abcdefghij"))
-        assertTrue(MemorySecretFilter.containsSecret("eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.sig"))
+        assertTrue(
+            MemorySecretFilter.containsSecret(
+                "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.sig"
+            )
+        )
     }
 
     @Test
