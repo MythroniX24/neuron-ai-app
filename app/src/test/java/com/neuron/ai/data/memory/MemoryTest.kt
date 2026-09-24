@@ -140,7 +140,7 @@ class MemoryTest {
     }
 
     /** Permission double that REFUSES everything (audit: forget must ask). */
-    private class DenyingPermissions : com.neuron.ai.core.permissions.PermissionManager {
+    private open class DenyingPermissions : com.neuron.ai.core.permissions.PermissionManager {
         override val pendingRequests: Flow<List<com.neuron.ai.core.permissions.PermissionRequest>> =
             MutableStateFlow(emptyList())
         override val granted: Flow<Set<com.neuron.ai.core.permissions.Capability>> =
