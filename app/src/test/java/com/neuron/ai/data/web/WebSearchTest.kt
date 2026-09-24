@@ -1,5 +1,6 @@
 package com.neuron.ai.data.web
 
+import com.neuron.ai.TestDispatchers
 import com.neuron.ai.core.web.SearchQuery
 import kotlinx.coroutines.test.runTest
 import okhttp3.mockwebserver.MockResponse
