@@ -7,7 +7,6 @@ import com.neuron.ai.core.web.SearchResponse
 import com.neuron.ai.core.web.SearchResult
 import kotlinx.coroutines.withContext
 import okhttp3.FormBody
-import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.util.concurrent.TimeUnit
 
@@ -26,11 +25,18 @@ class DuckDuckGoSearchProvider(
     override val id: String = "duckduckgo-html"
 
     private val io = dispatchers.io
-    private val client: OkHttpClient = (httpClient ?: OkHttpClient()).newBuilder()
-        .connectTimeout(10, TimeUnit.SECONDS)
-        .readTimeout(20, TimeUnit.SECONDS)
-        .header("User-Agent", HttpPageFetcher.USER_AGENT)
-        .build()
+    private val client: okhttp3.OkHttpClient =
+        (httpClient ?: okhttp3.OkHttpClient()).newBuilder()
+            .connectTimeout(10, TimeUnit.SECONDS)
+            .readTimeout(20, TimeUnit.SECONDS)
+            .addInterceptor { chain ->
+                chain.proceed(
+                    chain.request().newBuilder()
+                        .header("User-Agent", HttpPageFetcher.USER_AGENT)
+                        .build()
+                )
+            }
+            .build()
 
     override suspend fun search(query: SearchQuery): SearchResponse = withContext(io) {
         if (query.text.isBlank()) return@withContext SearchResponse.Failure("Empty search query.")

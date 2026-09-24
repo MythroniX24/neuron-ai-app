@@ -170,7 +170,7 @@ object BrowserTools {
         override suspend fun execute(argumentsJson: String): ToolResult {
             gate(env, permissions)?.let { return it }
             val session = browserManager.sessionFor(contextKey)
-            val page = session.page.value
+            val page = kotlinx.coroutines.flow.firstOrNull(session.page)
                 ?: return ToolResult.Failure("No page is loaded — use browser.open first.")
             return ToolResult.Success(fence(page.links.take(60).joinToString("\n")))
         }

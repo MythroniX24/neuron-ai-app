@@ -32,7 +32,7 @@ import android.webkit.WebResourceResponse
  */
 @SuppressLint("SetJavaScriptEnabled")
 class WebViewBrowserSession(
-    context: Context,
+    private val context: Context,
     private val dispatchers: DispatcherProvider,
     override val sessionId: String = "browser-" + UUID.randomUUID().toString().take(8)
 ) : BrowserSession {
@@ -74,6 +74,7 @@ class WebViewBrowserSession(
                         // everything else (trackers/ads) is denied.
                         val reqHost = request?.url?.host
                         val pageHost = view?.url?.host
+                            ?: webView?.url?.host
                         return if (reqHost != null && pageHost != null && reqHost != pageHost) {
                             WebResourceResponse("text/plain", "utf-8", java.io.ByteArrayInputStream(ByteArray(0)))
                         } else null

@@ -80,6 +80,7 @@ class ChatContextEngine(
     private fun applyBudget(messages: List<ChatMessage>): List<ChatMessage> {
         var total = messages.sumOf { it.content.length }
         if (total <= MAX_CONTEXT_CHARS) return messages
+        val trimmed = messages.toMutableList()
         var index = 0
         while (total > MAX_CONTEXT_CHARS && index < messages.size) {
             val message = messages[index]
@@ -87,10 +88,10 @@ class ChatContextEngine(
             val content = message.content
             val reduced = if (content.length > 400) content.take(400) + " …[trimmed]" else content
             total -= content.length - reduced.length
-            messages[index] = message.copy(content = reduced)
+            trimmed[index] = message.copy(content = reduced)
             index++
         }
-        return messages
+        return trimmed
     }
 
     companion object {
@@ -141,7 +142,7 @@ fun buildChatContext(messages: List<Message>): List<ChatMessage> {
     val prior = messages.subList(0, maxOf(0, end - 1))
     return prior
         .filter { it.role != Message.Role.TOOL && it.metadata?.isError != true }
-        .takeLast(MAX_HISTORY_TURNS)
+        .takeLast(MAX_HISTORY_TURNS_LEGACY)
         .map { msg ->
             ChatMessage(
                 role = toWireRole(msg.role),
@@ -149,4 +150,31 @@ fun buildChatContext(messages: List<Message>): List<ChatMessage> {
                 attachments = msg.attachments
             )
         }
+}
+
+/** The Milestone-1/2 cap (30 turns), kept for the legacy wrapper. */
+private const val MAX_HISTORY_TURNS_LEGACY = 30
+
+/**
+ * Derives a short conversation title (2–3 words) from the first user
+ * message — the pattern every mainstream chat app uses. Deterministic and
+ * offline: no extra model round-trip.
+ */
+fun deriveChatTitle(firstMessage: String): String {
+    val cleaned = firstMessage
+        .replace(Regex("```[\\s\\S]*?```"), " ")     // fenced code blocks
+        .replace(Regex("https?://\\S+"), " ")        // URLs
+        .replace(Regex("[#*_`>\\[\\]()[\"']!]+"), " ") // markdown noise
+        .split(Regex("\\s+"))
+        .filter { it.isNotBlank() }
+        .filter { token -> token.any { it.isLetter() } } // drop bare numbers/symbols
+        .dropWhile { it.length < 2 && it != it.uppercase() } // skip stray "a", "I" keeps
+        .take(3)
+        .joinToString(" ")
+        .trimEnd(',', '.', ';', ':', '!', '?', '-', '…')
+
+    if (cleaned.isBlank()) return "New chat"
+
+    val titled = cleaned.replaceFirstChar { it.uppercaseChar() }
+    return if (titled.length > 30) titled.take(30).trimEnd() + "…" else titled
 }
