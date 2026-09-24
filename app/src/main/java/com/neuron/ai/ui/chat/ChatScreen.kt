@@ -128,9 +128,10 @@ fun ChatScreen(
 
     val isStreaming = generation is GenerationState.Streaming
 
-    // ---- Terminal panel state -------------------------------------------------------
+    // ---- Terminal + Browser panel state -------------------------------------------
     val workspaces by viewModel.workspaceList.collectAsStateWithLifecycle(initialValue = emptyList())
     val terminalEnabled by viewModel.terminalEnabled.collectAsStateWithLifecycle()
+    val browserEnabled by viewModel.browserEnabled.collectAsStateWithLifecycle()
     val activeWorkspaceId = conversation?.workspaceId
     var showTerminal by remember { mutableStateOf(false) }
     var terminalSession by remember { mutableStateOf<com.neuron.ai.data.terminal.TerminalSession?>(null) }
@@ -351,6 +352,8 @@ fun ChatScreen(
             onFiles = { filePicker.launch(arrayOf("*/*")) },
             terminalEnabled = terminalEnabled,
             onToggleTerminal = { viewModel.setTerminalEnabled(it) },
+            browserEnabled = browserEnabled,
+            onToggleBrowser = { viewModel.setBrowserEnabled(it) },
             workspaces = workspaces,
             activeWorkspaceId = activeWorkspaceId,
             onAttachWorkspace = { viewModel.attachWorkspace(it) },

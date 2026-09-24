@@ -50,6 +50,9 @@ interface ConversationDao {
     @Query("UPDATE conversations SET terminalEnabled = :enabled WHERE id = :id")
     suspend fun setTerminalEnabled(id: String, enabled: Boolean)
 
+    @Query("UPDATE conversations SET browserEnabled = :enabled WHERE id = :id")
+    suspend fun setBrowserEnabled(id: String, enabled: Boolean)
+
     @Query("DELETE FROM conversations WHERE id = :id")
     suspend fun deleteConversation(id: String)    @Query("SELECT DISTINCT conversations.* FROM conversations " +
             "JOIN messages ON messages.conversationId = conversations.id " +

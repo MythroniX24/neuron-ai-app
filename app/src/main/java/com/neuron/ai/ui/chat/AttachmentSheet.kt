@@ -17,6 +17,7 @@ import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.Photo
 import androidx.compose.material.icons.outlined.PhotoCamera
+import androidx.compose.material.icons.outlined.Public
 import androidx.compose.material.icons.outlined.Terminal
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -45,6 +46,8 @@ fun AttachmentSheet(
     onFiles: () -> Unit,
     terminalEnabled: Boolean,
     onToggleTerminal: (Boolean) -> Unit,
+    browserEnabled: Boolean,
+    onToggleBrowser: (Boolean) -> Unit,
     workspaces: List<com.neuron.ai.core.workspace.Workspace>,
     activeWorkspaceId: String?,
     onAttachWorkspace: (String) -> Unit,
@@ -136,6 +139,35 @@ fun AttachmentSheet(
             androidx.compose.material3.Switch(
                 checked = terminalEnabled,
                 onCheckedChange = onToggleTerminal
+            )
+        }
+
+        Spacer(Modifier.height(Spacing.sm))
+
+        // ---- Browser capability toggle (per conversation, default OFF) ----------
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = Spacing.lg)
+        ) {
+            Icon(
+                Icons.Outlined.Public,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(22.dp)
+            )
+            Column(Modifier.weight(1f).padding(horizontal = Spacing.md)) {
+                Text("Browser access", style = MaterialTheme.typography.bodyMedium)
+                Text(
+                    "Let AI open and read web pages in this chat",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            androidx.compose.material3.Switch(
+                checked = browserEnabled,
+                onCheckedChange = onToggleBrowser
             )
         }
 

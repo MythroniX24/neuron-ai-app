@@ -85,6 +85,9 @@ class RoomConversationRepository(
     override suspend fun setConversationTerminal(conversationId: String, enabled: Boolean) =
         withContext(io) { dao.setTerminalEnabled(conversationId, enabled) }
 
+    override suspend fun setConversationBrowser(conversationId: String, enabled: Boolean) =
+        withContext(io) { dao.setBrowserEnabled(conversationId, enabled) }
+
     override suspend fun setConversationModel(
         conversationId: String,
         providerId: String?,

@@ -49,7 +49,9 @@ data class Conversation(
     /** Workspace attached to this conversation (null = none). */
     val workspaceId: String? = null,
     /** Per-conversation AI Terminal capability — OFF by default. */
-    val terminalEnabled: Boolean = false
+    val terminalEnabled: Boolean = false,
+    /** Per-conversation AI Browser capability — OFF by default (Milestone 3). */
+    val browserEnabled: Boolean = false
 )
 
 /** A message inside a [Conversation]. */
@@ -95,6 +97,9 @@ interface ConversationRepository {
 
     /** Enables/disables the AI Terminal capability for this conversation. */
     suspend fun setConversationTerminal(conversationId: String, enabled: Boolean)
+
+    /** Enables/disables the AI Browser capability for this conversation. */
+    suspend fun setConversationBrowser(conversationId: String, enabled: Boolean)
 
     suspend fun appendMessage(
         conversationId: String,

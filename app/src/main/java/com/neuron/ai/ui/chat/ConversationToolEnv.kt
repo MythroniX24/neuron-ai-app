@@ -8,9 +8,9 @@ import com.neuron.ai.data.workspace.WorkspaceManagerImpl
 
 /**
  * Conversation-scoped [WorkspaceToolEnv]: resolves the conversation's
- * attached workspace and Terminal capability at execution time. Sessions and
- * capability state never leak across conversations — every lookup is keyed
- * by THIS conversation id.
+ * attached workspace and Terminal/Browser capabilities at execution time.
+ * Sessions and capability state never leak across conversations — every
+ * lookup is keyed by THIS conversation id.
  */
 class ConversationToolEnv(
     private val conversationId: String,
@@ -27,6 +27,9 @@ class ConversationToolEnv(
 
     override suspend fun terminalEnabled(): Boolean =
         conversations.getConversation(conversationId)?.terminalEnabled ?: false
+
+    override suspend fun browserEnabled(): Boolean =
+        conversations.getConversation(conversationId)?.browserEnabled ?: false
 
     override suspend fun terminalSessionKey(): String = conversationId
 }

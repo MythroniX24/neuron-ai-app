@@ -296,6 +296,48 @@ coding chat, no terminal chat, no separate runtimes.
   conversation id; two chats sharing a workspace share files only — never
   session state.
 
+## Milestone 3 — Advanced Agent Platform
+
+All capabilities below are TOOLS of the one normal chat's AgentRuntime — no
+Browser Chat, no Web Search Chat, no Memory Chat.
+
+- **Web search:** `core/web/SearchProvider` abstraction with a real
+  DuckDuckGo HTML adapter (`data/web/DuckDuckGoSearchProvider`) — no paid API,
+  no self-hosted backend; queries leave the user's own device. Bounded reads
+  (≤400 KB markup), redirect unwrapping, URL deduplication, graceful failure
+  on CAPTCHA/block pages. `web.search` runs the pipeline: dedup → rank →
+  select → open top pages (via `HttpPageFetcher`) → cross-check. Sources are
+  returned with the result as `[n]` indices and persisted as TOOL messages —
+  citations always stay attached to the response that used them.
+- **Browser agent:** `core/integration/BrowserSession` over a REAL embedded
+  WebView (`data/browser/WebViewBrowserSession`). Tools: `browser.open`,
+  `browser.read`, `browser.find`, `browser.links`, and side-effect tools
+  `browser.click` / `browser.type` / `browser.select`. Read-only tools need
+  the per-conversation Browser toggle (+ → Browser, OFF by default);
+  side-effect tools ALWAYS raise an explicit permission request on top — the
+  agent can never act on an external site silently.
+- **Prompt-injection defense:** every page-derived string is wrapped in
+  `<<<UNTRUSTED_WEB_DATA>>>` fences and the system prompt instructs the model
+  to treat fenced content as data, never instructions. The JS bridge only
+  extracts text/links; page scripts can never call tools or alter state.
+- **Multimodal:** `ModelCapabilities` estimates TEXT/VISION/TOOL_CALLING from
+  model-id patterns plus the provider's config flags. `validateInput`
+  rejects image attachments for non-vision models BEFORE the request — with
+  a model-selection hint — so unsupported input is never sent blindly.
+- **Memory:** `core/memory/MemoryStore` (Room table + DataStore master
+  switch) with types USER_PREFERENCE (global), PROJECT (per workspace),
+  TASK/CONVERSATION (reserved). Only explicit `memory.remember` writes
+  persist — nothing is stored automatically. `MemorySecretFilter` rejects
+  API keys, tokens, passwords and JWTs outright (no masking). Memory tools
+  fix the scope from the conversation context — the model can never choose
+  or read another scope. Settings → Memory offers inspect/delete/clear-all
+  and the enable switch.
+- **Context engine:** `ChatContextEngine` builds model input under priority
+  (current request → recent turns → compressed tool results → memory block)
+  with a character budget that trims oldest-first and a tail guard. Tool
+  rows are COMPRESSED (key lines: exit=, [err], SOURCE, TITLE/URL), not
+  dropped. Relevant memory is injected as a capped system block.
+
 ## Key technical decisions
 
 | Decision                          | Reasoning                                                        |

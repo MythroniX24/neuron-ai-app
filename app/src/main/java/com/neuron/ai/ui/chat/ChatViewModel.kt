@@ -73,7 +73,10 @@ class ChatViewModel(
     private val importAttachmentFn: suspend (android.net.Uri) -> com.neuron.ai.core.conversation.Attachment?,
     private val importCaptureFn: suspend (java.io.File) -> com.neuron.ai.core.conversation.Attachment?,
     private val workspaces: com.neuron.ai.data.workspace.WorkspaceManagerImpl,
-    private val terminalManager: com.neuron.ai.data.terminal.TerminalManager
+    private val terminalManager: com.neuron.ai.data.terminal.TerminalManager,
+    /** Milestone 3: priority context builder with memory injection (no-op by default in previews/tests). */
+    private val contextEngine: com.neuron.ai.ui.chat.ChatContextEngine =
+        com.neuron.ai.ui.chat.ChatContextEngine()
 ) : ViewModel() {
 
     val messages: StateFlow<List<Message>> =
@@ -206,6 +209,17 @@ class ChatViewModel(
         }
     }
 
+    /** Per-conversation Browser toggle (+ → Browser) — Milestone 3. */
+    fun setBrowserEnabled(enabled: Boolean) {
+        viewModelScope.launch(dispatchers.io) {
+            ensureConversation()
+            conversations.setConversationBrowser(conversationId, enabled)
+            _conversation.value = conversations.getConversation(conversationId)
+        }
+    }
+
+    /** Terminal session for the panel; bound to this conversation. */
+
     /** Terminal session for the panel; bound to this conversation. */
     suspend fun terminalSession(): com.neuron.ai.data.terminal.TerminalSession {
         val wsId: String? = _conversation.value?.workspaceId
@@ -233,13 +247,13 @@ class ChatViewModel(
     }
 
     /**
-     * Builds the multi-turn context for the model: everything before the
-     * current user message, oldest first. TOOL rows are skipped — their
-     * assistant tool-call parents are not persisted, and dangling tool rows
-     * are rejected by several providers. Capped to keep requests sane.
+     * Builds the multi-turn context for the model via the Milestone-3 context
+     * engine: prioritized sources under a character budget — recent history
+     * kept whole, TOOL rows COMPRESSED (not dropped), relevant memory
+     * injected as a SYSTEM block, oldest content trimmed first.
      */
     private suspend fun buildHistory(): List<ChatMessage> =
-        buildChatContext(conversations.messagesOf(conversationId).first())
+        contextEngine.build(conversations.messagesOf(conversationId).first())
 
     fun setModel(providerId: String, modelId: String) {
         viewModelScope.launch(dispatchers.io) {
@@ -430,6 +444,25 @@ class ChatViewModel(
             return
         }
 
+        // Milestone 3 multimodal gate: reject inputs the model cannot accept
+        // BEFORE hitting the provider — never send unsupported input blindly.
+        val capabilityError = com.neuron.ai.data.provider.ModelCapabilities.validateInput(
+            model = com.neuron.ai.data.provider.ModelCapabilities.estimate(
+                id = modelId,
+                visionEnabled = config.visionEnabled,
+                toolsEnabled = config.toolsEnabled
+            ),
+            attachments = lastUserAttachments
+        )
+        if (capabilityError != null) {
+            taskId?.let { tid ->
+                tasks.updateStatus(tid, Task.Status.FAILED)
+                tasks.reportError(tid, capabilityError)
+            }
+            _generation.value = GenerationState.Failed(NeuronError.Provider(capabilityError))
+            return
+        }
+
         // Mirror the turn onto the task system.
         taskId?.let { tasks.updateStatus(it, Task.Status.RUNNING) }
 
@@ -443,7 +476,11 @@ class ChatViewModel(
 
         val agent = agentFactory(
             provider,
-            Model(id = modelId, displayName = modelId),
+            com.neuron.ai.data.provider.ModelCapabilities.estimate(
+                id = modelId,
+                visionEnabled = config.visionEnabled,
+                toolsEnabled = config.toolsEnabled
+            ),
             if (config.toolsEnabled) toolIdsProvider() else emptySet()
         )
 

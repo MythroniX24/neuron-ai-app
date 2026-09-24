@@ -45,6 +45,8 @@ fun SettingsScreen(
     val viewModel: SettingsViewModel =
         viewModel(factory = SettingsViewModelFactory(container))
     val themeMode by viewModel.themeMode.collectAsStateWithLifecycle()
+    val memoryEntries by viewModel.memoryEntries.collectAsStateWithLifecycle()
+    val memoryEnabled by viewModel.memoryEnabled.collectAsStateWithLifecycle()
 
     Column(
         modifier = Modifier
@@ -114,6 +116,63 @@ fun SettingsScreen(
 
             HorizontalDivider(modifier = Modifier.padding(vertical = Spacing.lg))
 
+            // ---- Memory (Milestone 3): inspect, disable, delete ----------------
+            Text(
+                text = "Memory",
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = Spacing.sm)
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("Remember saved facts", style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        "Nothing is saved automatically. Secrets are never stored.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                androidx.compose.material3.Switch(
+                    checked = memoryEnabled,
+                    onCheckedChange = { viewModel.setMemoryEnabled(it) }
+                )
+            }
+            if (memoryEntries.isNotEmpty()) {
+                memoryEntries.take(20).forEach { entry ->
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = Spacing.xs)
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                entry.key,
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                            Text(
+                                entry.value,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 2
+                            )
+                        }
+                        androidx.compose.material3.TextButton(onClick = {
+                            viewModel.deleteMemory(entry.id)
+                        }) { Text("Delete") }
+                    }
+                }
+                androidx.compose.material3.TextButton(onClick = {
+                    viewModel.clearAllMemory()
+                }) { Text("Clear all memory", color = MaterialTheme.colorScheme.error) }
+            }
+
+            HorizontalDivider(modifier = Modifier.padding(vertical = Spacing.lg))
+
             Text(
                 text = "AI Providers",
                 style = MaterialTheme.typography.titleMedium,
@@ -136,7 +195,7 @@ fun SettingsScreen(
                         style = MaterialTheme.typography.titleMedium
                     )
                     Text(
-                        text = "Version 0.2.0 — Phase 1",
+                        text = "Version 0.3.0 — Milestone 3",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

@@ -17,7 +17,9 @@ data class ConversationEntity(
     /** Workspace attached to this conversation (null = none). */
     val workspaceId: String? = null,
     /** Per-conversation Terminal capability (AI terminal access), default OFF. */
-    val terminalEnabled: Boolean = false
+    val terminalEnabled: Boolean = false,
+    /** Per-conversation AI Browser capability, default OFF (Milestone 3). */
+    val browserEnabled: Boolean = false
 )
 
 @Entity(
@@ -50,6 +52,22 @@ data class TaskEntity(
     val completedSteps: Int?,
     val totalSteps: Int?,
     val error: String?,
+    val createdAtEpochMs: Long,
+    val updatedAtEpochMs: Long
+)
+
+/**
+ * Persisted memory entries (Milestone 3). Secret-filtered at write time;
+ * PROJECT entries are scoped per workspace, CONVERSATION per chat — no
+ * cross-scope leakage. Values are user-inspectable and deletable.
+ */
+@Entity(tableName = "memory", indices = [Index("type", "scopeId")])
+data class MemoryEntryEntity(
+    @PrimaryKey val id: String,
+    val type: String,
+    val scopeId: String,
+    val key: String,
+    val value: String,
     val createdAtEpochMs: Long,
     val updatedAtEpochMs: Long
 )
