@@ -33,12 +33,16 @@ object CommandGuard {
 
 /**
  * AI Terminal tool — uses the SAME TerminalManager/session as the user's
- * terminal panel. Gated by the per-conversation Terminal capability: when
- * disabled the tool fails with guidance instead of executing.
+ * terminal panel. Gated by the per-conversation Terminal capability:
+ * - ENABLED  → the user's toggle IS the standing consent; commands run
+ *   directly without another prompt (guard checks still apply).
+ * - DISABLED → the tool raises a real permission request (popup); only an
+ *   explicit grant executes the command. It is never silently enabled.
  */
 class TerminalTool(
     private val env: WorkspaceToolEnv,
-    private val terminalManager: TerminalManager
+    private val terminalManager: TerminalManager,
+    private val permissions: com.neuron.ai.core.permissions.PermissionManager
 ) : Tool {
 
     override val id = "terminal.run"
@@ -46,7 +50,10 @@ class TerminalTool(
     override val description =
         "Executes a shell command in the conversation's terminal session " +
             "(workspace working directory). Requires Terminal capability enabled."
-    override val requiredCapabilities = setOf(Capability.TERMINAL, Capability.EXECUTE)
+    // Permission flow is handled INSIDE execute() so the per-conversation
+    // toggle can act as standing consent; an empty set means the executor
+    // never prompts ahead of the capability check.
+    override val requiredCapabilities = emptySet<com.neuron.ai.core.permissions.Capability>()
     override val riskLevel = RiskLevel.ELEVATED
     override val timeoutMs = 180_000L
     override val parametersSchemaJson =
@@ -78,11 +85,22 @@ class TerminalTool(
                     "Run it manually if you truly intend it."
             )
         }
-        // Capability gate FIRST — never silently enabled.
+        // Capability gate: the per-conversation toggle is the user's standing
+        // consent (no second prompt). When OFF, ask the user now — a popup,
+        // never a silent enable and never a silent execution.
         if (!env.terminalEnabled()) {
-            return ToolResult.Failure(
-                "Terminal access is disabled for this chat. The user must enable it via + → Terminal."
+            val granted = permissions.request(
+                capability = Capability.TERMINAL,
+                reason = "Terminal access is off for this chat. Allow \"$title\" to run this command once?",
+                requestedBy = title,
+                riskLevel = RiskLevel.ELEVATED
             )
+            if (!granted) {
+                return ToolResult.Failure(
+                    "Terminal access was not granted. Tell the user to enable it via + → Terminal " +
+                        "if they want terminal commands in this chat."
+                )
+            }
         }
         val contextKey = env.terminalSessionKey()
             ?: return ToolResult.Failure("No conversation context for a terminal session.")
@@ -257,14 +275,16 @@ object CodingTools {
     }
 
     // ---- RunBuild / RunTests (via shared terminal) ---------------------------------------------
-    class RunBuild(private val env: WorkspaceToolEnv, terminalManager: TerminalManager) : Tool {
-        private val terminal = TerminalTool(env, terminalManager)
+    // Like terminal.run, these rely on the per-conversation Terminal toggle as
+    // standing consent; with the toggle off, runCommand's popup flow asks.
+    class RunBuild(private val env: WorkspaceToolEnv, terminalManager: TerminalManager, permissions: com.neuron.ai.core.permissions.PermissionManager) : Tool {
+        private val terminal = TerminalTool(env, terminalManager, permissions)
 
         override val id = "code.build"
         override val title = "Building project"
         override val description =
             "Detects the project type and runs its build in the workspace terminal."
-        override val requiredCapabilities = setOf(Capability.TERMINAL, Capability.EXECUTE)
+        override val requiredCapabilities = emptySet<Capability>()
         override val riskLevel = RiskLevel.ELEVATED
         override val timeoutMs = 300_000L
         override val parametersSchemaJson = """{"type":"object","properties":{}}"""
@@ -280,14 +300,14 @@ object CodingTools {
         }
     }
 
-    class RunTests(private val env: WorkspaceToolEnv, terminalManager: TerminalManager) : Tool {
-        private val terminal = TerminalTool(env, terminalManager)
+    class RunTests(private val env: WorkspaceToolEnv, terminalManager: TerminalManager, permissions: com.neuron.ai.core.permissions.PermissionManager) : Tool {
+        private val terminal = TerminalTool(env, terminalManager, permissions)
 
         override val id = "code.test"
         override val title = "Running tests"
         override val description =
             "Detects the project type and runs its test suite in the workspace terminal."
-        override val requiredCapabilities = setOf(Capability.TERMINAL, Capability.EXECUTE)
+        override val requiredCapabilities = emptySet<Capability>()
         override val riskLevel = RiskLevel.ELEVATED
         override val timeoutMs = 300_000L
         override val parametersSchemaJson = """{"type":"object","properties":{}}"""

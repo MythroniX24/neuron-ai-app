@@ -1,5 +1,6 @@
 package com.neuron.ai.ui.chat
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -8,6 +9,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material.icons.Icons
@@ -49,7 +51,25 @@ fun AttachmentSheet(
     onDetachWorkspace: () -> Unit,
     onCreateWorkspace: () -> Unit
 ) {
-    ModalBottomSheet(onDismissRequest = onDismiss) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        // Tighter corners than the M3 default — less bubbly, more premium.
+        shape = RoundedCornerShape(topStart = 14.dp, topEnd = 14.dp),
+        dragHandle = null
+    ) {
+        // Custom slim drag handle (M3 default replaced for tighter corners).
+        androidx.compose.foundation.layout.Box(
+            Modifier
+                .padding(top = 10.dp)
+                .width(36.dp)
+                .height(4.dp)
+                .background(
+                    MaterialTheme.colorScheme.outlineVariant,
+                    RoundedCornerShape(2.dp)
+                )
+                .align(Alignment.CenterHorizontally)
+        )
+        Spacer(Modifier.height(Spacing.md))
         Text(
             text = "Add to chat",
             style = MaterialTheme.typography.titleSmall,
@@ -183,7 +203,7 @@ private fun SheetOption(
 ) {
     Surface(
         onClick = onClick,
-        shape = RoundedCornerShape(Radius.lg),
+        shape = RoundedCornerShape(10.dp),
         color = MaterialTheme.colorScheme.surfaceVariant,
         modifier = Modifier.size(width = 96.dp, height = 84.dp)
     ) {

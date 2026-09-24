@@ -277,10 +277,12 @@ coding chat, no terminal chat, no separate runtimes.
   execution settles with a bounded join — an orphaned child can never hang
   `execute()`; trailing output after a kill may be truncated.
 - **Terminal capability:** OFF by default per conversation
-  (`Conversation.terminalEnabled`). Toggled via + → Terminal. When disabled,
-  `terminal.run` refuses with guidance — the agent can never silently enable
-  it. Enabling still routes every command through the permission system
-  (EXECUTE + TERMINAL, ELEVATED risk).
+  (`Conversation.terminalEnabled`). Toggled via + → Terminal. The toggle IS
+  the user's standing consent: with Terminal ON, AI commands run directly
+  (catastrophic-command guard still applies) — no repeated prompt. With
+  Terminal OFF, `terminal.run`/`code.build`/`code.test` raise a real
+  permission dialog; only an explicit grant executes. The agent can never
+  silently enable it or silently run a command.
 - **Terminal panel:** draggable bottom sheet over the chat (half-screen
   default, drag to expand/dismiss), monospace output with stdout/stderr
   distinction, history, clear, copy, stop, keyboard-aware input. It is a
