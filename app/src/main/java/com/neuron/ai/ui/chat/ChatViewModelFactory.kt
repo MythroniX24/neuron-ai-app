@@ -143,6 +143,7 @@ class ChatViewModelFactory(
             importCaptureFn = { file -> container.attachmentStore.importCapture(file) },
             workspaces = container.workspaceManager,
             terminalManager = container.terminalManager,
+            browserManager = container.browserManager,
             contextEngine = contextEngine
         ) as T
     }

@@ -74,6 +74,8 @@ class ChatViewModel(
     private val importCaptureFn: suspend (java.io.File) -> com.neuron.ai.core.conversation.Attachment?,
     private val workspaces: com.neuron.ai.data.workspace.WorkspaceManagerImpl,
     private val terminalManager: com.neuron.ai.data.terminal.TerminalManager,
+    /** Milestone 3: this chat's browser session is closed with the ViewModel. */
+    private val browserManager: com.neuron.ai.core.integration.BrowserManager,
     /** Milestone 3: priority context builder with memory injection (no-op by default in previews/tests). */
     private val contextEngine: com.neuron.ai.ui.chat.ChatContextEngine =
         com.neuron.ai.ui.chat.ChatContextEngine()
@@ -637,6 +639,8 @@ class ChatViewModel(
         if (_generation.value is GenerationState.Streaming || _generation.value is GenerationState.Failed) {
             job?.cancel()
         }
+        // No WebView leaks: the chat's browser session dies with its ViewModel.
+        runCatching { browserManager.closeSession(conversationId) }
         currentTaskId?.let { id ->
             viewModelScope.launch(dispatchers.io) {
                 val task = tasks.tasks.first().find { it.id == id }
