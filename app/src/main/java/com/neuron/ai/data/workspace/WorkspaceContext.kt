@@ -94,7 +94,21 @@ class WorkspaceContext(
     suspend fun writeText(path: String, content: String): Boolean = withWriteLock {
         val file = resolve(path) ?: return@withWriteLock false
         file.parentFile?.mkdirs()
-        runCatching { file.writeText(content) }.isSuccess
+        runCatching {
+            // ATOMIC write: truncate-then-write would let a concurrent reader
+            // observe an empty/partial file. Write to a sibling temp file and
+            // rename — readers always see the old or the new COMPLETE content.
+            val tmp = File(file.parentFile, file.name + ".tmp-" + System.nanoTime())
+            tmp.writeText(content)
+            if (tmp.renameTo(file)) {
+                true
+            } else {
+                // Fallback (some filesystems refuse overwriting rename).
+                val replaced = (!file.exists() || file.delete()) && tmp.renameTo(file)
+                if (!replaced) tmp.delete()
+                replaced
+            }
+        }.getOrDefault(false)
     }
 
     suspend fun mkdirs(path: String): Boolean = withWriteLock {
