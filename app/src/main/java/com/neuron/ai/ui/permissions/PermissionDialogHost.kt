@@ -1,10 +1,11 @@
 package com.neuron.ai.ui.permissions
 
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -12,12 +13,15 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.neuron.ai.core.agent.RiskLevel
 import com.neuron.ai.core.permissions.Capability
 import com.neuron.ai.core.permissions.DecisionScope
 import com.neuron.ai.core.permissions.PermissionManager
 import com.neuron.ai.core.permissions.PermissionRequest
+import com.neuron.ai.ui.theme.Radius
+import com.neuron.ai.ui.theme.Spacing
 import kotlinx.coroutines.launch
 
 /** UI-facing labels for capabilities. */
@@ -36,8 +40,11 @@ object PermissionUiMapper {
 
 /**
  * Observes [PermissionManager.pendingRequests] and renders one decision dialog
- * at a time. DESTRUCTIVE requests offer no "remember" options — they must be
- * confirmed every single time.
+ * at a time. Custom dialog surface with FULL-WIDTH STACKED buttons — the old
+ * AlertDialog slot layout made the options overlap on small screens.
+ *
+ * DESTRUCTIVE requests offer no "remember" options — they must be confirmed
+ * every single time.
  */
 @Composable
 fun PermissionDialogHost(
@@ -53,24 +60,32 @@ fun PermissionDialogHost(
         val destructive = request.riskLevel == RiskLevel.DESTRUCTIVE ||
             request.capability == Capability.FILESYSTEM_DELETE
 
-        AlertDialog(
-            onDismissRequest = { /* stay until decided */ },
-            title = {
-                Text(if (destructive) "Dangerous action" else "Permission needed")
-            },
-            text = {
-                Column {
+        Dialog(onDismissRequest = { /* stay until decided */ }) {
+            Surface(
+                shape = MaterialTheme.shapes.extraLarge,
+                color = MaterialTheme.colorScheme.surface,
+                tonalElevation = 6.dp,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(Modifier.padding(Spacing.lg)) {
+                    Text(
+                        text = if (destructive) "Dangerous action" else "Permission needed",
+                        style = MaterialTheme.typography.titleLarge,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
                     Text(
                         text = "${request.requestedBy} wants to use " +
                             "${PermissionUiMapper.capabilityLabel(request.capability)}.",
-                        style = MaterialTheme.typography.bodyMedium
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = Spacing.sm)
                     )
                     if (request.reason.isNotBlank()) {
                         Text(
                             text = request.reason,
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(top = 4.dp)
+                            modifier = Modifier.padding(top = Spacing.xs)
                         )
                     }
                     if (destructive) {
@@ -78,59 +93,76 @@ fun PermissionDialogHost(
                             text = "This operation cannot be undone. It will always ask for confirmation.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.error,
-                            modifier = Modifier.padding(top = 8.dp)
+                            modifier = Modifier.padding(top = Spacing.sm)
                         )
                     }
-                }
-            },
-            confirmButton = {
-                Column {
-                    TextButton(
-                        onClick = {
+
+                    // Stacked, full-width actions — one per line, never overlapping.
+                    Column(
+                        verticalArrangement = Arrangement.spacedBy(2.dp),
+                        modifier = Modifier.padding(top = Spacing.md)
+                    ) {
+                        DialogAction(
+                            label = if (destructive) "Confirm once" else "Allow once",
+                            primary = true
+                        ) {
                             scope.launch {
                                 permissionManager.decide(request.id, true, DecisionScope.ONCE)
                             }
                         }
-                    ) { Text(if (destructive) "Confirm once" else "Allow once") }
-                    if (!destructive) {
-                        TextButton(
-                            onClick = {
+                        if (!destructive) {
+                            DialogAction(label = "Allow for this session") {
                                 scope.launch {
                                     permissionManager.decide(request.id, true, DecisionScope.SESSION)
                                 }
                             }
-                        ) { Text("Allow for session") }
-                        TextButton(
-                            onClick = {
+                            DialogAction(label = "Always allow") {
                                 scope.launch {
                                     permissionManager.decide(request.id, true, DecisionScope.WORKSPACE)
                                 }
                             }
-                        ) { Text("Always allow") }
-                    }
-                }
-            },
-            dismissButton = {
-                Column {
-                    TextButton(
-                        onClick = {
-                            scope.launch {
-                                permissionManager.decide(request.id, false, DecisionScope.ONCE)
+                            DialogAction(label = "Deny once") {
+                                scope.launch {
+                                    permissionManager.decide(request.id, false, DecisionScope.ONCE)
+                                }
                             }
-                        }
-                    ) { Text("Deny once") }
-                    if (!destructive) {
-                        TextButton(
-                            onClick = {
+                            DialogAction(label = "Always deny", danger = true) {
                                 scope.launch {
                                     permissionManager.decide(request.id, false, DecisionScope.ALWAYS)
                                 }
                             }
-                        ) {
-                            Text("Always deny", color = MaterialTheme.colorScheme.error)
+                        } else {
+                            DialogAction(label = "Cancel", danger = true) {
+                                scope.launch {
+                                    permissionManager.decide(request.id, false, DecisionScope.ONCE)
+                                }
+                            }
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DialogAction(
+    label: String,
+    primary: Boolean = false,
+    danger: Boolean = false,
+    onClick: () -> Unit
+) {
+    TextButton(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelLarge,
+            color = when {
+                danger -> MaterialTheme.colorScheme.error
+                primary -> MaterialTheme.colorScheme.primary
+                else -> MaterialTheme.colorScheme.onSurface
             }
         )
     }

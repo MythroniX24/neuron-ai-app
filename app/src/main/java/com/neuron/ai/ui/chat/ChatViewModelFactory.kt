@@ -42,13 +42,19 @@ class ChatViewModelFactory(
             container.toolRegistry.register(com.neuron.ai.data.tool.CodingTools.ApplyPatch(toolEnv))
             container.toolRegistry.register(com.neuron.ai.data.tool.CodingTools.Diff(toolEnv))
             container.toolRegistry.register(
-                com.neuron.ai.data.tool.CodingTools.RunBuild(toolEnv, container.terminalManager)
+                com.neuron.ai.data.tool.CodingTools.RunBuild(
+                    toolEnv, container.terminalManager, container.permissionManager
+                )
             )
             container.toolRegistry.register(
-                com.neuron.ai.data.tool.CodingTools.RunTests(toolEnv, container.terminalManager)
+                com.neuron.ai.data.tool.CodingTools.RunTests(
+                    toolEnv, container.terminalManager, container.permissionManager
+                )
             )
             container.toolRegistry.register(
-                com.neuron.ai.data.tool.TerminalTool(toolEnv, container.terminalManager)
+                com.neuron.ai.data.tool.TerminalTool(
+                    toolEnv, container.terminalManager, container.permissionManager
+                )
             )
         }
 

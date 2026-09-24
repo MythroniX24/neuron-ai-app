@@ -4,6 +4,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -390,13 +391,20 @@ private fun ChatTopBar(
     onOpenTerminal: () -> Unit
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
+    // Window-space bounds of the title block — the dropdown anchors to its
+    // bottom edge so it opens EXACTLY under the header text.
+    var titleBounds by remember {
+        mutableStateOf<androidx.compose.ui.geometry.Rect?>(null)
+    }
 
     TopAppBar(
         title = {
             Column(
-                modifier = Modifier.clickable(enabled = modelOptions.isNotEmpty()) {
-                    menuExpanded = true
-                }
+                modifier = Modifier
+                    .onGloballyPositioned { titleBounds = it.boundsInWindow() }
+                    .clickable(enabled = modelOptions.isNotEmpty()) {
+                        menuExpanded = true
+                    }
             ) {
                 Text(
                     text = modelName ?: "Select a model",
@@ -445,14 +453,16 @@ private fun ChatTopBar(
     )
 
     if (menuExpanded) {
-        // Custom dropdown card — anchored so its top-left sits directly under
-        // the title block ("header ke niche"), NOT a generic menu floating
-        // over the composer. Own surface, own shapes, own scrolling.
-        androidx.compose.ui.window.Popup(
-            alignment = Alignment.BottomStart,
-            onDismissRequest = { menuExpanded = false },
-            properties = androidx.compose.ui.window.PopupProperties(focusable = true)
-        ) {
+        // Custom dropdown card — anchored to the measured title block so its
+        // top edge sits immediately below the header ("header ke niche"),
+        // never near the composer.
+        val bounds = titleBounds
+        if (bounds != null) {
+            androidx.compose.ui.window.Popup(
+                popupPositionProvider = remember(bounds) { TitleDropdownProvider(bounds) },
+                onDismissRequest = { menuExpanded = false },
+                properties = androidx.compose.ui.window.PopupProperties(focusable = true)
+            ) {
             Surface(
                 shape = RoundedCornerShape(16.dp),
                 color = MaterialTheme.colorScheme.surface,
@@ -462,7 +472,6 @@ private fun ChatTopBar(
                     1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.4f)
                 ),
                 modifier = Modifier
-                    .padding(start = Spacing.xl, top = 2.dp)
                     .widthIn(min = 240.dp, max = 320.dp)
             ) {
                 Column(Modifier.padding(vertical = Spacing.sm)) {
@@ -529,7 +538,28 @@ private fun ChatTopBar(
                     }
                 }
             }
-        }
+            } // Popup content
+        } // if (bounds != null)
+    } // if (menuExpanded)
+}
+
+/**
+ * Positions the model dropdown with its top-left at the measured title
+ * block's bottom-left — hugging the header, fully on-screen.
+ */
+private class TitleDropdownProvider(
+    private val anchor: androidx.compose.ui.geometry.Rect
+) : androidx.compose.ui.window.PopupPositionProvider {
+    override fun calculatePosition(
+        anchorBounds: androidx.compose.ui.unit.IntRect,
+        windowSize: androidx.compose.ui.unit.IntSize,
+        layoutDirection: androidx.compose.ui.unit.LayoutDirection,
+        popupContentSize: androidx.compose.ui.unit.IntSize
+    ): androidx.compose.ui.unit.IntOffset {
+        val x = anchor.left.toInt().coerceIn(0, (windowSize.width - popupContentSize.width).coerceAtLeast(0))
+        val y = (anchor.bottom.toInt() + 4)
+            .coerceIn(0, (windowSize.height - popupContentSize.height).coerceAtLeast(0))
+        return androidx.compose.ui.unit.IntOffset(x, y)
     }
 }
 
@@ -563,23 +593,7 @@ private fun MessageRow(message: Message) {
             }
         }
 
-        Message.Role.TOOL -> Surface(
-            shape = MaterialTheme.shapes.medium,
-            color = MaterialTheme.colorScheme.surfaceVariant
-        ) {
-            Column(Modifier.padding(Spacing.md)) {
-                Text(
-                    text = "🛠 ${message.metadata?.toolName ?: "Tool"}",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Text(
-                    text = message.content.take(400),
-                    style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier.padding(top = Spacing.xs)
-                )
-            }
-        }
+        Message.Role.TOOL -> ToolMessageCard(message)
 
         Message.Role.ASSISTANT -> Column(
             // Subtle inset so AI text never touches the screen edges; no
@@ -592,6 +606,59 @@ private fun MessageRow(message: Message) {
         }
 
         Message.Role.SYSTEM -> Unit
+    }
+}
+
+/**
+ * One agent tool step, rendered as a COLLAPSIBLE card: collapsed shows just
+ * the tool title with a chevron; tapping expands the full output (command,
+ * exit code, [err] lines…). Defaults to collapsed so a command-running chat
+ * stays scannable; nothing is lost — expand to inspect.
+ */
+@Composable
+private fun ToolMessageCard(message: Message) {
+    var expanded by remember(message.id) { mutableStateOf(false) }
+    Surface(
+        shape = MaterialTheme.shapes.medium,
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { expanded = !expanded }
+    ) {
+        Column(Modifier.padding(Spacing.md)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = "🛠 ${message.metadata?.toolName ?: "Tool"}",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f)
+                )
+                Text(
+                    text = if (expanded) "▲" else "▼",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            // Animated expand/collapse — subtle, purposeful.
+            androidx.compose.animation.AnimatedVisibility(visible = expanded) {
+                Column {
+                    Text(
+                        text = message.content,
+                        style = MaterialTheme.typography.bodySmall,
+                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                        modifier = Modifier.padding(top = Spacing.xs)
+                    )
+                }
+            }
+            if (!expanded) {
+                Text(
+                    text = "Tap to view details",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                    modifier = Modifier.padding(top = 2.dp)
+                )
+            }
+        }
     }
 }
 
