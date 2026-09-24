@@ -60,7 +60,7 @@ class OpenAICompatibleProvider(
         .build()
 
     /** Injected by the DI layer so vision bytes come from the attachment store. */
-    var imageByteLoader: (suspend (attachmentId: String) -> ByteArray)? = null
+    var imageByteLoader: (suspend (attachmentId: String) -> ByteArray?)? = null
 
     private fun authHeader(): String? =
         credentials.get(config.credentialKey)?.trim()?.takeIf { it.isNotEmpty() }
