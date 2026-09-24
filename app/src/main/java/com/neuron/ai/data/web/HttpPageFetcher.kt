@@ -74,7 +74,7 @@ class HttpPageFetcher(
     }
 
     private fun String.toHttpUrlOrNull(): okhttp3.HttpUrl? =
-        runCatching { okhttp3.HttpUrl.Companion.parse(this) }.getOrNull()
+        runCatching { okhttp3.HttpUrl.Companion.get(this) }.getOrNull()
 
     companion object {
         private const val MAX_PAGE_BYTES = 512L * 1024L

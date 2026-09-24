@@ -69,7 +69,11 @@ class AppContainer(context: Context) {
 
     val providerRepository: ProviderRepository =
         ProviderRepository(context, secureCredentials, dispatchers, logger).apply {
-            imageLoader = { attachmentId -> attachmentStore.readBytesById(attachmentId) }
+            imageLoader = { attachmentId ->
+                kotlinx.coroutines.withContext(dispatchers.io) {
+                    attachmentStore.readBytesById(attachmentId)
+                }
+            }
         }
 
     val permissionManager: PermissionManager = SessionPermissionManager()
@@ -81,7 +85,8 @@ class AppContainer(context: Context) {
 
     val agentRuntime: DefaultAgentRuntime = DefaultAgentRuntime(dispatchers)
 
-    val workspaceManager: WorkspaceManagerImpl = WorkspaceManagerImpl(context.filesDir, dispatchers)
+    val workspaceManager: com.neuron.ai.data.workspace.WorkspaceManagerImpl =
+        com.neuron.ai.data.workspace.WorkspaceManagerImpl(context.filesDir, dispatchers)
 
     val terminalManager: TerminalManager = TerminalManager(dispatchers)
 

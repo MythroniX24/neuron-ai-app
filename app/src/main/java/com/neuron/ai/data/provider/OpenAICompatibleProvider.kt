@@ -60,7 +60,7 @@ class OpenAICompatibleProvider(
         .build()
 
     /** Injected by the DI layer so vision bytes come from the attachment store. */
-    var imageByteLoader: ((attachmentId: String) -> ByteArray)? = null
+    var imageByteLoader: (suspend (attachmentId: String) -> ByteArray)? = null
 
     private fun authHeader(): String? =
         credentials.get(config.credentialKey)?.trim()?.takeIf { it.isNotEmpty() }
@@ -212,7 +212,9 @@ class OpenAICompatibleProvider(
         return request.messages
             .flatMap { msg -> msg.attachments.filter { it.isImage }.map { it.id } }
             .distinct()
-            .mapNotNull { id -> runCatching { loader(id) }.getOrNull()?.let { id to it } }
+            .mapNotNull { id ->
+                runCatching { loader(id) }.getOrNull()?.let { id to it }
+            }
             .toMap()
     }
 
