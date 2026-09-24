@@ -73,6 +73,12 @@ class RoomConversationRepositoryTest {
             }
         }
 
+        override suspend fun setBrowserEnabled(id: String, enabled: Boolean) {
+            conversations.value = conversations.value.map {
+                if (it.id == id) it.copy(browserEnabled = enabled) else it
+            }
+        }
+
         override suspend fun setConversationModel(
             id: String,
             providerId: String?,
