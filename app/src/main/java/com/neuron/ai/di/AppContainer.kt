@@ -69,11 +69,7 @@ class AppContainer(context: Context) {
 
     val providerRepository: ProviderRepository =
         ProviderRepository(context, secureCredentials, dispatchers, logger).apply {
-            imageLoader = { attachmentId ->
-                kotlinx.coroutines.withContext(dispatchers.io) {
-                    attachmentStore.readBytesById(attachmentId)
-                }
-            }
+            imageLoader = { attachmentId -> attachmentStore.readBytesById(attachmentId) }
         }
 
     val permissionManager: PermissionManager = SessionPermissionManager()

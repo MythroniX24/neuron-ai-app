@@ -7,6 +7,7 @@ import com.neuron.ai.core.web.SearchResponse
 import com.neuron.ai.core.web.SearchResult
 import kotlinx.coroutines.withContext
 import okhttp3.FormBody
+import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.util.concurrent.TimeUnit
 

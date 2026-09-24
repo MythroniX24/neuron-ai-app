@@ -207,7 +207,7 @@ class OpenAICompatibleProvider(
 
     // ---- Helpers -----------------------------------------------------------------
 
-    private fun imageDataOf(request: CompletionRequest): Map<String, ByteArray> {
+    private suspend fun imageDataOf(request: CompletionRequest): Map<String, ByteArray> {
         val loader = imageByteLoader ?: return emptyMap()
         return request.messages
             .flatMap { msg -> msg.attachments.filter { it.isImage }.map { it.id } }

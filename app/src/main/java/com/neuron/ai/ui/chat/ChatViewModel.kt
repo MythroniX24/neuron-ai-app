@@ -170,6 +170,11 @@ class ChatViewModel(
         .map { it?.terminalEnabled ?: false }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
+    /** Browser capability state of THIS conversation (Milestone 3). */
+    val browserEnabled: StateFlow<Boolean> = _conversation
+        .map { it?.browserEnabled ?: false }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
     /** Creates a workspace, binds it to this chat and returns its id. */
     fun createWorkspace(name: String, onCreated: (String) -> Unit) {
         viewModelScope.launch(dispatchers.io) {
