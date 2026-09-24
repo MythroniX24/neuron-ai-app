@@ -7,6 +7,7 @@ import com.neuron.ai.data.workspace.WorkspaceManagerImpl
 import com.neuron.ai.core.coroutines.DispatcherProvider
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
@@ -94,14 +95,20 @@ class WorkspaceToolsTest {
     }
 
     @Test
-    fun `terminal tool refuses when capability disabled - never silently enabled`() = runTest {
+    fun `terminal tool asks permission when capability disabled - no silent enable`() = runTest {
         val context = newContext(tempRoot())
         val env = FakeEnv(workspace = context, terminal = false)
         val manager = com.neuron.ai.data.terminal.TerminalManager(dispatchers())
+        val permissions = com.neuron.ai.data.permissions.SessionPermissionManager()
+        // Answer the permission popup with DENY: the OFF flow must resolve the
+        // request (never hang) and refuse execution.
+        kotlinx.coroutines.launch(kotlinx.coroutines.Dispatchers.Unconfined) {
+            val pending = permissions.pendingRequests.first { it.isNotEmpty() }
+            permissions.deny(pending.first().id)
+        }
 
-        val result = TerminalTool(env, manager).runCommand("echo hi", 10)
+        val result = TerminalTool(env, manager, permissions).runCommand("echo hi", 10)
         assertTrue(result is ToolResult.Failure)
-        assertTrue((result as ToolResult.Failure).message.contains("disabled"))
     }
 
     @Test
@@ -109,8 +116,9 @@ class WorkspaceToolsTest {
         val context = newContext(tempRoot())
         val env = FakeEnv(workspace = context, terminal = true)
         val manager = com.neuron.ai.data.terminal.TerminalManager(dispatchers())
+        val permissions = com.neuron.ai.data.permissions.SessionPermissionManager()
 
-        val result = TerminalTool(env, manager).runCommand("echo gated-ok", 15)
+        val result = TerminalTool(env, manager, permissions).runCommand("echo gated-ok", 15)
         assertTrue(result is ToolResult.Success)
         assertTrue((result as ToolResult.Success).output.contains("gated-ok"))
     }
