@@ -1,6 +1,8 @@
 package com.neuron.ai.data.workspace
 
 import com.neuron.ai.core.coroutines.DispatcherProvider
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.io.File
 
 /**
@@ -14,6 +16,15 @@ class WorkspaceContext(
 ) {
     private val io = dispatchers.io
     val root: File = File(workspace.rootPath).canonicalFile
+
+    /**
+     * Milestone-3 task concurrency (sec 22): READS stay fully concurrent;
+     * every WRITE/mutation serializes per workspace, so two agent tasks can
+     * never interleave mutating steps on the same project. Files are still
+     * read fresh by the writer before each edit — ApplyPatch's anchor
+     * validation additionally fails loudly on a changed target.
+     */
+    private val writeMutex = Mutex()
 
     /** Resolves [relativePath] inside the root, or null on traversal. */
     fun resolve(relativePath: String): File? {
@@ -80,54 +91,54 @@ class WorkspaceContext(
         file.isFile && file.length() > limitBytes
     }
 
-    suspend fun writeText(path: String, content: String): Boolean = withIo {
-        val file = resolve(path) ?: return@withIo false
+    suspend fun writeText(path: String, content: String): Boolean = withWriteLock {
+        val file = resolve(path) ?: return@withWriteLock false
         file.parentFile?.mkdirs()
         runCatching { file.writeText(content) }.isSuccess
     }
 
-    suspend fun mkdirs(path: String): Boolean = withIo {
-        val dir = resolve(path) ?: return@withIo false
+    suspend fun mkdirs(path: String): Boolean = withWriteLock {
+        val dir = resolve(path) ?: return@withWriteLock false
         dir.isDirectory || runCatching { dir.mkdirs() }.getOrDefault(false)
     }
 
-    suspend fun rename(from: String, toName: String): Boolean = withIo {
-        val source = resolve(from) ?: return@withIo false
-        if (!source.exists()) return@withIo false
+    suspend fun rename(from: String, toName: String): Boolean = withWriteLock {
+        val source = resolve(from) ?: return@withWriteLock false
+        if (!source.exists()) return@withWriteLock false
         // Destination stays inside the source's parent directory.
         val target = File(source.parentFile, toName.trim().removePrefix("/"))
         val inside = target.canonicalFile.path.let { p ->
             p == root.path || p.startsWith(root.path + File.separator)
         }
-        if (!inside) return@withIo false
+        if (!inside) return@withWriteLock false
         // Never rename/replace the workspace root itself.
-        if (source.path == root.path) return@withIo false
+        if (source.path == root.path) return@withWriteLock false
         runCatching { source.renameTo(target) }.getOrDefault(false)
     }
 
-    suspend fun move(from: String, toDir: String): Boolean = withIo {
-        val source = resolve(from) ?: return@withIo false
-        val destDir = resolve(toDir) ?: return@withIo false
-        if (!source.exists() || !destDir.isDirectory) return@withIo false
+    suspend fun move(from: String, toDir: String): Boolean = withWriteLock {
+        val source = resolve(from) ?: return@withWriteLock false
+        val destDir = resolve(toDir) ?: return@withWriteLock false
+        if (!source.exists() || !destDir.isDirectory) return@withWriteLock false
         val target = File(destDir, source.name)
-        if (target.exists()) return@withIo false
+        if (target.exists()) return@withWriteLock false
         runCatching { source.renameTo(target) }.getOrDefault(false)
     }
 
-    suspend fun copy(from: String, toDir: String): Boolean = withIo {
-        val source = resolve(from) ?: return@withIo false
-        val destDir = resolve(toDir) ?: return@withIo false
-        if (!source.isFile || !destDir.isDirectory) return@withIo false
+    suspend fun copy(from: String, toDir: String): Boolean = withWriteLock {
+        val source = resolve(from) ?: return@withWriteLock false
+        val destDir = resolve(toDir) ?: return@withWriteLock false
+        if (!source.isFile || !destDir.isDirectory) return@withWriteLock false
         val target = File(destDir, source.name)
-        if (target.exists()) return@withIo false
+        if (target.exists()) return@withWriteLock false
         runCatching { source.copyTo(target) }.isSuccess
     }
 
-    suspend fun delete(path: String): Boolean = withIo {
-        val file = resolve(path) ?: return@withIo false
-        if (!file.exists()) return@withIo false
+    suspend fun delete(path: String): Boolean = withWriteLock {
+        val file = resolve(path) ?: return@withWriteLock false
+        if (!file.exists()) return@withWriteLock false
         // The workspace root itself is never deletable through this context.
-        if (file.path == root.path) return@withIo false
+        if (file.path == root.path) return@withWriteLock false
         runCatching { file.deleteRecursively() }.getOrDefault(false)
     }
 
@@ -195,6 +206,12 @@ class WorkspaceContext(
 
     private suspend fun <T> withIo(block: suspend () -> T): T =
         kotlinx.coroutines.withContext(io) { block() }
+
+    /** Serializes mutations so concurrent tasks never corrupt workspace data. */
+    private suspend fun <T> withWriteLock(block: suspend () -> T): T =
+        kotlinx.coroutines.withContext(io) {
+            writeMutex.withLock { block() }
+        }
 
     data class Entry(
         val name: String,
