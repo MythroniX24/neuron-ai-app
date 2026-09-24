@@ -244,7 +244,9 @@ Deliberate decisions that keep the codebase open:
   WAITING_FOR_PERMISSION state, mirrored from the chat's agent turns.
 - **Context management:** `buildChatContext` caps history (last 30 turns,
   oldest→newest), drops trailing non-user rows and TOOL/error rows so
-  providers never receive dangling tool results.
+  providers never receive dangling tool results. (Milestone 3 supersedes
+  this with `ChatContextEngine` — see below; the legacy function remains as
+  a test-compatibility wrapper.)
 - **UI:** permission dialogs offer Allow/Deny once, for session, or always;
   the Tasks screen shows status, activity, progress, retry for failures and
   stop for active work; agent activity shows ✓/✗/⟳ step states without
