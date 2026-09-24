@@ -7,6 +7,8 @@ import com.neuron.ai.data.workspace.WorkspaceManagerImpl
 import com.neuron.ai.core.coroutines.DispatcherProvider
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
@@ -102,7 +104,7 @@ class WorkspaceToolsTest {
         val permissions = com.neuron.ai.data.permissions.SessionPermissionManager()
         // Answer the permission popup with DENY: the OFF flow must resolve the
         // request (never hang) and refuse execution.
-        kotlinx.coroutines.launch(kotlinx.coroutines.Dispatchers.Unconfined) {
+        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Unconfined).launch {
             val pending = permissions.pendingRequests.first { it.isNotEmpty() }
             permissions.deny(pending.first().id)
         }
