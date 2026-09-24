@@ -339,6 +339,14 @@ Browser Chat, no Web Search Chat, no Memory Chat.
   with a character budget that trims oldest-first and a tail guard. Tool
   rows are COMPRESSED (key lines: exit=, [err], SOURCE, TITLE/URL), not
   dropped. Relevant memory is injected as a capped system block.
+- **Task concurrency (sec 22):** workspace READS run fully concurrent;
+  every WRITE/mutation (`writeText`, `mkdirs`, `rename`, `move`, `copy`,
+  `delete`) serializes behind a per-workspace `Mutex` in `WorkspaceContext` —
+  concurrent agent tasks can never interleave mutating steps on one project.
+  On top of that, `ApplyPatch` validates anchors against the CURRENT file and
+  fails loudly on a changed target (no silent overwrite).
+- **Session hygiene:** each chat's WebView browser session is closed when its
+  `ChatViewModel` is cleared — no engine or session leaks across chats.
 
 ## Key technical decisions
 
