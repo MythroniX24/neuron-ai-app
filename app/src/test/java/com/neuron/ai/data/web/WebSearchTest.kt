@@ -166,13 +166,18 @@ class WebSearchTest {
 
         assertTrue(result is com.neuron.ai.core.agent.ToolResult.Success)
         val out = (result as com.neuron.ai.core.agent.ToolResult.Success).output
-        // Both SOURCES listed; exactly ONE page actually opened/read.
+        // Both SOURCES listed from the engine.
         assertTrue(out.contains("[1] First result"))
         assertTrue(out.contains("[2] Second result"))
+        // openPages=2: BOTH URLs were attempted, but only the page that
+        // actually returned content contributes PAGE CONTENT.
+        assertEquals(
+            listOf("https://a.example.com/one", "https://b.example.com/two"),
+            fetcher.fetched
+        )
         assertTrue(out.contains("PAGE ONE CONTENT"))
-        assertEquals(listOf("https://a.example.com/one"), fetcher.fetched)
-        // No invented content for pages never read.
-        assertTrue(!out.contains("T:b.example"))
+        // No invented content for the page whose fetch failed.
+        assertTrue(!out.contains("T:m/two"))
     }
 
     @Test

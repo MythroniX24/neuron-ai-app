@@ -36,27 +36,31 @@ class WorkspaceConcurrencyTest {
     }
 
     @Test
-    fun `concurrent writes serialize instead of tearing`() = runTest {
+    fun `concurrent writes never tear the file`() = runTest {
         val (context, root) = newContext()
-        // Two "tasks" write the SAME file concurrently, each doing a
-        // read-modify-write of a counter. Without serialization, lost
-        // updates are likely; with serialization, all increments survive.
-        repeat(50) { i ->
-            context.writeText("counter.txt", "start")
-        }
+        // The guarantee under test (M3 sec 19): mutating steps SERIALIZE, so
+        // the file is never observed torn/mixed even under heavy concurrent
+        // writing. (Lost-update prevention for read-modify-write is a
+        // separate concern — handled by ApplyPatch anchor validation.)
         val writers = (1..8).map { writerId ->
             launch(TestDispatchers.io) {
-                repeat(10) {
-                    val current = context.readText("counter.txt")?.trim() ?: "0"
-                    val next = (current.toIntOrNull() ?: 0) + 1
-                    context.writeText("counter.txt", next.toString())
+                repeat(25) { i ->
+                    val payload = "w$writerId-" + "x".repeat(2000) + "-end"
+                    val ok = context.writeText("shared.txt", payload)
+                    check(ok)
+                    // Every read inside another writer's critical section
+                    // must see a COMPLETE payload, never a torn write.
+                    val seen = context.readText("shared.txt")
+                    if (seen != null) {
+                        check(seen.startsWith("w") && seen.endsWith("-end"))
+                    }
                 }
             }
         }
         writers.joinAll()
-        // All 80 increments serialized => final value reflects every write.
-        val final = context.readText("counter.txt")?.trim()?.toIntOrNull()
-        assertTrue("final=$final", final != null && final >= 8)
+        // After all writers finish, the file holds ONE complete payload.
+        val final = context.readText("shared.txt")
+        assertTrue("final=$final", final != null && final.startsWith("w") && final.endsWith("-end"))
         root.deleteRecursively()
     }
 
