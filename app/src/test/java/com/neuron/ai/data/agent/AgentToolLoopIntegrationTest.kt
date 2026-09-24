@@ -186,12 +186,13 @@ class AgentToolLoopIntegrationTest {
             collect(agent, AgentGoal(instruction = "read file", conversationId = "c1"))
         }
 
-        // The model received the structured denial as a tool result — and the
-        // tool itself NEVER executed (no file access happened).
+        // The model received the structured DENIAL as a tool result — and the
+        // tool itself NEVER executed (no file access happened). Denials are
+        // distinct from failures and explicitly forbid blind retries.
         val toolRow = provider.requests[1].filter { it.role == ChatMessage.Role.TOOL }
         assertEquals(1, toolRow.size)
-        assertTrue(toolRow.single().content.startsWith("Error:"))
-        assertTrue(toolRow.single().content.contains("denied"))
+        assertTrue(toolRow.single().content.startsWith("Permission denied:"))
+        assertTrue(toolRow.single().content.contains("Do not retry"))
         // The run completed gracefully instead of crashing.
         assertNotNull(events.filterIsInstance<AgentEvent.Finished>().singleOrNull())
     }

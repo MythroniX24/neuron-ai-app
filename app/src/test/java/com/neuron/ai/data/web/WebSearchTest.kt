@@ -124,6 +124,17 @@ class WebSearchTest {
 
     // ---- WebSearchTool pipeline (audit: real page reads + truthful citations) -------------
 
+    /** Hermetic search double: returns canned organic results, never the network. */
+    private class FakeSearchProvider(
+        private val results: List<com.neuron.ai.core.web.SearchResult>
+    ) : com.neuron.ai.core.web.SearchProvider {
+        override val id = "fake"
+        override suspend fun search(
+            query: com.neuron.ai.core.web.SearchQuery
+        ): com.neuron.ai.core.web.SearchResponse =
+            com.neuron.ai.core.web.SearchResponse.Success(query.text, results)
+    }
+
     /** Fetcher double: only the URLs it actually "opened" resolve. */
     private class FakeFetcher(private val pages: Map<String, String>) : com.neuron.ai.core.web.PageFetcher {
         val fetched = mutableListOf<String>()
@@ -138,17 +149,18 @@ class WebSearchTest {
 
     @Test
     fun `search tool opens requested pages and lists only real sources`() = runTest {
-        val provider = DuckDuckGoSearchProvider(TestDispatchers, okhttp3.OkHttpClient())
-        val html = """
-            <html><body>
-            <a class="result__a" href="https://a.example.com/one">First result</a>
-            <a class="result__a" href="https://b.example.com/two">Second result</a>
-            </body></html>
-        """.trimIndent()
-        val results = provider.parse(html)
-        assertEquals(2, results.size)
+        val results = listOf(
+            com.neuron.ai.core.web.SearchResult(
+                title = "First result", url = "https://a.example.com/one",
+                snippet = null, position = 1, domain = "a.example.com"
+            ),
+            com.neuron.ai.core.web.SearchResult(
+                title = "Second result", url = "https://b.example.com/two",
+                snippet = null, position = 2, domain = "b.example.com"
+            )
+        )
         val fetcher = FakeFetcher(mapOf("https://a.example.com/one" to "PAGE ONE CONTENT"))
-        val tool = com.neuron.ai.data.tool.WebTools.WebSearch(provider, fetcher)
+        val tool = com.neuron.ai.data.tool.WebTools.WebSearch(FakeSearchProvider(results), fetcher)
 
         val result = tool.execute("""{"query":"test","openPages":2}""")
 
@@ -160,23 +172,20 @@ class WebSearchTest {
         assertTrue(out.contains("PAGE ONE CONTENT"))
         assertEquals(listOf("https://a.example.com/one"), fetcher.fetched)
         // No invented content for pages never read.
-        assertTrue(!out.contains("b.example.com/two CONTENT"))
+        assertTrue(!out.contains("T:b.example"))
     }
 
     @Test
-    fun `search tool reports failure honestly on engine block`() = runTest {
-        val provider = DuckDuckGoSearchProvider(TestDispatchers, okhttp3.OkHttpClient())
+    fun `search tool reports failure honestly on empty engine response`() = runTest {
         val fetcher = FakeFetcher(emptyMap())
-        val tool = com.neuron.ai.data.tool.WebTools.WebSearch(provider, fetcher)
+        val tool = com.neuron.ai.data.tool.WebTools.WebSearch(FakeSearchProvider(emptyList()), fetcher)
 
         val result = tool.execute("""{"query":"anything"}""")
 
-        // No fabricated success: a blocked/empty engine yields an explicit failure.
+        // No fabricated success: an empty/blocked engine yields an explicit failure.
         assertTrue(result is com.neuron.ai.core.agent.ToolResult.Failure)
         assertTrue(
-            (result as com.neuron.ai.core.agent.ToolResult.Failure).message.let { msg ->
-                msg.contains("No results") || msg.contains("blocking")
-            }
+            (result as com.neuron.ai.core.agent.ToolResult.Failure).message.contains("No results")
         )
         assertTrue(fetcher.fetched.isEmpty())
     }
