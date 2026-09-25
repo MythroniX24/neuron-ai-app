@@ -262,6 +262,8 @@ class OpenAIWireCodecTest {
         val body = """{"error":{"message":"custom upstream failure"}}"""
         val error = OpenAIWireCodec.mapHttpError(body, 418)
 
-        assertEquals("custom upstream failure", error.message)
+        // Remote detail is appended after the generic reason — never dropped.
+        assertTrue(error.message.contains("custom upstream failure"))
+        assertTrue(error.message.contains("HTTP 418"))
     }
 }
