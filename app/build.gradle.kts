@@ -1,3 +1,5 @@
+import java.io.File
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -24,17 +26,17 @@ android {
     signingConfigs {
         create("release") {
             val ksPath = System.getenv("NEURON_KEYSTORE_PATH")
-            val ksPassword = System.getenv("NEURON_KEYSTORE_PASSWORD")
-            val alias = System.getenv("NEURON_KEY_ALIAS")
-            val keyPassword = System.getenv("NEURON_KEY_PASSWORD")
-            val configured = !ksPath.isNullOrEmpty() && java.io.File(ksPath).exists() &&
-                !ksPassword.isNullOrEmpty() && !alias.isNullOrEmpty() &&
-                !keyPassword.isNullOrEmpty()
+            val ksPass = System.getenv("NEURON_KEYSTORE_PASSWORD")
+            val aliasEnv = System.getenv("NEURON_KEY_ALIAS")
+            val keyPass = System.getenv("NEURON_KEY_PASSWORD")
+            val configured = !ksPath.isNullOrEmpty() && File(ksPath).exists() &&
+                !ksPass.isNullOrEmpty() && !aliasEnv.isNullOrEmpty() &&
+                !keyPass.isNullOrEmpty()
             if (configured) {
-                storeFile = java.io.File(ksPath)
-                storePassword = ksPassword
-                keyAlias = alias
-                keyPassword = keyPassword
+                storeFile = File(ksPath)
+                storePassword = ksPass
+                keyAlias = aliasEnv
+                keyPassword = keyPass
             }
         }
     }
@@ -47,7 +49,7 @@ android {
                 "proguard-rules.pro"
             )
             val ksPath = System.getenv("NEURON_KEYSTORE_PATH")
-            val configured = !ksPath.isNullOrEmpty() && java.io.File(ksPath).exists()
+            val configured = !ksPath.isNullOrEmpty() && File(ksPath).exists()
             if (configured) {
                 signingConfig = signingConfigs.getByName("release")
             }
