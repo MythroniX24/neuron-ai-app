@@ -12,6 +12,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBarsPadding
+import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
@@ -27,8 +29,6 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import com.neuron.ai.ui.components.entrancePop
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.ListItem
-import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.ModalDrawerSheet
@@ -45,6 +45,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -181,51 +182,55 @@ fun AppDrawer(
         }
     }
 
-    // ---- Long-press action sheet --------------------------------------------
+    // ---- Long-press action sheet (custom panel, matches the attach sheet) ----
     actionTarget?.let { target ->
-        ModalBottomSheet(onDismissRequest = { actionTarget = null }) {
+        ModalBottomSheet(
+            onDismissRequest = { actionTarget = null },
+            shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+            dragHandle = null,
+            containerColor = MaterialTheme.colorScheme.surface
+        ) {
+            androidx.compose.foundation.layout.Box(
+                Modifier
+                    .align(Alignment.CenterHorizontally)
+                    .padding(top = 10.dp)
+                    .width(40.dp)
+                    .height(4.dp)
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(MaterialTheme.colorScheme.outlineVariant)
+            )
             Text(
                 text = target.title,
                 style = MaterialTheme.typography.titleMedium,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.padding(horizontal = Spacing.lg, vertical = Spacing.sm)
+                modifier = Modifier.padding(horizontal = Spacing.lg, vertical = Spacing.md)
             )
-            ListItem(
-                headlineContent = { Text(if (target.pinned) "Unpin" else "Pin to top") },
-                leadingContent = { Icon(Icons.Outlined.PushPin, contentDescription = null) },
-                colors = ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.surface),
-                modifier = Modifier.clickable {
-                    actionTarget = null
-                    scope.launch { repo.setConversationPinned(target.id, !target.pinned) }
-                }
-            )
-            ListItem(
-                headlineContent = { Text("Rename") },
-                leadingContent = {
-                    Icon(Icons.Outlined.DriveFileRenameOutline, contentDescription = null)
-                },
-                colors = ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.surface),
-                modifier = Modifier.clickable {
-                    actionTarget = null
-                    renameTarget = target
-                }
-            )
-            ListItem(
-                headlineContent = { Text("Delete", color = MaterialTheme.colorScheme.error) },
-                leadingContent = {
-                    Icon(
-                        Icons.Outlined.Delete,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.error
-                    )
-                },
-                colors = ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.surface),
-                modifier = Modifier.clickable {
-                    actionTarget = null
-                    deleteTarget = target
-                }
-            )
+            DrawerActionRow(
+                icon = Icons.Outlined.PushPin,
+                label = if (target.pinned) "Unpin" else "Pin to top",
+                tint = MaterialTheme.colorScheme.primary
+            ) {
+                actionTarget = null
+                scope.launch { repo.setConversationPinned(target.id, !target.pinned) }
+            }
+            DrawerActionRow(
+                icon = Icons.Outlined.DriveFileRenameOutline,
+                label = "Rename",
+                tint = MaterialTheme.colorScheme.secondary
+            ) {
+                actionTarget = null
+                renameTarget = target
+            }
+            DrawerActionRow(
+                icon = Icons.Outlined.Delete,
+                label = "Delete",
+                tint = MaterialTheme.colorScheme.error,
+                labelColor = MaterialTheme.colorScheme.error
+            ) {
+                actionTarget = null
+                deleteTarget = target
+            }
             Spacer(Modifier.size(Spacing.xl))
         }
     }
@@ -339,4 +344,38 @@ private fun DrawerChatItem(
             .padding(horizontal = Spacing.md)
             .combinedClickable(onClick = onClick, onLongClick = onLongPress)
     )
+}
+
+/** Custom action row for the long-press sheet — icon chip + label, no M3 ListItem. */
+@Composable
+private fun DrawerActionRow(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    tint: androidx.compose.ui.graphics.Color,
+    labelColor: androidx.compose.ui.graphics.Color = MaterialTheme.colorScheme.onSurface,
+    onClick: () -> Unit
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = Spacing.lg, vertical = Spacing.sm)
+    ) {
+        androidx.compose.foundation.layout.Box(
+            Modifier
+                .size(36.dp)
+                .clip(androidx.compose.foundation.shape.CircleShape)
+                .background(tint.copy(alpha = 0.14f)),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(19.dp))
+        }
+        Text(
+            label,
+            style = MaterialTheme.typography.bodyMedium,
+            color = labelColor,
+            modifier = Modifier.padding(start = Spacing.md)
+        )
+    }
 }
