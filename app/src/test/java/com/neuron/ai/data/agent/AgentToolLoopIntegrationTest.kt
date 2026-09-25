@@ -122,6 +122,37 @@ class AgentToolLoopIntegrationTest {
     }
 
     @Test
+    fun `current message attachments reach the provider request`() = runTest {
+        val provider = ScriptedProvider()
+        provider.script.add(StreamEvent.Delta("I see the image."))
+
+        val (agent, _) = buildAgent(provider)
+        val attachment = com.neuron.ai.core.conversation.Attachment(
+            id = "att-img1",
+            displayName = "photo.jpg",
+            mimeType = "image/jpeg",
+            sizeBytes = 1024,
+            localPath = "attachments/att-img1_photo.jpg",
+            kind = com.neuron.ai.core.conversation.Attachment.Kind.IMAGE
+        )
+        withTimeout(5_000) {
+            collect(
+                agent,
+                AgentGoal(
+                    instruction = "What is in this image?",
+                    conversationId = "c1",
+                    attachments = listOf(attachment)
+                )
+            )
+        }
+
+        // The FINAL user row of the model request must carry the attachment.
+        val finalUser = provider.requests.single()
+            .last { it.role == ChatMessage.Role.USER }
+        assertEquals(listOf(attachment), finalUser.attachments)
+    }
+
+    @Test
     fun `multiple sequential tool calls in one task`() = runTest {
         val provider = ScriptedProvider()
         provider.script.add(toolRequestEvent("math.evaluate", "{\"expression\":\"2+2\"}"))
