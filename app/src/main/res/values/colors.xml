@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Window background used by the bootstrap theme before Compose draws. -->
+    <!-- Window background used by the bootstrap theme before Compose draws.
+         Light: white; the dark twin lives in values-night. -->
     <color name="neuron_window_background">#FFFFFF</color>
 </resources>

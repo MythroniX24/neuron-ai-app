@@ -2,6 +2,8 @@ package com.neuron.ai.ui.markdown
 
 import androidx.compose.foundation.text.InlineTextContent
 import androidx.compose.foundation.text.appendInlineContent
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.Composable
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
@@ -29,10 +31,15 @@ object InlineMarkdown {
 
     private enum class ContentType { BOLD, ITALIC, CODE, LINK, MATH }
 
+    @Composable
     fun toAnnotatedString(
         text: String,
         mathContent: Map<String, InlineTextContent> = emptyMap()
-    ): AnnotatedString = buildAnnotatedString {
+    ): AnnotatedString {
+        // Theme-aware inline colors, read once per call.
+        val codeBackground = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.12f)
+        val linkColor = MaterialTheme.colorScheme.primary
+        return buildAnnotatedString {
         val tokens = collectTokens(text)
         var cursor = 0
 
@@ -50,7 +57,7 @@ object InlineMarkdown {
                 }
 
                 ContentType.CODE -> withStyle(
-                    SpanStyle(fontFamily = FontFamily.Monospace, background = neutralCodeBackground)
+                    SpanStyle(fontFamily = FontFamily.Monospace, background = codeBackground)
                 ) {
                     append(token.payload)
                 }
@@ -100,9 +107,6 @@ object InlineMarkdown {
         }
 
         return tokens
+        }
     }
-
-    // Neutral colors; the renderer overrides via CompositionLocal-free approach.
-    internal val neutralCodeBackground = androidx.compose.ui.graphics.Color(0x14000000)
-    internal val linkColor = androidx.compose.ui.graphics.Color(0xFF4F46E5)
 }

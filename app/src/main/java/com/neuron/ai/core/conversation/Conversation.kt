@@ -85,7 +85,9 @@ interface ConversationRepository {
      */
     suspend fun createConversation(
         title: String,
-        id: String
+        id: String,
+        providerId: String? = null,
+        modelId: String? = null
     ): Conversation
 
     suspend fun renameConversation(conversationId: String, title: String)

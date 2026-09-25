@@ -13,6 +13,7 @@ import com.neuron.ai.core.conversation.MessageMetadata
 import com.neuron.ai.core.coroutines.DispatcherProvider
 import com.neuron.ai.core.error.NeuronError
 import com.neuron.ai.core.log.Logger
+import com.neuron.ai.core.settings.SettingsRepository
 import com.neuron.ai.core.provider.AIProvider
 import com.neuron.ai.core.provider.ChatMessage
 import com.neuron.ai.core.provider.Model
@@ -80,7 +81,9 @@ class ChatViewModel(
     private val contextEngine: com.neuron.ai.ui.chat.ChatContextEngine =
         com.neuron.ai.ui.chat.ChatContextEngine(),
     /** Reads attachment bytes/text so the agent can analyse user files. */
-    private val attachmentStore: com.neuron.ai.data.attachment.AttachmentStore? = null
+    private val attachmentStore: com.neuron.ai.data.attachment.AttachmentStore? = null,
+    /** Persists the last (provider, model) pick so it survives restarts. */
+    private val settings: SettingsRepository? = null
 ) : ViewModel() {
 
     val messages: StateFlow<List<Message>> =
@@ -128,6 +131,24 @@ class ChatViewModel(
     private var lastUserPrompt: String? = null
     private var lastUserAttachments: List<Attachment> = emptyList()
 
+    init {
+        // Brand-new chats pre-select the user's LAST used model (persisted in
+        // DataStore) — the selection survives app restarts and new chats.
+        if (_conversation.value == null) {
+            viewModelScope.launch(dispatchers.io) {
+                val selection = settings?.lastModelSelection?.first() ?: return@launch
+                if (providers.config(selection.first)?.enabled != true) return@launch
+                ensureConversation()
+                conversations.setConversationModel(
+                    conversationId,
+                    selection.first,
+                    selection.second
+                )
+                _conversation.value = conversations.getConversation(conversationId)
+            }
+        }
+    }
+
     /** Task-system mirror of the current agent turn (Milestone 1). */
     private var currentTaskId: String? = null
 
@@ -147,10 +168,19 @@ class ChatViewModel(
      */
     private suspend fun ensureConversation() {
         if (_conversation.value != null) return
-        val created = conversations.createConversation(
-            title = "New chat",
-            id = conversationId
-        )
+        // Carry the last-used model into the new conversation so it is
+        // visible in the top bar even before the first send.
+        val last = settings?.lastModelSelection?.first()
+        val created = if (last != null && providers.config(last.first)?.enabled == true) {
+            conversations.createConversation(
+                title = "New chat",
+                id = conversationId,
+                providerId = last.first,
+                modelId = last.second
+            )
+        } else {
+            conversations.createConversation(title = "New chat", id = conversationId)
+        }
         _conversation.value = created
         _createdConversationId.value = created.id
     }
@@ -275,6 +305,8 @@ class ChatViewModel(
             ensureConversation()
             conversations.setConversationModel(conversationId, providerId, modelId)
             _conversation.value = conversations.getConversation(conversationId)
+            // Remember globally: survives restarts and pre-fills new chats.
+            settings?.setLastModelSelection(providerId, modelId)
         }
     }
 

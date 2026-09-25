@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Dark window background matching the Compose dark scheme (SurfaceDimDark). -->
+    <!-- Dark twin: same key, matching the Compose BgDark (0xFF0B0D10) so the
+         window never flashes white before Compose draws in dark mode. -->
     <color name="neuron_window_background">#0B0D10</color>
 </resources>

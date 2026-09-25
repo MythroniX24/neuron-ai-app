@@ -145,7 +145,8 @@ class ChatViewModelFactory(
             terminalManager = container.terminalManager,
             browserManager = container.browserManager,
             contextEngine = contextEngine,
-            attachmentStore = container.attachmentStore
+            attachmentStore = container.attachmentStore,
+            settings = container.settingsRepository
         ) as T
     }
 }

@@ -23,12 +23,23 @@ object SyntaxHighlighter {
         val annotation: Color
     )
 
-    private val palette = Palette(
+    // Light-theme palette: tuned for a white/near-white code background.
+    private val lightPalette = Palette(
         keyword = Color(0xFF7C3AED),
         string = Color(0xFF0F766E),
         comment = Color(0xFF94A3B8),
         number = Color(0xFFB45309),
         annotation = Color(0xFFB45309)
+    )
+
+    // Dark-theme palette: same hues, lifted luminance so every token keeps
+    // readable contrast on the dark code-block surface.
+    private val darkPalette = Palette(
+        keyword = Color(0xFFC4B5FD),
+        string = Color(0xFF5EEAD4),
+        comment = Color(0xFF6B7280),
+        number = Color(0xFFFCD34D),
+        annotation = Color(0xFFFCD34D)
     )
 
     private val keywordSets: Map<String, Set<String>> = mapOf(
@@ -76,7 +87,8 @@ object SyntaxHighlighter {
         "py" to "python", "golang" to "go", "rs" to "rust"
     )
 
-    fun highlight(code: String, language: String?): AnnotatedString {
+    fun highlight(code: String, language: String?, dark: Boolean = false): AnnotatedString {
+        val palette = if (dark) darkPalette else lightPalette
         val key = aliases[language?.lowercase()] ?: language?.lowercase()
         val keywords = keywordSets[key] ?: emptySet()
 

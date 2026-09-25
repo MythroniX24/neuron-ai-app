@@ -28,6 +28,10 @@ enum class ThemeMode {
 interface SettingsRepository {
     val themeMode: Flow<ThemeMode>
     suspend fun setThemeMode(mode: ThemeMode)
+
+    /** Last model the user picked — survives restarts and pre-fills new chats. */
+    val lastModelSelection: Flow<Pair<String, String>?>
+    suspend fun setLastModelSelection(providerId: String, modelId: String)
 }
 
 private val Context.neuronDataStore by preferencesDataStore(name = "neuron_settings")
@@ -47,7 +51,23 @@ class SettingsRepositoryImpl(
         dataStore.edit { prefs -> prefs[KEY_THEME_MODE] = mode.name }
     }
 
+    override val lastModelSelection: Flow<Pair<String, String>?> = dataStore.data
+        .map { prefs ->
+            val provider = prefs[KEY_LAST_PROVIDER]
+            val model = prefs[KEY_LAST_MODEL]
+            if (provider != null && model != null) provider to model else null
+        }
+
+    override suspend fun setLastModelSelection(providerId: String, modelId: String) {
+        dataStore.edit { prefs ->
+            prefs[KEY_LAST_PROVIDER] = providerId
+            prefs[KEY_LAST_MODEL] = modelId
+        }
+    }
+
     private companion object {
         val KEY_THEME_MODE = stringPreferencesKey("theme_mode")
+        val KEY_LAST_PROVIDER = stringPreferencesKey("last_provider_id")
+        val KEY_LAST_MODEL = stringPreferencesKey("last_model_id")
     }
 }

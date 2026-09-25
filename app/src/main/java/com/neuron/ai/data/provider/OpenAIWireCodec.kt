@@ -26,14 +26,18 @@ internal class OpenAIWireCodec(private val json: Json) {
     /**
      * Encodes a completion request. [imageData] maps attachment ids to already
      * loaded PNG/JPEG bytes; image attachments without an entry are skipped.
+     * [toolsEnabled] = false omits the function-calling schema entirely — many
+     * models/providers reject it outright, and a tool-less turn must still
+     * complete (the agent loop falls back to plain chat in that case).
      */
     fun encodeRequest(
         request: CompletionRequest,
-        imageData: Map<String, ByteArray> = emptyMap()
+        imageData: Map<String, ByteArray> = emptyMap(),
+        toolsEnabled: Boolean = true
     ): JsonObject = buildJsonObject {
         put("model", request.model.id)
         put("messages", buildJsonArray { request.messages.forEach { add(encodeMessage(it, imageData)) } })
-        if (request.tools.isNotEmpty()) {
+        if (request.tools.isNotEmpty() && toolsEnabled) {
             put("tools", buildJsonArray {
                 request.tools.forEach { tool ->
                     add(buildJsonObject {
@@ -135,14 +139,17 @@ internal class OpenAIWireCodec(private val json: Json) {
                     ?.get("message")?.jsonPrimitive?.content
             }.getOrNull()
 
+            // The provider's own message is often the ONLY clue (e.g. "model
+            // does not support tools") — always surface it.
+            val detail = remoteMessage?.let { " — $it" } ?: ""
             return when (code) {
-                401 -> NeuronError.Provider("Invalid or missing API key.")
-                403 -> NeuronError.Provider("Access denied by the provider.")
-                404 -> NeuronError.Provider("Model or endpoint not found. Check the model id and base URL.")
-                408 -> NeuronError.Provider("The provider took too long to respond.")
-                429 -> NeuronError.Provider("Rate limit reached. Wait a moment and try again.")
-                in 500..599 -> NeuronError.Provider("Provider server error. Try again shortly.")
-                else -> NeuronError.Provider(remoteMessage ?: "Provider request failed (HTTP ${code ?: "?"}).")
+                401 -> NeuronError.Provider("Invalid or missing API key.$detail")
+                403 -> NeuronError.Provider("Access denied by the provider.$detail")
+                404 -> NeuronError.Provider("Model or endpoint not found. Check the model id and base URL.$detail")
+                408 -> NeuronError.Provider("The provider took too long to respond.$detail")
+                429 -> NeuronError.Provider("Rate limit reached. Wait a moment and try again.$detail")
+                in 500..599 -> NeuronError.Provider("Provider server error. Try again shortly.$detail")
+                else -> NeuronError.Provider("Provider request failed (HTTP ${code ?: "?"}).$detail")
             }
         }
     }

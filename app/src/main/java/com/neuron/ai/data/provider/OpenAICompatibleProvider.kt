@@ -111,7 +111,7 @@ class OpenAICompatibleProvider(
     // ---- One-shot completion ---------------------------------------------------
 
     override suspend fun complete(request: CompletionRequest): Completion {
-        val payload = wire.encodeRequest(request, imageDataOf(request))
+        val payload = wire.encodeRequest(request, imageDataOf(request), toolsEnabled = request.tools.isNotEmpty())
             .toString()
             .toRequestBody("application/json".toMediaType())
 
@@ -149,7 +149,7 @@ class OpenAICompatibleProvider(
     override fun stream(request: CompletionRequest): Flow<StreamEvent> = callbackFlow {
         val parser = SseChunkParser(jsonParser)
 
-        val payload = wire.encodeRequest(request, imageDataOf(request))
+        val payload = wire.encodeRequest(request, imageDataOf(request), toolsEnabled = request.tools.isNotEmpty())
             .toString()
             .toRequestBody("application/json".toMediaType())
 
@@ -184,14 +184,39 @@ class OpenAICompatibleProvider(
                     }
 
                     try {
+                        var sawSseData = false
+                        val rawBody = StringBuilder()
                         while (true) {
                             val line = source.readUtf8Line() ?: break
-                            if (!line.startsWith("data:")) continue
+                            if (!line.startsWith("data:")) {
+                                // Collect non-SSE lines: some providers ignore
+                                // stream:true and return one plain JSON body.
+                                if (!sawSseData) rawBody.append(line)
+                                continue
+                            }
+                            sawSseData = true
                             runCatching {
                                 parser.parse(line.removePrefix("data:").trim())
                             }.getOrNull()?.forEach { event ->
                                 trySend(event)
                             }
+                        }
+                        // No SSE at all → treat the body as a non-stream
+                        // completion and emit its content as a single delta.
+                        if (!sawSseData) {
+                            val bodyText = rawBody.toString().trim()
+                            if (bodyText.isNotEmpty()) {
+                                val content = runCatching {
+                                    val root = jsonParser.parseToJsonElement(bodyText).jsonObject
+                                    val choice = root["choices"]?.jsonArray?.firstOrNull()?.jsonObject
+                                    choice?.get("message")?.jsonObject?.get("content")
+                                }.getOrNull()
+                                    ?.let { OpenAIWireCodec.safeContent(it) }
+                                if (!content.isNullOrEmpty()) {
+                                    trySend(StreamEvent.Delta(content))
+                                }
+                            }
+                            trySend(StreamEvent.Completed)
                         }
                     } catch (e: IOException) {
                         trySend(StreamEvent.Failed(mapFailure(e)))
