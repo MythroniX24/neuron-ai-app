@@ -22,10 +22,13 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -82,9 +85,20 @@ fun QuickActionTile(
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val interaction = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val iconScale by androidx.compose.animation.core.animateFloatAsState(
+        targetValue = if (pressed) 1.15f else 1f,
+        animationSpec = androidx.compose.animation.core.spring(
+            dampingRatio = androidx.compose.animation.core.Spring.DampingRatioMediumBouncy,
+            stiffness = androidx.compose.animation.core.Spring.StiffnessMediumHigh
+        ),
+        label = "iconPop"
+    )
     Surface(
         onClick = onClick,
-        modifier = modifier,
+        interactionSource = interaction,
+        modifier = modifier.pressScale(interaction),
         shape = MaterialTheme.shapes.medium,
         color = MaterialTheme.colorScheme.surfaceVariant,
         border = androidx.compose.foundation.BorderStroke(
@@ -100,7 +114,12 @@ fun QuickActionTile(
                 imageVector = icon,
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(22.dp)
+                modifier = Modifier
+                    .size(22.dp)
+                    .graphicsLayer {
+                        scaleX = iconScale
+                        scaleY = iconScale
+                    }
             )
             Text(
                 text = label,
@@ -174,7 +193,7 @@ fun ChatComposer(
     }
 }
 
-/** Full-screen gentle loading state. */
+/** Full-screen gentle loading state — shimmer skeleton, not a spinner. */
 @Composable
 fun LoadingState(message: String, modifier: Modifier = Modifier) {
     Column(
@@ -182,11 +201,9 @@ fun LoadingState(message: String, modifier: Modifier = Modifier) {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(Spacing.md)
     ) {
-        CircularProgressIndicator(
-            modifier = Modifier.size(28.dp),
-            strokeWidth = 2.5.dp,
-            color = MaterialTheme.colorScheme.primary
-        )
+        SkeletonBar(Modifier.size(width = 220.dp, height = 14.dp))
+        SkeletonBar(Modifier.size(width = 160.dp, height = 14.dp))
+        SkeletonBar(Modifier.size(width = 190.dp, height = 14.dp))
         Text(
             text = message,
             style = MaterialTheme.typography.bodyMedium,

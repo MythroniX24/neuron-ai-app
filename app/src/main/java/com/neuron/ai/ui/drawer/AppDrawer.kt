@@ -3,6 +3,7 @@ package com.neuron.ai.ui.drawer
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -23,6 +24,7 @@ import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
+import com.neuron.ai.ui.components.entrancePop
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ListItem
@@ -150,11 +152,20 @@ fun AppDrawer(
                     }
                 }
                 items(filtered, key = { it.id }) { conversation ->
-                    DrawerChatItem(
-                        conversation = conversation,
-                        onClick = { onOpenChat(conversation.id) },
-                        onLongPress = { actionTarget = conversation }
-                    )
+                    // Staggered entrance — first few items cascade in when
+                    // the drawer opens; later items appear without delay.
+                    val index = filtered.indexOf(conversation)
+                    Box(
+                        Modifier.entrancePop(
+                            delayMs = if (index < 6) index * 40 else 0
+                        )
+                    ) {
+                        DrawerChatItem(
+                            conversation = conversation,
+                            onClick = { onOpenChat(conversation.id) },
+                            onLongPress = { actionTarget = conversation }
+                        )
+                    }
                 }
             }
 
