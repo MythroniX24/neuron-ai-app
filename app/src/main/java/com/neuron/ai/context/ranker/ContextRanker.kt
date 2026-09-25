@@ -33,6 +33,10 @@ object ContextRanker {
     /**
      * Composite within-tier score. Pure function of the item + query — cheap
      * to test exhaustively.
+     *
+     * Recency is an ADDITIVE term (tiny), not just a multiplier: two items
+     * with no relevance signal (both 0f) still order newer-first instead of
+     * falling back to input order.
      */
     internal fun score(item: ContextItem, queryTerms: Set<String>, nowMs: Long): Double {
         var score = item.relevanceScore.toDouble()
@@ -46,11 +50,11 @@ object ContextRanker {
             }
         }
 
-        // Recency decay inside the tier (old items fade, never invert tiers).
-        val age = (nowMs - item.timestampMs).coerceAtLeast(0)
-        if (item.timestampMs > 0 && age > RECENCY_WINDOW_MS) {
-            val decay = 1.0 / (1.0 + age / 3_600_000.0) // hours
-            score *= 0.7 + 0.3 * decay
+        // Additive recency: normalizes age against a 1h half-life, scaled
+        // small enough to never outrank a genuinely more relevant item.
+        if (item.timestampMs > 0) {
+            val age = (nowMs - item.timestampMs).coerceAtLeast(0)
+            score += 0.01 / (1.0 + age / 1_800_000.0)
         }
         return score
     }
