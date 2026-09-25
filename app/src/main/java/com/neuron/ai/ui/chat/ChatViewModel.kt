@@ -96,6 +96,18 @@ class ChatViewModel(
     private val _draftAttachments = MutableStateFlow<List<Attachment>>(emptyList())
     val draftAttachments: StateFlow<List<Attachment>> = _draftAttachments.asStateFlow()
 
+    /** Message queued while a turn is streaming; auto-sent when it finishes. */
+    private val _queuedMessage = MutableStateFlow<String?>(null)
+    val queuedMessage: StateFlow<String?> = _queuedMessage.asStateFlow()
+    private var queuedPrompt: String? = null
+    private var queuedAttachments: List<Attachment> = emptyList()
+
+    fun cancelQueuedMessage() {
+        queuedPrompt = null
+        queuedAttachments = emptyList()
+        _queuedMessage.value = null
+    }
+
     /** One-shot visible reason when an attachment import fails (never silent). */
     private val _attachmentNotice = MutableStateFlow<String?>(null)
     val attachmentNotice: StateFlow<String?> = _attachmentNotice.asStateFlow()
@@ -358,8 +370,19 @@ class ChatViewModel(
         val prompt = text.trim()
         val attachments = _draftAttachments.value
         if (prompt.isEmpty() && attachments.isEmpty()) return
-        if (_generation.value is GenerationState.Streaming) return
+        if (_generation.value is GenerationState.Streaming) {
+            // Never drop what the user typed mid-turn — queue it; it is sent
+            // automatically when the running turn finishes.
+            queuedPrompt = prompt
+            queuedAttachments = attachments
+            _queuedMessage.value = prompt.ifBlank { "${attachments.size} attachment(s)" }
+            _draftAttachments.value = emptyList()
+            return
+        }
+        startTurn(prompt, attachments)
+    }
 
+    private fun startTurn(prompt: String, attachments: List<Attachment>) {
         lastUserAttachments = attachments
 
         job = viewModelScope.launch(dispatchers.io) {
@@ -384,7 +407,19 @@ class ChatViewModel(
             )
             currentTaskId = task.id
             runAgentTurn(effectivePrompt, task.id, attachments = attachments)
+            drainQueuedTurn()
         }
+    }
+
+    /** Sends a turn queued during streaming, if any (no-op otherwise). */
+    private fun drainQueuedTurn() {
+        val next = queuedPrompt ?: return
+        if (_generation.value is GenerationState.Failed) return
+        queuedPrompt = null
+        val nextAttachments = queuedAttachments
+        queuedAttachments = emptyList()
+        _queuedMessage.value = null
+        startTurn(next, nextAttachments)
     }
 
     /**
@@ -448,6 +483,7 @@ class ChatViewModel(
         val prompt = lastUserPrompt ?: return
         if (_generation.value is GenerationState.Streaming) return
 
+        cancelQueuedMessage()
         // The user message is already persisted; only re-run the answer.
         job = viewModelScope.launch(dispatchers.io) {
             runAgentTurn(prompt, currentTaskId, attachments = lastUserAttachments ?: emptyList())
@@ -468,6 +504,33 @@ class ChatViewModel(
             val effective = lastUser.content + flattenTextAttachments(lastUser.attachments)
             lastUserPrompt = effective
             runAgentTurn(effective, currentTaskId, attachments = lastUser.attachments)
+            drainQueuedTurn()
+        }
+    }
+
+    /**
+     * Regenerates from a specific ASSISTANT message: deletes it and every
+     * later row, then re-runs the turn against the previous user message.
+     */
+    fun retryFrom(messageId: String) {
+        if (_generation.value is GenerationState.Streaming) return
+        viewModelScope.launch(dispatchers.io) {
+            val all = conversations.messagesOf(conversationId).first()
+            val index = all.indexOfFirst { it.id == messageId }
+            if (index <= 0) return@launch
+            val target = all[index]
+            if (target.role != Message.Role.ASSISTANT) return@launch
+
+            // Drop the answer itself and everything after it.
+            all.drop(index).forEach { conversations.deleteMessage(it.id) }
+
+            val userMessage = all.subList(0, index).lastOrNull { it.role == Message.Role.USER }
+                ?: return@launch
+            lastUserAttachments = userMessage.attachments
+            val effective = userMessage.content + flattenTextAttachments(userMessage.attachments)
+            lastUserPrompt = effective
+            runAgentTurn(effective, currentTaskId, attachments = userMessage.attachments)
+            drainQueuedTurn()
         }
     }
 
@@ -708,6 +771,19 @@ class ChatViewModel(
         _activity.value = emptyList()
         if (_generation.value is GenerationState.Streaming) {
             _generation.value = GenerationState.Idle
+        }
+
+        // Drain a message queued while this turn was streaming — but never
+        // auto-send over an unacknowledged failure.
+        if (_generation.value !is GenerationState.Failed) {
+            val next = queuedPrompt
+            if (next != null) {
+                queuedPrompt = null
+                val nextAttachments = queuedAttachments
+                queuedAttachments = emptyList()
+                _queuedMessage.value = null
+                startTurn(next, nextAttachments)
+            }
         }
     }
 

@@ -17,6 +17,8 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
@@ -53,6 +55,8 @@ import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.ContentCopy
+import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.KeyboardArrowDown
 import androidx.compose.material.icons.outlined.Menu
@@ -139,6 +143,7 @@ fun ChatScreen(
     val activity by viewModel.activity.collectAsStateWithLifecycle()
     val draftAttachments by viewModel.draftAttachments.collectAsStateWithLifecycle()
     val attachmentNotice by viewModel.attachmentNotice.collectAsStateWithLifecycle()
+    val queuedMessage by viewModel.queuedMessage.collectAsStateWithLifecycle()
     val conversation by viewModel.conversation.collectAsStateWithLifecycle()
 
     var draft by remember { mutableStateOf("") }
@@ -193,35 +198,42 @@ fun ChatScreen(
         }
     }
 
+    // Camera capture state must SURVIVE the activity recreation that happens
+    // while the camera app is in the foreground — otherwise the capture file
+    // (and the whole flow) is lost and the photo never lands in the draft.
+    var pendingCapturePath by androidx.compose.runtime.saveable.rememberSaveable {
+        mutableStateOf("")
+    }
     val cameraLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.TakePicture()
     ) { captured ->
-        val file = pendingCaptureFile
-        if (captured && file != null) {
-            viewModel.importCameraCapture(file)
+        val path = pendingCapturePath
+        pendingCapturePath = ""
+        if (captured && path.isNotEmpty()) {
+            viewModel.importCameraCapture(java.io.File(path))
         }
-        pendingCaptureFile = null
     }
 
     val cameraPermission = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
-        val file = pendingCaptureFile
-        if (granted && file != null) {
+        val path = pendingCapturePath
+        if (granted && path.isNotEmpty()) {
             cameraLauncher.launch(
                 androidx.core.content.FileProvider.getUriForFile(
                     context,
                     context.packageName + ".fileprovider",
-                    file
+                    java.io.File(path)
                 )
             )
+        } else if (!granted) {
+            pendingCapturePath = ""
         }
-        pendingCaptureFile = null
     }
 
     val launchCamera: () -> Unit = {
         val file = container.attachmentStore.createCaptureDestination()
-        pendingCaptureFile = file
+        pendingCapturePath = file.absolutePath
         val granted = androidx.core.content.ContextCompat.checkSelfPermission(
             context, android.Manifest.permission.CAMERA
         ) == android.content.pm.PackageManager.PERMISSION_GRANTED
@@ -313,9 +325,13 @@ fun ChatScreen(
                     Modifier
                         .animateItem()
                         .messageEntrance(fromEnd = message.role == Message.Role.USER, enabled = animateIn)
-                ) { MessageRow(message, onEditAndResend = {
-                    viewModel.editAndResend(message.id, message.content)
-                }) }
+                ) {
+                    MessageRow(
+                        message = message,
+                        onRetryFromHere = { viewModel.retryFrom(message.id) },
+                        onEditAndResend = { viewModel.editAndResend(message.id, message.content) }
+                    )
+                }
             }
 
             if (activity.isNotEmpty()) {
@@ -399,6 +415,26 @@ fun ChatScreen(
             }
         }
 
+        // Queued-while-streaming indicator with an undo affordance.
+        queuedMessage?.let { queued ->
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = Spacing.lg, vertical = Spacing.xs)
+            ) {
+                Text(
+                    text = "⏳ Queued: $queued",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f)
+                )
+                TextButton(onClick = viewModel::cancelQueuedMessage) { Text("Undo") }
+            }
+        }
+
         ComposerBar(
             draft = draft,
             onDraftChange = { draft = it },
@@ -409,10 +445,10 @@ fun ChatScreen(
             },
             onStop = viewModel::stop,
             onRegenerate = viewModel::regenerate,
+            // The composer stays USABLE while streaming: the user can keep
+            // typing and attaching; sending queues the next turn instead of
+            // dropping it. Only the send action swaps to Stop.
             isStreaming = isStreaming,
-            // The + attach control is part of the composer on EVERY surface —
-            // a new chat included. It no longer "appears after the first
-            // message" because it never disappeared in the first place.
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(Spacing.lg)
@@ -420,7 +456,19 @@ fun ChatScreen(
     }
 
     if (showAttachmentSheet) {
-        AttachmentSheet(
+        // Custom presentation: dim scrim + bottom-anchored panel (replaces the
+        // default ModalBottomSheet for a fully hand-designed look).
+        Box(Modifier.fillMaxSize()) {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.45f))
+                    .clickable(indication = null, interactionSource = remember {
+                        androidx.compose.foundation.interaction.MutableInteractionSource()
+                    }) { showAttachmentSheet = false }
+            )
+            Box(Modifier.align(Alignment.BottomCenter)) {
+                AttachmentSheet(
             onDismiss = { showAttachmentSheet = false },
             onCamera = launchCamera,
             onPhotos = {
@@ -442,12 +490,22 @@ fun ChatScreen(
             onCreateWorkspace = {
                 viewModel.createWorkspace("Workspace") { }
             }
-        )
+                )
+            }
+        }
     }
 
     // ---- Draggable terminal panel over the chat (inside the overlay Box) --------
-    terminalSession?.let { session ->
-        if (showTerminal) {
+        terminalSession?.let { session ->
+        // Slide-up/down entrance instead of a hard pop — the panel feels like
+        // it slides out of the composer, not teleporting in.
+        androidx.compose.animation.AnimatedVisibility(
+            visible = showTerminal,
+            enter = slideInVertically(tween(280, easing = FastOutSlowInEasing)) { it } +
+                fadeIn(tween(200)),
+            exit = slideOutVertically(tween(220, easing = FastOutSlowInEasing)) { it } +
+                fadeOut(tween(160))
+        ) {
             Box(
                 Modifier
                     .align(androidx.compose.ui.Alignment.BottomCenter)
@@ -500,7 +558,7 @@ private fun ChatTopBar(
                         }
                 ) {
                 Text(
-                    text = modelName ?: "Select a model",
+                    text = shortModelName(modelName),
                     style = MaterialTheme.typography.titleMedium,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -607,7 +665,7 @@ private fun ChatTopBar(
                                 ) {
                                     Column(Modifier.weight(1f)) {
                                         Text(
-                                            option.modelId,
+                                            shortModelName(option.modelId),
                                             style = MaterialTheme.typography.bodyMedium,
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis
@@ -655,6 +713,16 @@ private class TitleDropdownProvider(
             .coerceIn(0, (windowSize.height - popupContentSize.height).coerceAtLeast(0))
         return androidx.compose.ui.unit.IntOffset(x, y)
     }
+}
+
+/**
+ * Strips the provider/namespace prefix from a raw model id for display:
+ * "openai/gpt-oss-120b" → "gpt-oss-120b", "accounts/fireworks/models/llama" →
+ * "llama". The full id stays in use internally — this is label-only.
+ */
+private fun shortModelName(rawModelId: String?): String {
+    if (rawModelId.isNullOrBlank()) return "Select a model"
+    return rawModelId.substringAfterLast('/').ifBlank { rawModelId }
 }
 
 /**
@@ -722,8 +790,12 @@ private fun MessageAttachmentTile(attachment: Attachment) {
 @Composable
 private fun MessageRow(
     message: Message,
+    onRetryFromHere: (() -> Unit)? = null,
     onEditAndResend: (() -> Unit)? = null
 ) {
+    val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
+    var showMenu by remember { mutableStateOf(false) }
+
     when (message.role) {
         Message.Role.USER -> Row(
             modifier = Modifier.fillMaxWidth(),
@@ -740,13 +812,25 @@ private fun MessageRow(
                         }
                     }
                 }
-                var showMenu by remember { mutableStateOf(false) }
                 androidx.compose.material3.DropdownMenu(
                     expanded = showMenu,
                     onDismissRequest = { showMenu = false }
                 ) {
                     androidx.compose.material3.DropdownMenuItem(
+                        text = { Text("Copy") },
+                        leadingIcon = {
+                            Icon(Icons.Outlined.ContentCopy, contentDescription = null, modifier = Modifier.size(18.dp))
+                        },
+                        onClick = {
+                            showMenu = false
+                            clipboard.setText(androidx.compose.ui.text.AnnotatedString(message.content))
+                        }
+                    )
+                    androidx.compose.material3.DropdownMenuItem(
                         text = { Text("Edit & resend") },
+                        leadingIcon = {
+                            Icon(Icons.Outlined.Edit, contentDescription = null, modifier = Modifier.size(18.dp))
+                        },
                         onClick = {
                             showMenu = false
                             onEditAndResend?.invoke()
@@ -780,7 +864,39 @@ private fun MessageRow(
                 .fillMaxWidth()
                 .padding(start = Spacing.sm, end = Spacing.sm)
         ) {
-            MarkdownText(markdown = message.content)
+            androidx.compose.material3.DropdownMenu(
+                expanded = showMenu,
+                onDismissRequest = { showMenu = false }
+            ) {
+                androidx.compose.material3.DropdownMenuItem(
+                    text = { Text("Copy") },
+                    leadingIcon = {
+                        Icon(Icons.Outlined.ContentCopy, contentDescription = null, modifier = Modifier.size(18.dp))
+                    },
+                    onClick = {
+                        showMenu = false
+                        clipboard.setText(androidx.compose.ui.text.AnnotatedString(message.content))
+                    }
+                )
+                androidx.compose.material3.DropdownMenuItem(
+                    text = { Text("Retry") },
+                    leadingIcon = {
+                        Icon(Icons.Outlined.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
+                    },
+                    onClick = {
+                        showMenu = false
+                        onRetryFromHere?.invoke()
+                    }
+                )
+            }
+            Box(
+                Modifier.combinedClickable(
+                    onClick = {},
+                    onLongClick = { showMenu = true }
+                )
+            ) {
+                MarkdownText(markdown = message.content)
+            }
         }
 
         Message.Role.SYSTEM -> Unit
@@ -933,7 +1049,7 @@ private fun ComposerBar(
             // The + control is a PERMANENT part of the composer: attach, work-
             // space, terminal toggles live here on every screen state — new chat
             // included. Streaming only disables it, it never hides it.
-            IconButton(onClick = onAttach, enabled = !isStreaming) {
+            IconButton(onClick = onAttach) {
                 Icon(
                     imageVector = Icons.Outlined.Add,
                     contentDescription = "Attach and capabilities",
@@ -945,7 +1061,8 @@ private fun ComposerBar(
                 onValueChange = onDraftChange,
                 modifier = Modifier.weight(1f),
                 placeholder = { Text("Ask Neuron…") },
-                enabled = !isStreaming,
+                // Typing stays available during streaming — the send queues.
+                enabled = true,
                 minLines = 1,
                 maxLines = 5,
                 colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
@@ -955,8 +1072,8 @@ private fun ComposerBar(
                 ),
                 textStyle = MaterialTheme.typography.bodyLarge
             )
-            // Right slot morphs send ⇄ stop with a quick scale crossfade —
-            // same slot, so the composer never changes shape.
+            // Streaming: STOP first (prominent), send second — send queues the
+            // next turn. Idle: send only. Same slot, animated morph.
             AnimatedContent(
                 targetState = isStreaming,
                 transitionSpec = {
@@ -965,19 +1082,23 @@ private fun ComposerBar(
                 },
                 label = "composerAction"
             ) { streaming ->
-                if (streaming) {
-                    IconButton(onClick = onStop) {
-                        Icon(
-                            imageVector = Icons.Outlined.Close,
-                            contentDescription = "Stop generating",
-                            tint = MaterialTheme.colorScheme.error
-                        )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (streaming) {
+                        IconButton(onClick = onStop) {
+                            Icon(
+                                imageVector = Icons.Outlined.Close,
+                                contentDescription = "Stop generating",
+                                tint = MaterialTheme.colorScheme.error
+                            )
+                        }
                     }
-                } else {
-                    IconButton(onClick = onSend, enabled = draft.isNotBlank()) {
+                    IconButton(
+                        onClick = onSend,
+                        enabled = draft.isNotBlank()
+                    ) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.Send,
-                            contentDescription = "Send",
+                            contentDescription = if (streaming) "Queue message" else "Send",
                             tint = if (draft.isNotBlank()) MaterialTheme.colorScheme.primary
                             else MaterialTheme.colorScheme.outline
                         )
