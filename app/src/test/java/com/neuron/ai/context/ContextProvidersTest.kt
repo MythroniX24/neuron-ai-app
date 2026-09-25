@@ -70,12 +70,19 @@ class ContextRankerTest {
 
     @Test
     fun `within a tier equal relevance - newer wins`() {
+        // Fixed 'now' makes the recency rule deterministic.
+        val now = 2_000_000L
         val ranked = ContextRanker.rank(
             listOf(
-                item("older", ContextPriority.RECENT_CHAT, ageMs = 5_000),
-                item("newer", ContextPriority.RECENT_CHAT, ageMs = 100)
+                item("older", ContextPriority.RECENT_CHAT, chars = 100).let {
+                    it.copy(timestampMs = now - 60_000L)
+                },
+                item("newer", ContextPriority.RECENT_CHAT, chars = 100).let {
+                    it.copy(timestampMs = now - 1_000L)
+                }
             ),
-            query = "anything"
+            query = "anything",
+            nowMs = now
         )
         assertEquals("newer", ranked.first().id)
     }
