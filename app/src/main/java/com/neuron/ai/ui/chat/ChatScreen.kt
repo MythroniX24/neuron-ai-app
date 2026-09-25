@@ -4,10 +4,12 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
-import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.Image
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -17,6 +19,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBarsPadding
@@ -35,7 +38,6 @@ import androidx.compose.material.icons.outlined.KeyboardArrowDown
 import androidx.compose.material.icons.outlined.Menu
 import androidx.compose.material.icons.outlined.Terminal
 import androidx.compose.material.icons.outlined.Refresh
-import androidx.compose.material3.AssistChip
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -62,6 +64,8 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import com.neuron.ai.core.conversation.Attachment
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -107,6 +111,7 @@ fun ChatScreen(
     val generation by viewModel.generationState.collectAsStateWithLifecycle()
     val activity by viewModel.activity.collectAsStateWithLifecycle()
     val draftAttachments by viewModel.draftAttachments.collectAsStateWithLifecycle()
+    val attachmentNotice by viewModel.attachmentNotice.collectAsStateWithLifecycle()
     val conversation by viewModel.conversation.collectAsStateWithLifecycle()
 
     var draft by remember { mutableStateOf("") }
@@ -294,26 +299,53 @@ fun ChatScreen(
             }
         }
 
-        // Draft attachment row with remove affordances.
+        // Visible reason when an attachment fails to import — never silent.
+        attachmentNotice?.let { notice ->
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = Spacing.lg, vertical = Spacing.xs)
+            ) {
+                Text(
+                    text = notice,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.weight(1f)
+                )
+                TextButton(onClick = viewModel::clearAttachmentNotice) { Text("Dismiss") }
+            }
+        }
+
+        // Draft attachment tiles above the text box — rounded squares.
+        // Images show the actual thumbnail; files show their name. Tap = remove.
         if (draftAttachments.isNotEmpty()) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = Spacing.lg),
+                    .padding(horizontal = Spacing.lg, vertical = Spacing.xs),
                 horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
             ) {
-                draftAttachments.take(3).forEach { attachment ->
-                    AssistChip(
-                        onClick = { viewModel.removeDraftAttachment(attachment.id) },
-                        label = { Text(attachment.displayName, maxLines = 1) },
-                        trailingIcon = {
+                draftAttachments.take(4).forEach { attachment ->
+                    Box {
+                        MessageAttachmentTile(attachment)
+                        Surface(
+                            shape = androidx.compose.foundation.shape.CircleShape,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier
+                                .size(18.dp)
+                                .align(Alignment.TopEnd)
+                                .offset(x = 6.dp, y = (-6).dp)
+                                .clickable { viewModel.removeDraftAttachment(attachment.id) }
+                        ) {
                             Icon(
                                 imageVector = Icons.Outlined.Close,
                                 contentDescription = "Remove ${attachment.displayName}",
-                                modifier = Modifier.size(14.dp)
+                                tint = MaterialTheme.colorScheme.onPrimary,
+                                modifier = Modifier.padding(3.dp)
                             )
                         }
-                    )
+                    }
                 }
             }
         }
@@ -568,6 +600,65 @@ private class TitleDropdownProvider(
 }
 
 @Composable
+/**
+ * One attachment tile for a [message] row — the sent-file strip in chat.
+ * Images render the thumbnail; other files render a document tile with the
+ * file name (never a fake preview).
+ */
+@Composable
+private fun MessageAttachmentTile(attachment: Attachment) {
+    val context = LocalContext.current
+    val model = remember(attachment.id) {
+        attachment.takeIf { it.isImage }?.let { att ->
+            runCatching {
+                val f = java.io.File(context.filesDir, att.localPath)
+                if (f.exists()) {
+                    android.graphics.BitmapFactory.decodeStream(
+                        java.io.FileInputStream(f), null,
+                        android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                    )
+                    val opts = android.graphics.BitmapFactory.Options().apply {
+                        inSampleSize = maxOf(1, maxOf(outWidth, outHeight) / 512)
+                    }
+                    android.graphics.BitmapFactory.decodeStream(java.io.FileInputStream(f), null, opts)
+                } else null
+            }.getOrNull()
+        }
+    }
+    Surface(
+        shape = RoundedCornerShape(10.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        modifier = Modifier.size(64.dp)
+    ) {
+        if (model != null) {
+            Image(
+                bitmap = model.asImageBitmap(),
+                contentDescription = attachment.displayName,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(10.dp))
+            )
+        } else {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+                modifier = Modifier.padding(6.dp)
+            ) {
+                Text(
+                    text = "📄",
+                    style = MaterialTheme.typography.titleMedium
+                )
+                Text(
+                    text = attachment.displayName,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+    }
+}
+
 private fun MessageRow(message: Message) {
     when (message.role) {
         Message.Role.USER -> Row(
@@ -576,12 +667,14 @@ private fun MessageRow(message: Message) {
         ) {
             Column(horizontalAlignment = Alignment.End) {
                 if (message.attachments.isNotEmpty()) {
-                    Text(
-                        text = "📎 ${message.attachments.size} attachment(s)",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
                         modifier = Modifier.padding(bottom = Spacing.xs)
-                    )
+                    ) {
+                        message.attachments.take(4).forEach { attachment ->
+                            MessageAttachmentTile(attachment)
+                        }
+                    }
                 }
                 Surface(
                     shape = MaterialTheme.shapes.large,

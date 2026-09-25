@@ -29,6 +29,12 @@ sealed class ToolPolicy {
 data class AgentGoal(
     val instruction: String,
     val conversationId: String,
+    /**
+     * Attachments of the CURRENT user message. Images go to the model as
+     * vision input; text-like files must be flattened into [instruction]
+     * by the caller before the goal is built.
+     */
+    val attachments: List<com.neuron.ai.core.conversation.Attachment> = emptyList(),
     /** Deprecated Phase 1 field kept for source compatibility; use [toolPolicy]. */
     val allowedTools: Set<String> = emptySet(),
     /** Prior conversation turns (oldest first) so multi-turn chat has context. */

@@ -144,7 +144,8 @@ class ChatViewModelFactory(
             workspaces = container.workspaceManager,
             terminalManager = container.terminalManager,
             browserManager = container.browserManager,
-            contextEngine = contextEngine
+            contextEngine = contextEngine,
+            attachmentStore = container.attachmentStore
         ) as T
     }
 }

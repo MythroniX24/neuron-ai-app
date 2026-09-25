@@ -78,7 +78,9 @@ class ChatViewModel(
     private val browserManager: com.neuron.ai.core.integration.BrowserManager,
     /** Milestone 3: priority context builder with memory injection (no-op by default in previews/tests). */
     private val contextEngine: com.neuron.ai.ui.chat.ChatContextEngine =
-        com.neuron.ai.ui.chat.ChatContextEngine()
+        com.neuron.ai.ui.chat.ChatContextEngine(),
+    /** Reads attachment bytes/text so the agent can analyse user files. */
+    private val attachmentStore: com.neuron.ai.data.attachment.AttachmentStore? = null
 ) : ViewModel() {
 
     val messages: StateFlow<List<Message>> =
@@ -90,6 +92,12 @@ class ChatViewModel(
 
     private val _draftAttachments = MutableStateFlow<List<Attachment>>(emptyList())
     val draftAttachments: StateFlow<List<Attachment>> = _draftAttachments.asStateFlow()
+
+    /** One-shot visible reason when an attachment import fails (never silent). */
+    private val _attachmentNotice = MutableStateFlow<String?>(null)
+    val attachmentNotice: StateFlow<String?> = _attachmentNotice.asStateFlow()
+
+    fun clearAttachmentNotice() { _attachmentNotice.value = null }
 
     private val _activity = MutableStateFlow<List<AgentActivityUi>>(emptyList())
     val activity: StateFlow<List<AgentActivityUi>> = _activity.asStateFlow()
@@ -286,8 +294,11 @@ class ChatViewModel(
             val attachment = importAttachmentFn(uri)
             if (attachment != null) {
                 _draftAttachments.value = _draftAttachments.value + attachment
+                _attachmentNotice.value = null
             } else {
                 logger.w("Chat", "Attachment import failed")
+                _attachmentNotice.value =
+                    "Could not import this file. If it is a cloud-only item, download it locally first."
             }
         }
     }
@@ -301,8 +312,10 @@ class ChatViewModel(
             val attachment = importCaptureFn(captureFile)
             if (attachment != null) {
                 _draftAttachments.value = _draftAttachments.value + attachment
+                _attachmentNotice.value = null
             } else {
                 logger.w("Chat", "Camera capture import failed")
+                _attachmentNotice.value = "Could not save the camera capture. Try again."
             }
         }
     }
@@ -315,10 +328,15 @@ class ChatViewModel(
         if (prompt.isEmpty() && attachments.isEmpty()) return
         if (_generation.value is GenerationState.Streaming) return
 
-        lastUserPrompt = prompt
         lastUserAttachments = attachments
 
         job = viewModelScope.launch(dispatchers.io) {
+            // Text-like attachments are flattened into the prompt as 【FILE】
+            // blocks so any model (vision or not) can actually read the file
+            // content. Bounded: ≤3 files, ≤4k chars each.
+            val effectivePrompt = prompt + flattenTextAttachments(attachments)
+            lastUserPrompt = effectivePrompt
+
             ensureConversation()
             conversations.appendMessage(
                 conversationId,
@@ -333,7 +351,25 @@ class ChatViewModel(
                 conversationId = conversationId
             )
             currentTaskId = task.id
-            runAgentTurn(prompt, task.id)
+            runAgentTurn(effectivePrompt, task.id, attachments = attachments)
+        }
+    }
+
+    /**
+     * Flattens text-like attachments into the prompt as fenced 【FILE】 blocks
+     * so the model can read their content. Bounded: ≤3 files, ≤4k chars each;
+     * read failures degrade to a note instead of failing the whole turn.
+     */
+    private suspend fun flattenTextAttachments(attachments: List<Attachment>): String {
+        val store = attachmentStore ?: return ""
+        val textFiles = attachments.filter { it.isText }.take(3)
+        if (textFiles.isEmpty()) return ""
+        return textFiles.joinToString("") { att ->
+            val content = runCatching { store.extractText(att, maxBytes = 4_000) }
+                .getOrNull()
+                ?.takeIf { it.isNotBlank() }
+                ?: "[could not read file content]"
+            "\n\n【FILE: ${att.displayName}】\n$content\n【END FILE ${att.displayName}】"
         }
     }
 
@@ -372,13 +408,14 @@ class ChatViewModel(
         job = null
         // Task CANCELLED status is set inside the turn's cancellation handler,
         // where the scope is already cancelled — safe there via NonCancellable.
-    }
-
-    fun retry() {
+    }    fun retry() {
         val prompt = lastUserPrompt ?: return
         if (_generation.value is GenerationState.Streaming) return
+
         // The user message is already persisted; only re-run the answer.
-        job = viewModelScope.launch(dispatchers.io) { runAgentTurn(prompt, currentTaskId) }
+        job = viewModelScope.launch(dispatchers.io) {
+            runAgentTurn(prompt, currentTaskId, attachments = lastUserAttachments ?: emptyList())
+        }
     }
 
     fun regenerate() {
@@ -390,9 +427,11 @@ class ChatViewModel(
                 it.role == Message.Role.ASSISTANT
             }.forEach { conversations.deleteMessage(it.id) }
 
-            lastUserPrompt = lastUser.content
             lastUserAttachments = lastUser.attachments
-            runAgentTurn(lastUser.content, currentTaskId)
+            // Re-flatten text files — the persisted row keeps only the raw prompt.
+            val effective = lastUser.content + flattenTextAttachments(lastUser.attachments)
+            lastUserPrompt = effective
+            runAgentTurn(effective, currentTaskId, attachments = lastUser.attachments)
         }
     }
 
@@ -407,9 +446,11 @@ class ChatViewModel(
                 newContent,
                 attachments = original?.attachments ?: emptyList()
             )
-            lastUserPrompt = newContent
-            lastUserAttachments = original?.attachments ?: emptyList()
-            runAgentTurn(newContent, currentTaskId)
+            val originalAttachments = original?.attachments ?: emptyList()
+            lastUserAttachments = originalAttachments
+            val effective = newContent + flattenTextAttachments(originalAttachments)
+            lastUserPrompt = effective
+            runAgentTurn(effective, currentTaskId, attachments = originalAttachments)
         }
     }
 
@@ -424,7 +465,11 @@ class ChatViewModel(
 
     /** Runs one agent turn; the user message must already be persisted.
      *  [taskId] mirrors this turn onto the task system when provided. */
-    private suspend fun runAgentTurn(prompt: String, taskId: String?) {
+    private suspend fun runAgentTurn(
+        prompt: String,
+        taskId: String?,
+        attachments: List<Attachment> = emptyList()
+    ) {
         val selection = resolveSelection()
         if (selection == null) {
             taskId?.let { tid ->
@@ -496,6 +541,7 @@ class ChatViewModel(
                 AgentGoal(
                     instruction = prompt,
                     conversationId = conversationId,
+                    attachments = attachments,
                     history = buildHistory()
                 )
             ).collect { event ->
