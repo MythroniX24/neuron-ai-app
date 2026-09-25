@@ -4,7 +4,6 @@ import com.neuron.ai.core.conversation.Message
 import com.neuron.ai.core.provider.ChatMessage
 
 private const val MAX_HISTORY_TURNS = 24
-private const val MAX_CONTEXT_CHARS = 24_000
 
 /**
  * Milestone-3 context engine builds the model request from PRIORITIZED
@@ -18,7 +17,9 @@ private const val MAX_CONTEXT_CHARS = 24_000
  * Never sends: whole workspaces, unbounded old history, huge tool outputs.
  */
 class ChatContextEngine(
-    private val memoryBlockProvider: suspend () -> String? = { null }
+    private val memoryBlockProvider: suspend () -> String? = { null },
+    /** Selected model's context window (tokens); null = conservative default. */
+    private val contextWindowTokens: Int? = null
 ) {
     /**
      * Builds the multi-turn context sent to the model, oldest first.
@@ -44,8 +45,10 @@ class ChatContextEngine(
                 when (msg.role) {
                     Message.Role.TOOL -> ChatMessage(
                         role = ChatMessage.Role.TOOL,
-                        // Compression: keep head + the most informative lines.
-                        content = compressToolResult(msg.content),
+                        // Phase-1 context orchestration: structured tool-result
+                        // compression (summary + key lines + full-ref hint).
+                        content = com.neuron.ai.context.compression.ToolResultProcessor
+                            .process(msg),
                         toolCallId = msg.metadata?.toolCallId
                     )
                     else -> ChatMessage(
@@ -71,18 +74,27 @@ class ChatContextEngine(
             out += ChatMessage(role = ChatMessage.Role.USER, content = directUserText)
         }
 
-        // Final budget: oldest messages shrink first; the tail (current
-        // request + recent turns) keeps full detail.
-        return applyBudget(out)
+        // Final budget: model-aware (CONTEXT_ARCHITECTURE.md §6) — the window
+        // estimate drives the character budget (≈4 chars/token, 10% safety,
+        // 2k tokens reserved for the answer); oldest messages shrink first,
+        // the tail (current request + recent turns) keeps full detail.
+        val charBudget = com.neuron.ai.context.budget.TokenBudgetManager()
+            .computeBudget(contextWindowTokens ?: 8_000)
+            .usableForInput * 4
+        return applyBudget(out, maxOf(charBudget, MIN_CONTEXT_CHARS))
     }
 
+    /** Returns an engine bound to a specific model context window (tokens). */
+    fun withWindow(windowTokens: Int): ChatContextEngine =
+        ChatContextEngine(memoryBlockProvider, windowTokens)
+
     /** Priority budget: compress from the oldest end; never touch the tail. */
-    private fun applyBudget(messages: List<ChatMessage>): List<ChatMessage> {
+    private fun applyBudget(messages: List<ChatMessage>, maxChars: Int): List<ChatMessage> {
         var total = messages.sumOf { it.content.length }
-        if (total <= MAX_CONTEXT_CHARS) return messages
+        if (total <= maxChars) return messages
         val trimmed = messages.toMutableList()
         var index = 0
-        while (total > MAX_CONTEXT_CHARS && index < messages.size) {
+        while (total > maxChars && index < messages.size) {
             val message = messages[index]
             if (message.role == ChatMessage.Role.SYSTEM) { index++; continue }
             val content = message.content
@@ -95,32 +107,8 @@ class ChatContextEngine(
     }
 
     companion object {
-        /**
-         * Tool-result compression: keeps structured headers (exit=, SOURCE,
-         * TITLE/URL, [err] lines) and a bounded tail — the model keeps what it
-         * needs to react, without the full payload.
-         */
-        fun compressToolResult(content: String, maxChars: Int = 1_200): String {
-            if (content.length <= maxChars) return content
-            val lines = content.lines()
-            val keyLines = lines.filter { line ->
-                val t = line.trimStart()
-                t.startsWith("exit=") || t.startsWith("SOURCE") ||
-                    t.startsWith("TITLE:") || t.startsWith("URL:") ||
-                    t.startsWith("[") || t.startsWith("[err]") || t.startsWith("✓") ||
-                    t.startsWith("error") || t.startsWith("Error")
-            }
-            val head = lines.take(20)
-            val tail = lines.takeLast(10)
-            val parts = buildList {
-                addAll(keyLines.distinct().take(20))
-                add("---")
-                addAll(head)
-                if (lines.size > 30) add("…")
-                addAll(tail)
-            }
-            return parts.joinToString("\n").take(maxChars)
-        }
+        /** Floor for the character budget — tiny models still get usable context. */
+        const val MIN_CONTEXT_CHARS = 6_000
     }
 }
 

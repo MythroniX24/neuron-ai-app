@@ -309,8 +309,15 @@ class ChatViewModel(
      * kept whole, TOOL rows COMPRESSED (not dropped), relevant memory
      * injected as a SYSTEM block, oldest content trimmed first.
      */
-    private suspend fun buildHistory(): List<ChatMessage> =
-        contextEngine.build(conversations.messagesOf(conversationId).first())
+        private suspend fun buildHistory(): List<ChatMessage> {
+        // Model-aware budget: the selected model's estimated context window
+        // drives how much history/context is assembled (Phase-1 orchestration).
+        val window = resolveSelection()?.let { (_, modelId) ->
+            com.neuron.ai.data.provider.ModelCapabilities.estimateContextWindow(modelId)
+        }
+        val engine = if (window != null) contextEngine.withWindow(window) else contextEngine
+        return engine.build(conversations.messagesOf(conversationId).first())
+    }
 
     fun setModel(providerId: String, modelId: String) {
         viewModelScope.launch(dispatchers.io) {
