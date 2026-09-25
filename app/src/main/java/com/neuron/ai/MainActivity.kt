@@ -34,6 +34,21 @@ class MainActivity : ComponentActivity() {
             }
 
             NeuronTheme(darkMode = darkMode) {
+                // Sync system-bar icon appearance with the APP theme, not the
+                // OS theme — otherwise app-dark + system-light renders
+                // invisible white status-bar icons over a light top bar.
+                val view = androidx.compose.ui.platform.LocalView.current
+                if (!view.isInEditMode) {
+                    androidx.compose.runtime.LaunchedEffect(darkMode) {
+                        val window = (view.context as? android.app.Activity)?.window
+                        if (window != null) {
+                            val controller =
+                                androidx.core.view.WindowCompat.getInsetsController(window, window.decorView)
+                            controller.isAppearanceLightStatusBars = !darkMode
+                            controller.isAppearanceLightNavigationBars = !darkMode
+                        }
+                    }
+                }
                 NeuronApp(container = container)
             }
         }
