@@ -41,6 +41,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -457,8 +458,14 @@ fun ChatScreen(
 
     if (showAttachmentSheet) {
         // Custom presentation: dim scrim + bottom-anchored panel (replaces the
-        // default ModalBottomSheet for a fully hand-designed look).
-        Box(Modifier.fillMaxSize()) {
+        // default ModalBottomSheet for a fully hand-designed look). The panel
+        // slides up / fades out with the scrim — no hard pop.
+        androidx.compose.animation.AnimatedVisibility(
+            visible = showAttachmentSheet,
+            enter = androidx.compose.animation.fadeIn(tween(160)),
+            exit = androidx.compose.animation.fadeOut(tween(180))
+        ) {
+            Box(Modifier.fillMaxSize()) {
             Box(
                 Modifier
                     .fillMaxSize()
@@ -467,7 +474,19 @@ fun ChatScreen(
                         androidx.compose.foundation.interaction.MutableInteractionSource()
                     }) { showAttachmentSheet = false }
             )
-            Box(Modifier.align(Alignment.BottomCenter)) {
+            androidx.compose.animation.AnimatedVisibility(
+                visible = showAttachmentSheet,
+                enter = slideInVertically(tween(280, easing = FastOutSlowInEasing)) { it } +
+                    fadeIn(tween(200)),
+                exit = slideOutVertically(tween(220, easing = FastOutSlowInEasing)) { it } +
+                    fadeOut(tween(160)),
+                modifier = Modifier.align(Alignment.BottomCenter)
+            ) {
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .navigationBarsPadding()
+            ) {
                 AttachmentSheet(
             onDismiss = { showAttachmentSheet = false },
             onCamera = launchCamera,
@@ -492,25 +511,26 @@ fun ChatScreen(
             }
                 )
             }
+            }
+        }
         }
     }
 
     // ---- Draggable terminal panel over the chat (inside the overlay Box) --------
         terminalSession?.let { session ->
         // Slide-up/down entrance instead of a hard pop — the panel feels like
-        // it slides out of the composer, not teleporting in.
+        // it slides out of the composer, not teleporting in. The alignment
+        // MUST sit on AnimatedVisibility itself (the direct Box child) — an
+        // align deeper in the content is ignored and the panel lands on top.
         androidx.compose.animation.AnimatedVisibility(
             visible = showTerminal,
             enter = slideInVertically(tween(280, easing = FastOutSlowInEasing)) { it } +
                 fadeIn(tween(200)),
             exit = slideOutVertically(tween(220, easing = FastOutSlowInEasing)) { it } +
-                fadeOut(tween(160))
+                fadeOut(tween(160)),
+            modifier = Modifier.align(Alignment.BottomCenter)
         ) {
-            Box(
-                Modifier
-                    .align(androidx.compose.ui.Alignment.BottomCenter)
-                    .systemBarsPadding()
-            ) {
+            Box(Modifier.systemBarsPadding()) {
                 TerminalPanel(
                     session = session,
                     onDismiss = { showTerminal = false }

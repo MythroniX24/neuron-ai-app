@@ -50,6 +50,15 @@ private val LightColors = lightColorScheme(
     onSurface = Ink900,
     surfaceVariant = SurfaceDimLight,
     onSurfaceVariant = Ink600,
+    // Container ladder: menus, dialogs and sheets read these — unset roles
+    // fall back to the Material baseline (gray-purple) and break the theme.
+    surfaceContainerLowest = SurfaceLight,
+    surfaceContainerLow = Color(0xFFFAFBFC),
+    surfaceContainer = SurfaceDimLight,
+    surfaceContainerHigh = Color(0xFFEFF1F4),
+    surfaceContainerHighest = Color(0xFFE8EAEE),
+    surfaceDim = Color(0xFFDDE0E5),
+    surfaceBright = SurfaceLight,
     surfaceTint = Accent500,
     inverseSurface = Color(0xFF1F242B),
     inverseOnSurface = Color(0xFFF1F3F6),
@@ -84,6 +93,15 @@ private val DarkColors = darkColorScheme(
     // cards / code blocks / sheets read as raised surfaces, not black voids.
     surfaceVariant = SurfaceVariantDark,
     onSurfaceVariant = Color(0xFF9AA1AC),
+    // Container ladder in dark: every step visibly lighter than the last so
+    // dialogs/menus/sheets never melt into the background.
+    surfaceContainerLowest = BgDark,
+    surfaceContainerLow = Color(0xFF14171C),
+    surfaceContainer = Color(0xFF1A1F27),
+    surfaceContainerHigh = Color(0xFF20252E),
+    surfaceContainerHighest = Color(0xFF262C36),
+    surfaceDim = BgDark,
+    surfaceBright = Color(0xFF2A2F37),
     surfaceTint = Accent200,
     inverseSurface = Color(0xFFE8EAEE),
     inverseOnSurface = Color(0xFF1F242B),
