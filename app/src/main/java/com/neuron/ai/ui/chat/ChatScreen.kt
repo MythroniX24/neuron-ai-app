@@ -811,7 +811,7 @@ private fun ToolMessageCard(message: Message) {
             .pressScale(interaction, pressedScale = 0.985f)
             .combinedClickable(
                 interactionSource = interaction,
-                indication = androidx.compose.material.ripple.rememberRipple(),
+                indication = null,
                 onClick = { expanded = !expanded }
             )
     ) {
