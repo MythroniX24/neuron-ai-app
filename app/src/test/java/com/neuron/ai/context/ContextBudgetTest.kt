@@ -4,6 +4,7 @@ import com.neuron.ai.context.budget.TokenBudgetManager
 import com.neuron.ai.context.model.ContextItem
 import com.neuron.ai.context.model.ContextPriority
 import com.neuron.ai.context.model.ContextSourceType
+import com.neuron.ai.context.compression.ProcessedToolResult
 import com.neuron.ai.context.compression.ToolResultProcessor
 import com.neuron.ai.core.conversation.Message
 import com.neuron.ai.core.conversation.MessageMetadata
