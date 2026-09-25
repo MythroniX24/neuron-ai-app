@@ -10,6 +10,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.Image
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -599,7 +601,6 @@ private class TitleDropdownProvider(
     }
 }
 
-@Composable
 /**
  * One attachment tile for a [message] row — the sent-file strip in chat.
  * Images render the thumbnail; other files render a document tile with the
@@ -659,6 +660,7 @@ private fun MessageAttachmentTile(attachment: Attachment) {
     }
 }
 
+@Composable
 private fun MessageRow(message: Message) {
     when (message.role) {
         Message.Role.USER -> Row(
