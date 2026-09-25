@@ -39,45 +39,47 @@ object InlineMarkdown {
         // Theme-aware inline colors, read once per call.
         val codeBackground = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.12f)
         val linkColor = MaterialTheme.colorScheme.primary
-        return buildAnnotatedString {
         val tokens = collectTokens(text)
-        var cursor = 0
 
-        for (token in tokens.sortedBy { it.range.first }) {
-            if (token.range.first < cursor) continue // overlapping earlier token wins
-            if (token.range.first > cursor) append(text.substring(cursor, token.range.first))
+        return buildAnnotatedString {
+            var cursor = 0
 
-            when (token.contentType) {
-                ContentType.BOLD -> withStyle(SpanStyle(fontWeight = FontWeight.SemiBold)) {
-                    append(token.payload)
-                }
+            for (token in tokens.sortedBy { it.range.first }) {
+                if (token.range.first < cursor) continue // overlapping earlier token wins
+                if (token.range.first > cursor) append(text.substring(cursor, token.range.first))
 
-                ContentType.ITALIC -> withStyle(SpanStyle(fontStyle = FontStyle.Italic)) {
-                    append(token.payload)
-                }
+                when (token.contentType) {
+                    ContentType.BOLD -> withStyle(SpanStyle(fontWeight = FontWeight.SemiBold)) {
+                        append(token.payload)
+                    }
 
-                ContentType.CODE -> withStyle(
-                    SpanStyle(fontFamily = FontFamily.Monospace, background = codeBackground)
-                ) {
-                    append(token.payload)
-                }
+                    ContentType.ITALIC -> withStyle(SpanStyle(fontStyle = FontStyle.Italic)) {
+                        append(token.payload)
+                    }
 
-                ContentType.LINK -> withLink(LinkAnnotation.Url(token.payload)) {
-                    withStyle(
-                        SpanStyle(
-                            color = linkColor,
-                            textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline
-                        )
+                    ContentType.CODE -> withStyle(
+                        SpanStyle(fontFamily = FontFamily.Monospace, background = codeBackground)
                     ) {
                         append(token.payload)
                     }
-                }
 
-                ContentType.MATH -> appendInlineContent(MATH_ID, token.payload)
+                    ContentType.LINK -> withLink(LinkAnnotation.Url(token.payload)) {
+                        withStyle(
+                            SpanStyle(
+                                color = linkColor,
+                                textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline
+                            )
+                        ) {
+                            append(token.payload)
+                        }
+                    }
+
+                    ContentType.MATH -> appendInlineContent(MATH_ID, token.payload)
+                }
+                cursor = token.range.last + 1
             }
-            cursor = token.range.last + 1
+            if (cursor < text.length) append(text.substring(cursor))
         }
-        if (cursor < text.length) append(text.substring(cursor))
     }
 
     private fun collectTokens(text: String): List<Token> {
@@ -107,6 +109,5 @@ object InlineMarkdown {
         }
 
         return tokens
-        }
     }
 }

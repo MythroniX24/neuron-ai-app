@@ -133,21 +133,23 @@ class ToolUsingAgent(
                 }
             }
 
-            streamError?.let { error ->
-                // Some models/providers reject the function-calling schema
-                // outright (HTTP 400/404 with a "tools" complaint). When the
-                // turn had tools attached and nothing streamed yet, retry ONCE
-                // without the tools array — plain chat still completes.
-                val requestHadTools = availableTools.isNotEmpty()
-                val nothingStreamed = assistantText.isBlank() && toolCalls.isEmpty()
-                if (requestHadTools && toolsAvailable && !retriedWithoutTools && nothingStreamed) {
-                    retriedWithoutTools = true
-                    toolsAvailable = false
-                    step--
-                    logger?.w("Agent", "Tool schema rejected — retrying without tools: ${error.message}")
-                    continue
-                }
-                send(AgentEvent.Failed(error.userMessage))
+            // Some models/providers reject the function-calling schema
+            // outright (HTTP 400/404 with a "tools" complaint). When the
+            // turn had tools attached and nothing streamed yet, retry ONCE
+            // without the tools array — plain chat still completes.
+            val retryWithoutTools = streamError != null &&
+                availableTools.isNotEmpty() &&
+                toolsAvailable &&
+                !retriedWithoutTools &&
+                assistantText.isBlank() &&
+                toolCalls.isEmpty()
+            if (retryWithoutTools) {
+                retriedWithoutTools = true
+                toolsAvailable = false
+                step--
+                logger?.w("Agent", "Tool schema rejected — retrying without tools: ${streamError?.message}")
+            } else if (streamError != null) {
+                send(AgentEvent.Failed(streamError!!.userMessage))
                 return@channelFlow
             }
 
