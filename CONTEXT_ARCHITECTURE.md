@@ -27,6 +27,11 @@ Three concepts stay strictly separate:
 UserRequest
     ↓
 ContextOrchestrator                 (single entry point, called by AgentRuntime before every model call)
+
+INTEGRATION POINT (current Neuron-AI code): context is built today by
+ChatViewModel.buildHistory() → ChatContextEngine, passed to AgentGoal.history.
+The orchestrator REPLACES that call site — AgentGoal.history remains the
+carrier into the agent loop. No second context-building path may appear.
     ↓
 [Providers fetch raw candidates in parallel]
     ↓
@@ -44,13 +49,14 @@ ActiveContext                        (final, immutable, sent to model)
 ## 3. Package Structure
 
 ```
-com.mythronix.neuronai.context/
+com.neuron.ai.context/
 ├── orchestrator/   ContextOrchestrator, ContextBuilder
 ├── model/          ActiveContext, ContextItem, ContextPriority, ContextSourceType
 ├── providers/       ConversationContextProvider, MemoryContextProvider,
                       WorkspaceContextProvider, TaskContextProvider,
-                      ToolContextProvider, ConnectorContextProvider,
-                      AttachmentContextProvider
+                      ToolContextProvider, AttachmentContextProvider
+                      (ConnectorContextProvider is v2 — no connector
+                       subsystem exists in the app yet; excluded from v1)
 ├── retrieval/       HybridRetriever, LexicalIndex (SQLite FTS5), Reranker
 ├── budget/          TokenBudgetManager, TokenEstimator
 ├── compaction/       CompactionManager, StructuredStateBuilder
@@ -205,9 +211,9 @@ No heavy vector database dependency. Hybrid lexical + metadata retrieval:
 - **SQLite FTS5** (built into Android's SQLite — zero extra dependency) indexes conversation messages
   for keyword search.
 - Ranking combines FTS5 BM25 score + recency decay + source priority.
-- **Future upgrade path (not required for v1):** [[continuum-slm]] could generate lightweight on-device
-  embeddings for true semantic retrieval, avoiding any third-party embedding model or paid API — this
-  fits naturally once Continuum is further along, but isn't a blocker for shipping this system.
+- **Future upgrade path (not required for v1):** a small on-device SLM could generate lightweight
+  embeddings for true semantic retrieval, avoiding any third-party embedding model or paid API —
+  pluggable later via the `SemanticIndex` interface without touching the pipeline.
 
 ```kotlin
 class HybridRetriever(
@@ -296,8 +302,8 @@ data class ContextDebugSnapshot(
 )
 ```
 
-Surfaced initially as a developer-only panel; can later be exposed to end users as a lightweight
-"context usage" indicator.
+v1: logged via the existing Logger on every assembled context (debug builds only);
+UI panel / end-user "context usage" indicator is deferred until the system is verified.
 
 ---
 
@@ -340,7 +346,7 @@ without adding a heavy dependency:
 - Maintain a small **synonym/alias map** (stored via the existing memory system) that the retriever
   expands the query with before searching — e.g. `"terminal permission"` ↔ `"shell access"`.
 - Keep semantic embeddings as a **pluggable** `SemanticIndex` behind the same `Reranker` interface, so
-  [[continuum-slm]] can be swapped in later without touching the orchestrator pipeline.
+  a future on-device embedding index can be swapped in later without touching the orchestrator pipeline.
 
 ```kotlin
 interface SemanticIndex {

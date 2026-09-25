@@ -38,8 +38,32 @@ object ModelCapabilities {
         id = id,
         displayName = id,
         supportsVision = estimateVision(id, visionEnabled),
-        supportsTools = estimateTools(id, toolsEnabled)
+        supportsTools = estimateTools(id, toolsEnabled),
+        contextWindowTokens = estimateContextWindow(id)
     )
+
+    /**
+     * Conservative context-window estimate from well-known model-id patterns
+     * (tokens). Used by the context budgeter; providers that can report a
+     * real window override via Model.contextWindowTokens. Unknown models get
+     * the smallest common window — under-promise, never overflow.
+     */
+    fun estimateContextWindow(modelId: String): Int = when {
+        Regex("(?i)gpt-4-turbo|gpt-4o|gpt-4\\.1|o3|o4-mini").containsMatchIn(modelId) -> 128_000
+        Regex("(?i)gpt-4\\b").containsMatchIn(modelId) -> 8_000
+        Regex("(?i)gpt-3\\.5").containsMatchIn(modelId) -> 16_000
+        Regex("(?i)gemini-1\.5-pro|gemini-2|gemini-pro").containsMatchIn(modelId) -> 128_000
+        Regex("(?i)gemini-1\.5-flash|gemini-flash").containsMatchIn(modelId) -> 128_000
+        Regex("(?i)claude-3-5|claude-3\\.5|claude-4").containsMatchIn(modelId) -> 200_000
+        Regex("(?i)claude-3(opus|sonnet|haiku)").containsMatchIn(modelId) -> 200_000
+        Regex("(?i)llama-3\.1|llama-3\.3|llama4").containsMatchIn(modelId) -> 128_000
+        Regex("(?i)llama-3\\b").containsMatchIn(modelId) -> 8_000
+        Regex("(?i)deepseek").containsMatchIn(modelId) -> 64_000
+        Regex("(?i)qwen2?\.5|qwen3").containsMatchIn(modelId) -> 32_000
+        Regex("(?i)mistral|mixtral").containsMatchIn(modelId) -> 32_000
+        Regex("(?i)grok").containsMatchIn(modelId) -> 128_000
+        else -> 8_000
+    }
 
     /**
      * Validates a planned send against the model's capabilities.
