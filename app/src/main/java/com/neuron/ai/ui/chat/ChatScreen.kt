@@ -474,19 +474,14 @@ fun ChatScreen(
                         androidx.compose.foundation.interaction.MutableInteractionSource()
                     }) { showAttachmentSheet = false }
             )
-            androidx.compose.animation.AnimatedVisibility(
-                visible = showAttachmentSheet,
-                enter = slideInVertically(tween(280, easing = FastOutSlowInEasing)) { it } +
-                    fadeIn(tween(200)),
-                exit = slideOutVertically(tween(220, easing = FastOutSlowInEasing)) { it } +
-                    fadeOut(tween(160)),
+            // Drag-up-for-fullscreen panel — same gesture language as the
+            // terminal: strip up = grow, strip down past the threshold = close.
+            com.neuron.ai.ui.components.DraggablePanelContainer(
+                onDismiss = { showAttachmentSheet = false },
+                restFraction = 0.62f,
                 modifier = Modifier.align(Alignment.BottomCenter)
             ) {
-            Box(
-                Modifier
-                    .fillMaxWidth()
-                    .navigationBarsPadding()
-            ) {
+            Box(Modifier.navigationBarsPadding()) {
                 AttachmentSheet(
             onDismiss = { showAttachmentSheet = false },
             onCamera = launchCamera,

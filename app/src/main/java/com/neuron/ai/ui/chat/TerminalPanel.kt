@@ -1,12 +1,12 @@
 package com.neuron.ai.ui.chat
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
@@ -32,7 +32,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -40,7 +39,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
@@ -54,20 +52,17 @@ import com.neuron.ai.data.terminal.TerminalState
 import com.neuron.ai.ui.theme.Spacing
 import kotlinx.coroutines.launch
 
-private enum class PanelState { HALF, EXPANDED }
-
 /**
- * Real terminal panel over the chat: half-screen by default, draggable to
- * expanded, dismissible. Streams the shared [TerminalSession] output — the
- * same session AI tools use. Light-first, monospace, stdout/stderr distinct.
+ * Real terminal panel over the chat: rendered inside a
+ * [com.neuron.ai.ui.components.DraggablePanelContainer] — drag the strip up
+ * for full screen, down to close. Streams the shared [TerminalSession]
+ * output — the same session AI tools use. Monospace, stdout/stderr distinct.
  */
 @Composable
 fun TerminalPanel(
     session: TerminalSession,
     onDismiss: () -> Unit
 ) {
-    var panelState by remember { mutableStateOf(PanelState.HALF) }
-    var heightFraction: Float by remember { mutableStateOf(0.5f) }
     var command by remember { mutableStateOf("") }
     val output by session.output.collectAsStateWithLifecycle()
     val state by session.state.collectAsStateWithLifecycle()
@@ -84,11 +79,9 @@ fun TerminalPanel(
 
     val isRunning = state == TerminalState.RUNNING
 
-    Box(
-        Modifier
-            .fillMaxWidth()
-            .height((heightFraction * 950f).dp.coerceIn(220.dp, 820.dp))
-    ) {
+    // Drag-up-to-fullscreen container owns the height and the drag strip;
+    // this composable just renders the panel content below it.
+    com.neuron.ai.ui.components.DraggablePanelContainer(onDismiss = onDismiss) {
         Surface(
             shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
             color = MaterialTheme.colorScheme.surface,
@@ -98,42 +91,8 @@ fun TerminalPanel(
             Column(
                 Modifier
                     .imePadding()
+                    .fillMaxHeight()
             ) {
-                // ---- Drag handle + actions --------------------------------------
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .pointerInput(Unit) {
-                            detectVerticalDragGestures(
-                                onDragEnd = {
-                                    when {
-                                        heightFraction > 0.72f -> heightFraction = 0.85f
-                                        heightFraction < 0.38f -> {
-                                            heightFraction = 0.5f
-                                            onDismiss()
-                                        }
-                                        else -> heightFraction = 0.5f
-                                    }
-                                    panelState = if (heightFraction > 0.6f) PanelState.EXPANDED else PanelState.HALF
-                                }
-                            ) { _, dragAmount ->
-                                val newFraction = heightFraction - dragAmount / 950f
-                                heightFraction = newFraction.coerceIn(0.3f, 0.9f)
-                            }
-                        }
-                        .padding(top = Spacing.xs)
-                ) {
-                    Box(
-                        Modifier
-                            .width(44.dp)
-                            .height(4.dp)
-                            .background(
-                                MaterialTheme.colorScheme.outline,
-                                RoundedCornerShape(2.dp)
-                            )
-                    )
-                }
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier
