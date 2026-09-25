@@ -79,6 +79,11 @@ class ToolUsingAgent(
         )
 
         var step = 0
+        var toolsAvailable = goal.toolPolicy != com.neuron.ai.core.agent.ToolPolicy.Only(emptySet())
+        var retriedWithoutTools = false
+        // Survives across turns so an exhausted budget can still surface the
+        // last model output instead of a bare failure.
+        var lastAssistantText = ""
         while (step < maxSteps) {
             step++
 
@@ -91,13 +96,13 @@ class ToolUsingAgent(
             val request = CompletionRequest(
                 model = model,
                 messages = history.toList(),
-                tools = availableTools.map {
+                tools = if (toolsAvailable) availableTools.map {
                     ToolSpec(
                         id = it.id,
                         description = it.description,
                         parametersSchemaJson = it.parametersSchemaJson
                     )
-                }
+                } else emptyList()
             )
 
             // One model turn, streamed.
@@ -129,10 +134,24 @@ class ToolUsingAgent(
             }
 
             streamError?.let { error ->
+                // Some models/providers reject the function-calling schema
+                // outright (HTTP 400/404 with a "tools" complaint). When the
+                // turn had tools attached and nothing streamed yet, retry ONCE
+                // without the tools array — plain chat still completes.
+                val requestHadTools = availableTools.isNotEmpty()
+                val nothingStreamed = assistantText.isBlank() && toolCalls.isEmpty()
+                if (requestHadTools && toolsAvailable && !retriedWithoutTools && nothingStreamed) {
+                    retriedWithoutTools = true
+                    toolsAvailable = false
+                    step--
+                    logger?.w("Agent", "Tool schema rejected — retrying without tools: ${error.message}")
+                    continue
+                }
                 send(AgentEvent.Failed(error.userMessage))
                 return@channelFlow
             }
 
+            lastAssistantText = assistantText.toString()
             if (toolCalls.isEmpty()) {
                 send(AgentEvent.Finished(assistantText.toString()))
                 return@channelFlow
@@ -211,7 +230,18 @@ class ToolUsingAgent(
             // Loop continues: the model now sees the tool results.
         }
 
-        send(AgentEvent.Failed("The agent needed too many steps for this request."))
+        // Step budget exhausted with no final answer: surface whatever the
+        // model DID produce instead of reporting a pure failure.
+        if (lastAssistantText.isNotBlank()) {
+            send(AgentEvent.Finished(lastAssistantText))
+        } else {
+            send(
+                AgentEvent.Failed(
+                    "The agent needed too many steps for this request. " +
+                        "Try breaking it into smaller questions."
+                )
+            )
+        }
     }.catch { t ->
         if (t !is kotlinx.coroutines.CancellationException) {
             logger?.e("Agent", "Agent run failed", t)

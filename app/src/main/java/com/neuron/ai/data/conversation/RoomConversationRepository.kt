@@ -58,14 +58,18 @@ class RoomConversationRepository(
 
     override suspend fun createConversation(
         title: String,
-        id: String
+        id: String,
+        providerId: String?,
+        modelId: String?
     ): Conversation = withContext(io) {
         val now = clock()
         val conversation = Conversation(
             id = id,
             title = title.ifBlank { "New chat" },
             createdAtEpochMs = now,
-            updatedAtEpochMs = now
+            updatedAtEpochMs = now,
+            providerId = providerId,
+            modelId = modelId
         )
         dao.upsertConversation(conversation.toEntity())
         conversation
