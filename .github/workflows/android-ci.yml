@@ -1,14 +1,19 @@
 # Neuron-AI — Android CI
 #
-# Push/PR  -> debug APK is built and uploaded as a workflow artifact.
-# Tag v*   -> release APK is built and attached to a GitHub Release.
+# Push/PR  -> unit tests + debug APK artifact.
+# Push     -> if signing secrets exist, a SIGNED RELEASE APK is also built
+#             and uploaded as `neuron-ai-release-apk`. A properly signed
+#             release build avoids Play Protect "harmful app" warnings that
+#             debug-signed APKs often trigger during sideload installs.
+# Tag v*   -> the signed release APK is additionally attached to a Release.
 #
-# Notes:
-# - JDK 17 is required (see app/build.gradle.kts compileOptions).
-# - Gradle caching is handled by gradle/actions/setup-gradle.
-# - The release APK is unsigned (no signing config yet); signing material is
-#   deliberately kept out of the repository. Add a secrets-based signing step
-#   in Phase 1 when distribution starts.
+# Signing material lives ONLY in GitHub Secrets (never in the repo):
+#   NEURON_KEYSTORE_B64   — base64 of the release .jks keystore
+#   NEURON_KEYSTORE_PASSWORD
+#   NEURON_KEY_ALIAS
+#   NEURON_KEY_PASSWORD
+# Without the secrets the release job still runs and produces an unsigned
+# APK (same as before), so CI never breaks.
 
 name: android-ci
 
@@ -53,10 +58,7 @@ jobs:
   build-release:
     name: Build release APK
     needs: build-debug
-    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -70,13 +72,46 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Build release APK
+      - name: Decode signing keystore from secrets
+        if: ${{ env.NEURON_KEYSTORE_B64 != '' }}
+        env:
+          NEURON_KEYSTORE_B64: ${{ secrets.NEURON_KEYSTORE_B64 }}
+        run: |
+          echo "$NEURON_KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/neuron-release.jks"
+          echo "NEURON_KEYSTORE_PATH=$RUNNER_TEMP/neuron-release.jks" >> "$GITHUB_ENV"
+
+      - name: Build release APK (signed when secrets present)
+        env:
+          NEURON_KEYSTORE_PASSWORD: ${{ secrets.NEURON_KEYSTORE_PASSWORD }}
+          NEURON_KEY_ALIAS: ${{ secrets.NEURON_KEY_ALIAS }}
+          NEURON_KEY_PASSWORD: ${{ secrets.NEURON_KEY_PASSWORD }}
         run: ./gradlew assembleRelease --stacktrace
 
-      - name: Attach APK to GitHub Release
+      - name: Upload release APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: neuron-ai-release-apk
+          path: app/build/outputs/apk/release/*.apk
+          if-no-files-found: error
+
+  attach-to-release:
+    name: Attach APK to GitHub Release
+    needs: build-release
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download release APK
+        uses: actions/download-artifact@v4
+        with:
+          name: neuron-ai-release-apk
+          path: release-apk
+
+      - name: Attach to Release
         uses: softprops/action-gh-release@v2
         with:
-          files: app/build/outputs/apk/release/*.apk
+          files: release-apk/*.apk
           body: |
             Automated build for ${{ github.ref_name }}.
-            The release APK is unsigned — install the debug APK for testing.
+            Install the release APK; the debug APK remains available as an artifact.
