@@ -14,8 +14,29 @@ android {
         applicationId = "com.neuron.ai"
         minSdk = 26
         targetSdk = 34
-        versionCode = 2
-        versionName = "0.2.0"
+        versionCode = 3
+        versionName = "0.3.1"
+    }
+
+    // Release signing is driven entirely by CI secrets/env — the keystore
+    // NEVER lives in the repository. Locally or without secrets the release
+    // build simply falls back to unsigned.
+    signingConfigs {
+        create("release") {
+            val ksPath = System.getenv("NEURON_KEYSTORE_PATH")
+            val ksPassword = System.getenv("NEURON_KEYSTORE_PASSWORD")
+            val alias = System.getenv("NEURON_KEY_ALIAS")
+            val keyPassword = System.getenv("NEURON_KEY_PASSWORD")
+            val configured = !ksPath.isNullOrEmpty() && java.io.File(ksPath).exists() &&
+                !ksPassword.isNullOrEmpty() && !alias.isNullOrEmpty() &&
+                !keyPassword.isNullOrEmpty()
+            if (configured) {
+                storeFile = java.io.File(ksPath)
+                storePassword = ksPassword
+                keyAlias = alias
+                keyPassword = keyPassword
+            }
+        }
     }
 
     buildTypes {
@@ -25,6 +46,11 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            val ksPath = System.getenv("NEURON_KEYSTORE_PATH")
+            val configured = !ksPath.isNullOrEmpty() && java.io.File(ksPath).exists()
+            if (configured) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
 
