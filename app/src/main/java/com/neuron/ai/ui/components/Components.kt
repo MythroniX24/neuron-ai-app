@@ -1,6 +1,6 @@
 package com.neuron.ai.ui.components
 
-import androidx.compose.foundation.border
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -9,7 +9,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material3.Button
@@ -24,11 +23,13 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.neuron.ai.R
 import com.neuron.ai.ui.theme.MinTouchTarget
 import com.neuron.ai.ui.theme.Radius
 import com.neuron.ai.ui.theme.Spacing
@@ -253,19 +254,13 @@ fun EmptyState(
     }
 }
 
-/** Rounded brand dot used in headers and about dialogs. */
+/** Brand mark shown in the drawer header and settings — the official
+ *  Neuron-AI logo asset (transparent PNG) at the legacy 28dp size. */
 @Composable
 fun BrandMark(modifier: Modifier = Modifier) {
-    Box(
-        modifier = modifier
-            .size(28.dp)
-            .border(1.dp, MaterialTheme.colorScheme.outline, CircleShape)
-            .padding(5.dp)
-    ) {
-        Box(
-            modifier = Modifier
-                .size(18.dp)
-                .border(2.dp, MaterialTheme.colorScheme.primary, CircleShape)
-        )
-    }
+    Image(
+        painter = painterResource(R.drawable.brand_logo),
+        contentDescription = null,
+        modifier = modifier.size(28.dp)
+    )
 }
