@@ -364,13 +364,17 @@ class ChatViewModel(
         val store = attachmentStore ?: return ""
         val textFiles = attachments.filter { it.isText }.take(3)
         if (textFiles.isEmpty()) return ""
-        return textFiles.joinToString("") { att ->
+        val builder = StringBuilder()
+        textFiles.forEach { att ->
             val content = runCatching { store.extractText(att, maxBytes = 4_000) }
                 .getOrNull()
                 ?.takeIf { it.isNotBlank() }
                 ?: "[could not read file content]"
-            "\n\n【FILE: ${att.displayName}】\n$content\n【END FILE ${att.displayName}】"
+            builder.append("\n\n【FILE: ").append(att.displayName).append("】\n")
+                .append(content)
+                .append("\n【END FILE ").append(att.displayName).append("】")
         }
+        return builder.toString()
     }
 
     /**
