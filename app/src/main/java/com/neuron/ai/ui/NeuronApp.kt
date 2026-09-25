@@ -2,6 +2,8 @@ package com.neuron.ai.ui
 
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.core.tween
@@ -84,12 +86,18 @@ fun NeuronApp(container: AppContainer) {
                 navController = navController,
                 startDestination = Routes.HOME,
                 enterTransition = {
-                    fadeIn(tween(220)) + slideInHorizontally(tween(260)) { it / 10 }
+                    fadeIn(tween(220)) +
+                        slideInHorizontally(tween(260)) { it / 10 } +
+                        scaleIn(tween(260), initialScale = 0.96f)
                 },
                 exitTransition = { fadeOut(tween(160)) },
-                popEnterTransition = { fadeIn(tween(220)) },
+                popEnterTransition = {
+                    fadeIn(tween(220)) + scaleIn(tween(220), initialScale = 0.98f)
+                },
                 popExitTransition = {
-                    fadeOut(tween(160)) + slideOutHorizontally(tween(260)) { it / 10 }
+                    fadeOut(tween(160)) +
+                        slideOutHorizontally(tween(260)) { it / 10 } +
+                        scaleOut(tween(260), targetScale = 0.96f)
                 }
             ) {
                 composable(Routes.HOME) {

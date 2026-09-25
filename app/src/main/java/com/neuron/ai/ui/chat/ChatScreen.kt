@@ -2,6 +2,24 @@ package com.neuron.ai.ui.chat
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.rememberScrollState
@@ -67,7 +85,14 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
 import com.neuron.ai.core.conversation.Attachment
+import com.neuron.ai.ui.components.BrandMark
+import com.neuron.ai.ui.components.SkeletonBar
+import com.neuron.ai.ui.components.entrancePop
+import com.neuron.ai.ui.components.messageEntrance
+import com.neuron.ai.ui.components.neuronPulse
+import com.neuron.ai.ui.components.pressScale
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -118,6 +143,9 @@ fun ChatScreen(
 
     var draft by remember { mutableStateOf("") }
     val listState = rememberLazyListState()
+
+    // Message ids that already played their entrance animation.
+    val entranceSeen = remember { androidx.compose.runtime.mutableStateListOf<String>() }
 
     LaunchedEffect(viewModel) { viewModel.loadConversation() }
 
@@ -224,6 +252,7 @@ fun ChatScreen(
             selectedProviderId = conversation?.providerId,
             onSelectModel = { providerId, modelId -> viewModel.setModel(providerId, modelId) },
             onOpenMenu = onOpenMenu,
+            isThinking = isStreaming,
             terminalEnabled = terminalEnabled,
             onOpenTerminal = {
                 val existing = terminalSession
@@ -274,8 +303,19 @@ fun ChatScreen(
             }
 
             items(messages, key = { it.id }) { message ->
-                // Subtle entrance for new rows; cheap on scrolling performance.
-                Box(Modifier.animateItem()) { MessageRow(message) }
+                // Entrance choreography runs ONCE per freshly-sent message:
+                // recycled rows (scrolled back into view) render statically.
+                val animateIn = remember(message.id) {
+                    message.id !in entranceSeen && (message.id == messages.lastOrNull()?.id)
+                }
+                remember(message.id) { entranceSeen.add(message.id) }
+                Box(
+                    Modifier
+                        .animateItem()
+                        .messageEntrance(fromEnd = message.role == Message.Role.USER, enabled = animateIn)
+                ) { MessageRow(message, onEditAndResend = {
+                    viewModel.editAndResend(message.id, message.content)
+                }) }
             }
 
             if (activity.isNotEmpty()) {
@@ -331,6 +371,9 @@ fun ChatScreen(
                 draftAttachments.take(4).forEach { attachment ->
                     Box {
                         MessageAttachmentTile(attachment)
+                        val removeInteraction = remember {
+                            androidx.compose.foundation.interaction.MutableInteractionSource()
+                        }
                         Surface(
                             shape = androidx.compose.foundation.shape.CircleShape,
                             color = MaterialTheme.colorScheme.primary,
@@ -338,7 +381,11 @@ fun ChatScreen(
                                 .size(18.dp)
                                 .align(Alignment.TopEnd)
                                 .offset(x = 6.dp, y = (-6).dp)
-                                .clickable { viewModel.removeDraftAttachment(attachment.id) }
+                                .pressScale(removeInteraction, pressedScale = 0.8f)
+                                .clickable(
+                                    interactionSource = removeInteraction,
+                                    indication = null
+                                ) { viewModel.removeDraftAttachment(attachment.id) }
                         ) {
                             Icon(
                                 imageVector = Icons.Outlined.Close,
@@ -425,6 +472,7 @@ private fun ChatTopBar(
     selectedProviderId: String?,
     onSelectModel: (providerId: String, modelId: String) -> Unit,
     onOpenMenu: () -> Unit,
+    isThinking: Boolean,
     terminalEnabled: Boolean,
     onOpenTerminal: () -> Unit
 ) {
@@ -437,13 +485,20 @@ private fun ChatTopBar(
 
     TopAppBar(
         title = {
-            Column(
-                modifier = Modifier
-                    .onGloballyPositioned { titleBounds = it.boundsInWindow() }
-                    .clickable(enabled = modelOptions.isNotEmpty()) {
-                        menuExpanded = true
-                    }
-            ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                // Signature: the brand mark breathes while the agent works.
+                BrandMark(
+                    Modifier
+                        .padding(end = Spacing.sm)
+                        .neuronPulse(enabled = isThinking)
+                )
+                Column(
+                    modifier = Modifier
+                        .onGloballyPositioned { titleBounds = it.boundsInWindow() }
+                        .clickable(enabled = modelOptions.isNotEmpty()) {
+                            menuExpanded = true
+                        }
+                ) {
                 Text(
                     text = modelName ?: "Select a model",
                     style = MaterialTheme.typography.titleMedium,
@@ -463,6 +518,7 @@ private fun ChatTopBar(
                         modifier = Modifier.size(16.dp),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                }
                 }
             }
         },
@@ -629,7 +685,9 @@ private fun MessageAttachmentTile(attachment: Attachment) {
     Surface(
         shape = RoundedCornerShape(10.dp),
         color = MaterialTheme.colorScheme.surfaceVariant,
-        modifier = Modifier.size(64.dp)
+        modifier = Modifier
+            .size(64.dp)
+            .entrancePop()
     ) {
         if (model != null) {
             Image(
@@ -660,8 +718,12 @@ private fun MessageAttachmentTile(attachment: Attachment) {
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun MessageRow(message: Message) {
+private fun MessageRow(
+    message: Message,
+    onEditAndResend: (() -> Unit)? = null
+) {
     when (message.role) {
         Message.Role.USER -> Row(
             modifier = Modifier.fillMaxWidth(),
@@ -678,9 +740,26 @@ private fun MessageRow(message: Message) {
                         }
                     }
                 }
+                var showMenu by remember { mutableStateOf(false) }
+                androidx.compose.material3.DropdownMenu(
+                    expanded = showMenu,
+                    onDismissRequest = { showMenu = false }
+                ) {
+                    androidx.compose.material3.DropdownMenuItem(
+                        text = { Text("Edit & resend") },
+                        onClick = {
+                            showMenu = false
+                            onEditAndResend?.invoke()
+                        }
+                    )
+                }
                 Surface(
                     shape = MaterialTheme.shapes.large,
-                    color = MaterialTheme.colorScheme.primaryContainer
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                    modifier = Modifier.combinedClickable(
+                        onClick = {},
+                        onLongClick = { showMenu = true }
+                    )
                 ) {
                     Text(
                         text = message.content,
@@ -714,17 +793,33 @@ private fun MessageRow(message: Message) {
  * exit code, [err] lines…). Defaults to collapsed so a command-running chat
  * stays scannable; nothing is lost — expand to inspect.
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ToolMessageCard(message: Message) {
     var expanded by remember(message.id) { mutableStateOf(false) }
+    val interaction = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+    val chevronRotation by animateFloatAsState(
+        targetValue = if (expanded) 180f else 0f,
+        animationSpec = tween(220, easing = FastOutSlowInEasing),
+        label = "chevron"
+    )
     Surface(
         shape = MaterialTheme.shapes.medium,
         color = MaterialTheme.colorScheme.surfaceVariant,
         modifier = Modifier
             .fillMaxWidth()
-            .clickable { expanded = !expanded }
+            .pressScale(interaction, pressedScale = 0.985f)
+            .combinedClickable(
+                interactionSource = interaction,
+                indication = androidx.compose.material.ripple.rememberRipple(),
+                onClick = { expanded = !expanded }
+            )
     ) {
-        Column(Modifier.padding(Spacing.md)) {
+        Column(
+            Modifier
+                .padding(Spacing.md)
+                .animateContentSize(spring(dampingRatio = 0.85f, stiffness = 320f))
+        ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     text = "🛠 ${message.metadata?.toolName ?: "Tool"}",
@@ -732,10 +827,13 @@ private fun ToolMessageCard(message: Message) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.weight(1f)
                 )
-                Text(
-                    text = if (expanded) "▲" else "▼",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                Icon(
+                    imageVector = Icons.Outlined.KeyboardArrowDown,
+                    contentDescription = if (expanded) "Collapse" else "Expand",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier
+                        .size(18.dp)
+                        .graphicsLayer { rotationZ = chevronRotation }
                 )
             }
             // Animated expand/collapse — subtle, purposeful.
@@ -767,9 +865,41 @@ private fun StreamingBubble(text: String) {
         Modifier
             .fillMaxWidth()
             .padding(start = Spacing.sm, end = Spacing.sm)
+            .animateContentSize(spring(dampingRatio = 0.85f, stiffness = 320f))
     ) {
-        MarkdownText(markdown = text)
+        if (text.isEmpty()) {
+            // Waiting for the first token: shimmer skeleton instead of a spinner.
+            Column(verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
+                SkeletonBar(Modifier.size(width = 180.dp, height = 12.dp))
+                SkeletonBar(Modifier.size(width = 240.dp, height = 12.dp))
+                SkeletonBar(Modifier.size(width = 120.dp, height = 12.dp))
+            }
+        } else {
+            MarkdownText(markdown = text)
+            BlinkingCaret()
+        }
     }
+}
+
+/** Small blinking caret under the streaming text — “still writing” signal. */
+@Composable
+private fun BlinkingCaret() {
+    val transition = rememberInfiniteTransition(label = "caret")
+    val alpha by transition.animateFloat(
+        initialValue = 1f,
+        targetValue = 0.15f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(500, easing = androidx.compose.animation.core.LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "caretAlpha"
+    )
+    Text(
+        text = "▍",
+        style = MaterialTheme.typography.bodyLarge,
+        color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier.padding(top = 2.dp).graphicsLayer { this.alpha = alpha }
+    )
 }
 
 /**
@@ -825,25 +955,33 @@ private fun ComposerBar(
                 ),
                 textStyle = MaterialTheme.typography.bodyLarge
             )
-            // Right slot: streaming → Stop; otherwise → Send. The + control
-            // stays on the left the whole time, so the composer never changes
-            // shape between "new chat" and "conversation" states.
-            if (isStreaming) {
-                IconButton(onClick = onStop) {
-                    Icon(
-                        imageVector = Icons.Outlined.Close,
-                        contentDescription = "Stop generating",
-                        tint = MaterialTheme.colorScheme.error
-                    )
-                }
-            } else {
-                IconButton(onClick = onSend, enabled = draft.isNotBlank()) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.Send,
-                        contentDescription = "Send",
-                        tint = if (draft.isNotBlank()) MaterialTheme.colorScheme.primary
-                        else MaterialTheme.colorScheme.outline
-                    )
+            // Right slot morphs send ⇄ stop with a quick scale crossfade —
+            // same slot, so the composer never changes shape.
+            AnimatedContent(
+                targetState = isStreaming,
+                transitionSpec = {
+                    (scaleIn(tween(180), initialScale = 0.6f) + fadeIn(tween(180))) togetherWith
+                        (scaleOut(tween(140), targetScale = 0.6f) + fadeOut(tween(140)))
+                },
+                label = "composerAction"
+            ) { streaming ->
+                if (streaming) {
+                    IconButton(onClick = onStop) {
+                        Icon(
+                            imageVector = Icons.Outlined.Close,
+                            contentDescription = "Stop generating",
+                            tint = MaterialTheme.colorScheme.error
+                        )
+                    }
+                } else {
+                    IconButton(onClick = onSend, enabled = draft.isNotBlank()) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.Send,
+                            contentDescription = "Send",
+                            tint = if (draft.isNotBlank()) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.outline
+                        )
+                    }
                 }
             }
         }
@@ -854,7 +992,8 @@ private fun ComposerBar(
 private fun AgentActivityCard(steps: List<AgentActivityUi>) {
     Surface(
         shape = MaterialTheme.shapes.medium,
-        color = MaterialTheme.colorScheme.surfaceVariant
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        modifier = Modifier.entrancePop()
     ) {
         Column(Modifier.padding(Spacing.md)) {
             steps.forEach { step ->
