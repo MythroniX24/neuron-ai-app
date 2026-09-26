@@ -135,7 +135,7 @@ object SearchReranker {
         // Low-trust / SEO-farm patterns.
         return when {
             d.startsWith("blog.") && d.count { it == '.' } >= 2 -> 0.2
-            LOW_TIERS.any { d.endsWith(it) } -> 0.2
+            LOW_TIERS.any { d == it || d.endsWith(".$it") } -> 0.2
             else -> 0.5
         }
     }
@@ -170,7 +170,7 @@ object SearchReranker {
     )
 
     private val LOW_TIERS = listOf(
-        "pinterest.", "quora.com", "facebook.com", "medium.com", "buzzfeed.com",
+        "pinterest.com", "quora.com", "facebook.com", "medium.com", "buzzfeed.com",
         "answers.com", "ehow.com", "wikihow.com", "slideshare.net", "scribd.com"
     )
 }
