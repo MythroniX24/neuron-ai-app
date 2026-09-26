@@ -65,7 +65,7 @@ class SearchPipelineTest {
             )
         )
         assertEquals(2, merged.size)
-        val a = merged.first { it.url.contains("example.com") }
+        val a = merged.first { it.url.contains("example.com", ignoreCase = true) }
         assertEquals(2, a.seenInProviders.size)
         assertEquals(1, a.bestPosition) // best position kept
         val b = merged.first { it.url.contains("other.com") }
@@ -369,11 +369,13 @@ class SearchPipelineTest {
         val wrapped = WebContentSanitizer.wrap(malicious)
         assertTrue(wrapped.startsWith(WebContentSanitizer.FENCE_OPEN))
         assertTrue(wrapped.trimEnd().endsWith(WebContentSanitizer.FENCE_CLOSE))
-        // No contiguous fence-breaker inside the payload.
-        assertTrue(
-            !wrapped.removePrefix(WebContentSanitizer.FENCE_OPEN + "\n")
-                .contains(WebContentSanitizer.FENCE_CLOSE)
-        )
+        // No contiguous fence-breaker inside the payload (strip BOTH fences
+        // that wrap() itself adds before inspecting).
+        val payload = wrapped
+            .removePrefix(WebContentSanitizer.FENCE_OPEN + "\n")
+            .removeSuffix("\n" + WebContentSanitizer.FENCE_CLOSE)
+        assertTrue(!payload.contains(WebContentSanitizer.FENCE_CLOSE))
+        assertTrue(!payload.contains(WebContentSanitizer.FENCE_OPEN))
         assertTrue(wrapped.contains("INJECTED INSTRUCTION REMOVED"))
         assertTrue(!wrapped.contains("ignore all previous instructions"))
     }
