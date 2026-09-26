@@ -113,7 +113,7 @@ class ContextOrchestratorTest {
             repeat(40) { i ->
                 add(
                     message(
-                        "old-$i", Message.Role.USER, "old filler ${"x".repeat(400)}", ageMs = (10_000 - i * 100)
+                        "old-$i", Message.Role.USER, "old filler ${"x".repeat(400)}", ageMs = (10_000L - i * 100L)
                     )
                 )
             }
