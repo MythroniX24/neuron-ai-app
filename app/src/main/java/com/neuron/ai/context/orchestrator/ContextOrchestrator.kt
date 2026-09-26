@@ -1,6 +1,7 @@
 package com.neuron.ai.context.orchestrator
 
 import com.neuron.ai.context.budget.TokenBudgetManager
+import com.neuron.ai.context.compaction.CompactionManager
 import com.neuron.ai.context.model.ContextItem
 import com.neuron.ai.context.model.ContextPriority
 import com.neuron.ai.context.model.ContextSourceType
@@ -38,6 +39,8 @@ class ContextOrchestrator(
     /** Pulls the raw conversation log once; shared by both assembly paths. */
     private val messagesProvider: suspend (String) -> List<com.neuron.ai.core.conversation.Message>,
     private val budgetManager: TokenBudgetManager = TokenBudgetManager(),
+    /** §8: structured compaction when the ranked fit is still over budget. */
+    private val compactionManager: CompactionManager = CompactionManager(),
     /** Safe-minimal fallback keeps at most this many recent turns. */
     private val minimalRecentCount: Int = 8
 ) {
@@ -51,7 +54,11 @@ class ContextOrchestrator(
         val keptCount: Int,
         val droppedCount: Int,
         /** True when the safe minimal fallback was used instead of the ranked fit. */
-        val usedMinimalFallback: Boolean
+        val usedMinimalFallback: Boolean,
+        /** True when a §8 compaction pass ran over the fitted result. */
+        val compacted: Boolean = false,
+        /** False = compaction ran but §14.4 rejected the summary (raw eviction only). */
+        val compactionSummaryIncluded: Boolean = false
     )
 
     suspend fun buildContext(
@@ -125,15 +132,41 @@ class ContextOrchestrator(
                 droppedCount = 0,
                 usedMinimalFallback = false
             )
-            is TokenBudgetManager.FitResult.OverBudget -> BuiltContext(
-                messages = assemble(fit.items),
-                tokenUsage = fit.tokenUsage,
-                tokenBudgetTotal = budget.total,
-                candidateCount = candidates.size,
-                keptCount = fit.items.size,
-                droppedCount = fit.dropped.size,
-                usedMinimalFallback = false
-            )
+            is TokenBudgetManager.FitResult.OverBudget -> {
+                // §5/§8: compaction runs ONLY when over budget — evict the
+                // oldest droppable items, prepend their StructuredState. The
+                // summary's own cost is part of the eviction math; §14.4
+                // validation failure leaves the raw eviction result. A bug
+                // here must never break the turn (§12) — fall back to the
+                // plain fitted list.
+                val compacted = runCatching {
+                    compactionManager.compact(fit.items, budget.usableForInput, messages)
+                }.getOrNull()
+
+                if (compacted != null) {
+                    BuiltContext(
+                        messages = assemble(compacted.items),
+                        tokenUsage = compacted.items.sumOf { it.tokenEstimate },
+                        tokenBudgetTotal = budget.total,
+                        candidateCount = candidates.size,
+                        keptCount = compacted.items.size,
+                        droppedCount = fit.dropped.size + compacted.evictedCount,
+                        usedMinimalFallback = false,
+                        compacted = true,
+                        compactionSummaryIncluded = compacted.summaryIncluded
+                    )
+                } else {
+                    BuiltContext(
+                        messages = assemble(fit.items),
+                        tokenUsage = fit.tokenUsage,
+                        tokenBudgetTotal = budget.total,
+                        candidateCount = candidates.size,
+                        keptCount = fit.items.size,
+                        droppedCount = fit.dropped.size,
+                        usedMinimalFallback = false
+                    )
+                }
+            }
             TokenBudgetManager.FitResult.Impossible -> {
                 val fallback = minimal(messages, currentUserId, contextWindowTokens, excludeCurrentRequest)
                 fallback.copy(
@@ -237,7 +270,9 @@ class ContextOrchestrator(
                 "candidates=${built.candidateCount} kept=${built.keptCount} " +
                 "dropped=${built.droppedCount} " +
                 "tokens=${built.tokenUsage}/${built.tokenBudgetTotal} " +
-                "minimalFallback=${built.usedMinimalFallback}"
+                "minimalFallback=${built.usedMinimalFallback} " +
+                "compacted=${built.compacted} " +
+                "summary=${built.compactionSummaryIncluded}"
         )
     }
 }
