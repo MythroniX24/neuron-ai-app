@@ -145,6 +145,10 @@ class ChatViewModelFactory(
             terminalManager = container.terminalManager,
             browserManager = container.browserManager,
             contextEngine = contextEngine,
+            // Phase-3 shadow: run the orchestrator alongside the legacy
+            // context engine; ChatViewModel.buildHistory() logs both and
+            // still returns the legacy result until verified (§14.3).
+            orchestrator = container.contextOrchestrator,
             attachmentStore = container.attachmentStore,
             settings = container.settingsRepository
         ) as T

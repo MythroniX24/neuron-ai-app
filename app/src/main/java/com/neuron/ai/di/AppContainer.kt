@@ -37,6 +37,7 @@ import com.neuron.ai.data.web.DuckDuckGoSearchProvider
 import com.neuron.ai.data.web.HttpPageFetcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 
@@ -114,6 +115,26 @@ class AppContainer(context: Context) {
         dispatchers,
         RoomTaskRecordStore(database.taskDao())
     )
+
+    /**
+     * Phase-3 context orchestration (CONTEXT_ARCHITECTURE.md §5). Runs in
+     * SHADOW MODE alongside the legacy ChatContextEngine (§14.3) — the
+     * ChatViewModel logs both side by side but still feeds the model the
+     * legacy context until the comparison is verified.
+     */
+    val contextOrchestrator: com.neuron.ai.context.orchestrator.ContextOrchestrator by lazy {
+        com.neuron.ai.context.orchestrator.ContextOrchestrator(
+            memoryProvider = com.neuron.ai.context.providers.MemoryContextProvider { type, scopeId, limit ->
+                memoryManager.relevant(type, scopeId, limit)
+            },
+            taskProvider = com.neuron.ai.context.providers.TaskContextProvider {
+                taskManager.tasks.first()
+            },
+            messagesProvider = { conversationId ->
+                conversationRepository.messagesOf(conversationId).first()
+            }
+        )
+    }
 
     private val initScope = CoroutineScope(SupervisorJob() + dispatchers.io)
 

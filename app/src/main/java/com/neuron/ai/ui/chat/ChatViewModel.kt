@@ -80,6 +80,8 @@ class ChatViewModel(
     /** Milestone 3: priority context builder with memory injection (no-op by default in previews/tests). */
     private val contextEngine: com.neuron.ai.ui.chat.ChatContextEngine =
         com.neuron.ai.ui.chat.ChatContextEngine(),
+    /** Phase-3 shadow: the new orchestrator pipeline; null in previews/tests. */
+    private val orchestrator: com.neuron.ai.context.orchestrator.ContextOrchestrator? = null,
     /** Reads attachment bytes/text so the agent can analyse user files. */
     private val attachmentStore: com.neuron.ai.data.attachment.AttachmentStore? = null,
     /** Persists the last (provider, model) pick so it survives restarts. */
@@ -316,7 +318,37 @@ class ChatViewModel(
             com.neuron.ai.data.provider.ModelCapabilities.estimateContextWindow(modelId)
         }
         val engine = if (window != null) contextEngine.withWindow(window) else contextEngine
-        return engine.build(conversations.messagesOf(conversationId).first())
+        val legacy = engine.build(conversations.messagesOf(conversationId).first())
+
+        // ---- Phase-3 SHADOW MODE (CONTEXT_ARCHITECTURE.md §14.3) -------------
+        // Run the orchestrator alongside the legacy engine and log both side
+        // by side. The model still receives the LEGACY context until the new
+        // pipeline is verified against real conversations — flip
+        // USE_ORCHESTRATOR_CONTEXT when the comparison looks correct.
+        val shadow = orchestrator?.let { pipeline ->
+            runCatching {
+                pipeline.buildContext(
+                    query = lastUserPrompt ?: "",
+                    conversationId = conversationId,
+                    currentUserId = messages.value
+                        .lastOrNull { it.role == Message.Role.USER }?.id,
+                    workspaceId = _conversation.value?.workspaceId,
+                    taskId = currentTaskId,
+                    contextWindowTokens = window ?: 8_000,
+                    // The current request travels via the agent goal, not the
+                    // history — parity with the legacy engine's output.
+                    excludeCurrentRequest = true
+                )
+            }.getOrNull()
+        }
+        if (shadow != null) {
+            val report = com.neuron.ai.context.orchestrator.ContextOrchestrator
+                .builtFrom(legacy, shadow)
+            logger.d("ContextShadow", report.getValue("legacy"))
+            logger.d("ContextShadow", report.getValue("orchestrator"))
+        }
+        if (USE_ORCHESTRATOR_CONTEXT && shadow != null) return shadow.messages
+        return legacy
     }
 
     fun setModel(providerId: String, modelId: String) {
@@ -815,5 +847,14 @@ class ChatViewModel(
             }
         }
         super.onCleared()
+    }
+
+    companion object {
+        /**
+         * Phase-3 shadow rollout switch (CONTEXT_ARCHITECTURE.md §14.3):
+         * false = orchestrator runs in shadow only (logged, never returned);
+         * flip to true after the logged comparison verifies the new pipeline.
+         */
+        private const val USE_ORCHESTRATOR_CONTEXT = false
     }
 }

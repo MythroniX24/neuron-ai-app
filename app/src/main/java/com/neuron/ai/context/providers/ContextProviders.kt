@@ -56,7 +56,17 @@ class ConversationContextProvider {
                 message.content
             },
             timestampMs = message.createdAtEpochMs,
-            conversationId = conversationId
+            conversationId = conversationId,
+            // Wire fidelity (Phase 3): the orchestrator can rebuild the exact
+            // multi-turn message list, roles and tool-call ids included.
+            wireRole = when (message.role) {
+                Message.Role.USER -> com.neuron.ai.core.provider.ChatMessage.Role.USER
+                Message.Role.ASSISTANT -> com.neuron.ai.core.provider.ChatMessage.Role.ASSISTANT
+                Message.Role.SYSTEM -> com.neuron.ai.core.provider.ChatMessage.Role.SYSTEM
+                Message.Role.TOOL -> com.neuron.ai.core.provider.ChatMessage.Role.TOOL
+            },
+            toolCallId = message.metadata?.toolCallId,
+            attachments = message.attachments
         )
     }
 }
