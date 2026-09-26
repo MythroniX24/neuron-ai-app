@@ -109,9 +109,6 @@ import com.neuron.ai.ui.markdown.MarkdownText
 import com.neuron.ai.ui.theme.Spacing
 import kotlinx.coroutines.launch
 
-private const val EMPTY_HINT =
-    "Start the conversation. Your messages stay on this device."
-
 internal fun greeting(): String {
     val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
     return when (hour) {
@@ -290,28 +287,13 @@ fun ChatScreen(
         ) {
             if (messages.isEmpty() && generation is GenerationState.Idle) {
                 item {
-                    // Unified-surface greeting: same calm hero the old Home had,
-                    // now inline in the one-and-only chat screen.
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = Spacing.xxl)
-                    ) {
-                        Text(
-                            text = greeting(),
-                            style = MaterialTheme.typography.headlineMedium,
-                            color = MaterialTheme.colorScheme.onBackground,
-                            textAlign = TextAlign.Center
-                        )
-                        Spacer(Modifier.height(Spacing.sm))
-                        Text(
-                            text = "What can I help you with?",
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            textAlign = TextAlign.Center
-                        )
-                    }
+                    // First-open hero: breathing brand mark + tappable starter
+                    // prompts that pre-fill the composer (tap → edit → send).
+                    EmptyChatHero(
+                        onSuggestion = { suggestion ->
+                            draft = suggestion.prompt
+                        }
+                    )
                 }
             }
 
@@ -456,16 +438,17 @@ fun ChatScreen(
         )
     }
 
-    if (showAttachmentSheet) {
-        // Custom presentation: dim scrim + bottom-anchored panel (replaces the
-        // default ModalBottomSheet for a fully hand-designed look). The panel
-        // slides up / fades out with the scrim — no hard pop.
-        androidx.compose.animation.AnimatedVisibility(
-            visible = showAttachmentSheet,
-            enter = androidx.compose.animation.fadeIn(tween(160)),
-            exit = androidx.compose.animation.fadeOut(tween(180))
-        ) {
-            Box(Modifier.fillMaxSize()) {
+    // Custom presentation: dim scrim + bottom-anchored panel (replaces the
+    // default ModalBottomSheet for a fully hand-designed look). Gated ONLY by
+    // AnimatedVisibility — a wrapping `if (...)` unmounts the node and kills
+    // the exit animation, which previously made the panel teleport away.
+    androidx.compose.animation.AnimatedVisibility(
+        visible = showAttachmentSheet,
+        enter = fadeIn(tween(160)) + slideInVertically(tween(280, easing = FastOutSlowInEasing)) { it / 3 },
+        exit = fadeOut(tween(180)) + slideOutVertically(tween(220, easing = FastOutSlowInEasing)) { it / 3 },
+        modifier = Modifier.align(Alignment.BottomCenter)
+    ) {
+        Box(Modifier.fillMaxSize()) {
             Box(
                 Modifier
                     .fillMaxSize()
@@ -509,22 +492,20 @@ fun ChatScreen(
             }
         }
         }
-    }
 
     // ---- Draggable terminal panel over the chat (inside the overlay Box) --------
+    // AnimatedVisibility stays MOUNTED (not nested inside a session-null
+    // check): composing it fresh with visible=true skips the enter animation,
+    // which is why the panel previously teleported in with no slide.
+    androidx.compose.animation.AnimatedVisibility(
+        visible = showTerminal,
+        enter = slideInVertically(tween(280, easing = FastOutSlowInEasing)) { it } +
+            fadeIn(tween(200)),
+        exit = slideOutVertically(tween(220, easing = FastOutSlowInEasing)) { it } +
+            fadeOut(tween(160)),
+        modifier = Modifier.align(Alignment.BottomCenter)
+    ) {
         terminalSession?.let { session ->
-        // Slide-up/down entrance instead of a hard pop — the panel feels like
-        // it slides out of the composer, not teleporting in. The alignment
-        // MUST sit on AnimatedVisibility itself (the direct Box child) — an
-        // align deeper in the content is ignored and the panel lands on top.
-        androidx.compose.animation.AnimatedVisibility(
-            visible = showTerminal,
-            enter = slideInVertically(tween(280, easing = FastOutSlowInEasing)) { it } +
-                fadeIn(tween(200)),
-            exit = slideOutVertically(tween(220, easing = FastOutSlowInEasing)) { it } +
-                fadeOut(tween(160)),
-            modifier = Modifier.align(Alignment.BottomCenter)
-        ) {
             Box(Modifier.systemBarsPadding()) {
                 TerminalPanel(
                     session = session,

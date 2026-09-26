@@ -5,6 +5,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 
 // ---- Palette: calm, professional, light-first -------------------------------
@@ -115,6 +116,14 @@ private val DarkColors = darkColorScheme(
 )
 
 /**
+ * App-theme darkness. Compose content must read THIS instead of the OS
+ * `isSystemInDarkTheme()` — the app has its own theme setting, and app-dark
+ * + system-light previously rendered code blocks (and anything else that
+ * peeked at the OS flag) with the light palette inside the dark UI.
+ */
+val LocalAppDarkMode = staticCompositionLocalOf { false }
+
+/**
  * App theme. Light is the reference design; dark is a first-class twin with
  * proper tonal elevation — every container role is explicitly set so no
  * Material default (purple) ever leaks through.
@@ -125,10 +134,12 @@ fun NeuronTheme(
     content: @Composable () -> Unit
 ) {
     val colors = if (darkMode) DarkColors else LightColors
-    MaterialTheme(
-        colorScheme = colors,
-        typography = NeuronTypography,
-        shapes = NeuronShapes,
-        content = content
-    )
+    androidx.compose.runtime.CompositionLocalProvider(LocalAppDarkMode provides darkMode) {
+        MaterialTheme(
+            colorScheme = colors,
+            typography = NeuronTypography,
+            shapes = NeuronShapes,
+            content = content
+        )
+    }
 }

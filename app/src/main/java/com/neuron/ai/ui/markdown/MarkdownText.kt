@@ -3,7 +3,6 @@ package com.neuron.ai.ui.markdown
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -121,7 +120,9 @@ private fun BlockView(block: MdBlock) {
 @Composable
 private fun CodeBlockView(block: MdBlock.CodeBlock) {
     val clipboard = LocalClipboardManager.current
-    val isDark = isSystemInDarkTheme()
+    // Follow the APP theme (LocalAppDarkMode), not the OS flag — app-dark +
+    // system-light previously rendered code blocks with the light palette.
+    val isDark = com.neuron.ai.ui.theme.LocalAppDarkMode.current
     // Dark code blocks use a slightly deeper panel than surfaceVariant so the
     // lifted-luminance token colors keep contrast; light uses surfaceVariant.
     val codeBackground = if (isDark) {
