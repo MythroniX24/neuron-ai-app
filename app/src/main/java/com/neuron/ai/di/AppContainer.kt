@@ -92,6 +92,22 @@ class AppContainer(context: Context) {
     /** Real web search over the user's own network — no paid API, no backend. */
     val searchProvider: SearchProvider = DuckDuckGoSearchProvider(dispatchers)
 
+    /**
+     * Orchestrated search (fast/reliable web search architecture): parallel
+     * fan-out across registered adapters behind the stable [SearchProvider]
+     * interface, per-provider circuit breakers, TTL cache, dedup + rerank.
+     * Add future adapters (incl. self-hosted) to the registry list only.
+     */
+    val searchOrchestrator: com.neuron.ai.data.web.SearchOrchestrator =
+        com.neuron.ai.data.web.SearchOrchestrator(
+            registry = com.neuron.ai.data.web.SearchProviderRegistry(
+                providers = listOf(searchProvider),
+                logger = logger
+            ),
+            cache = com.neuron.ai.data.web.SearchCache(),
+            logger = logger
+        )
+
     /** Bounded page fetcher/extractor used by web tools. */
     val pageFetcher: PageFetcher = HttpPageFetcher(dispatchers)
 
@@ -149,7 +165,7 @@ class AppContainer(context: Context) {
             toolRegistry.register(SafeTools.FileSearch(workspace))
             // Milestone 3: web search + reading + memory are global tools.
             toolRegistry.register(
-                com.neuron.ai.data.tool.WebTools.WebSearch(searchProvider, pageFetcher)
+                com.neuron.ai.data.tool.WebTools.WebSearch(searchOrchestrator, pageFetcher)
             )
             toolRegistry.register(com.neuron.ai.data.tool.WebTools.WebRead(pageFetcher))
             memoryTools.forEach { toolRegistry.register(it) }
