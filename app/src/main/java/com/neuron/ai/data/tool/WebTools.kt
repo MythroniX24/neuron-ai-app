@@ -217,13 +217,11 @@ object WebTools {
         }
     }
 
-    companion object {
-        /** Below this average snippet length, page reads earn their cost. */
-        const val MIN_USEFUL_SNIPPET_CHARS = 140
+    /** Below this average snippet length, page reads earn their cost. */
+    const val MIN_USEFUL_SNIPPET_CHARS = 140
 
-        private val FACT_MARKERS = Regex(
-            "(?i)\\b(when|what year|how many|how much|who is|population|price|date|born|died|" +
-                "released|launched|record|score|winner|capital|founded|age of)\\b"
-        )
-    }
+    private val FACT_MARKERS = Regex(
+        "(?i)\\b(when|what year|how many|how much|who is|population|price|date|born|died|" +
+            "released|launched|record|score|winner|capital|founded|age of)\\b"
+    )
 }
