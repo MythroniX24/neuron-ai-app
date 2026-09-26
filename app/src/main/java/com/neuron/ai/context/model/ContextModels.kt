@@ -38,7 +38,13 @@ data class ContextItem(
     val timestampMs: Long = 0L,
     val workspaceId: String? = null,
     val conversationId: String = "",
-    val taskId: String? = null
+    val taskId: String? = null,
+    /** Wire role for chat assembly; null = orchestrator derives from priority. */
+    val wireRole: com.neuron.ai.core.provider.ChatMessage.Role? = null,
+    /** TOOL rows must reference the assistant tool-call id on the wire. */
+    val toolCallId: String? = null,
+    /** Images/files attached to the original message (vision input parity). */
+    val attachments: List<com.neuron.ai.core.conversation.Attachment> = emptyList()
 ) {
     val tokenEstimate: Int get() = content.length / 4
 }
