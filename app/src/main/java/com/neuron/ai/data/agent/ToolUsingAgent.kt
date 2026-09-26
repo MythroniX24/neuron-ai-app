@@ -81,10 +81,12 @@ class ToolUsingAgent(
         var step = 0
         var toolsAvailable = goal.toolPolicy != com.neuron.ai.core.agent.ToolPolicy.Only(emptySet())
         var retriedWithoutTools = false
+        /** One-shot guard: some providers emit an occasional EMPTY completion. */
+        var retriedEmptyTurn = false
         // Survives across turns so an exhausted budget can still surface the
         // last model output instead of a bare failure.
         var lastAssistantText = ""
-        while (step < maxSteps) {
+        loop@ while (step < maxSteps) {
             step++
 
             // Policy-resolved allowlist: All exposes every registered tool,
@@ -148,12 +150,35 @@ class ToolUsingAgent(
                 toolsAvailable = false
                 step--
                 logger?.w("Agent", "Tool schema rejected — retrying without tools: ${streamError?.message}")
+                // THE fix: this branch previously fell through and emitted
+                // Finished("") — the user-visible "model returned an empty
+                // response" error. Retry the turn properly instead.
+                continue@loop
             } else if (streamError != null) {
                 send(AgentEvent.Failed(streamError!!.userMessage))
                 return@channelFlow
             }
 
             lastAssistantText = assistantText.toString()
+
+            // Transient empty turn: some providers occasionally return a
+            // completely blank completion (nothing streamed, no error).
+            // Retry ONCE silently; a second failure surfaces a clear error
+            // instead of a Finished("") that reads as an empty response.
+            if (assistantText.isBlank() && toolCalls.isEmpty()) {
+                if (!retriedEmptyTurn) {
+                    retriedEmptyTurn = true
+                    logger?.w("Agent", "Empty model turn — retrying once")
+                    continue@loop
+                }
+                send(
+                    AgentEvent.Failed(
+                        "The model returned an empty response. Please try again — " +
+                            "or rephrase the request."
+                    )
+                )
+                return@channelFlow
+            }
             if (toolCalls.isEmpty()) {
                 send(AgentEvent.Finished(assistantText.toString()))
                 return@channelFlow

@@ -41,6 +41,8 @@ class AgentToolLoopIntegrationTest {
         override val displayName = "Fake"
 
         val requests = mutableListOf<List<ChatMessage>>()
+        /** Tool-spec count per model turn (schema-rejection assertions). */
+        val toolSpecCounts = mutableListOf<Int>()
         /** One entry per model turn: tool request or plain text. */
         val script = ArrayDeque<StreamEvent>()
         var toolCallCounter = 0
@@ -52,6 +54,7 @@ class AgentToolLoopIntegrationTest {
 
         override fun stream(request: CompletionRequest): Flow<StreamEvent> = flow {
             requests.add(request.messages)
+            toolSpecCounts.add(request.tools.size)
             val next = script.removeFirstOrNull()
                 ?: StreamEvent.Failed(
                     com.neuron.ai.core.error.NeuronError.Provider("Script exhausted")
@@ -275,5 +278,71 @@ class AgentToolLoopIntegrationTest {
 
         val toolRow = provider.requests[1].filter { it.role == ChatMessage.Role.TOOL }
         assertTrue(toolRow.single().content.contains("Missing required argument"))
+    }
+
+    // ---- Empty-turn / schema-rejection recovery (the "empty response" fix) ----
+
+    @Test
+    fun `transient empty model turn is retried once and recovers`() = runTest {
+        val provider = ScriptedProvider()
+        // Turn 1: provider emits NOTHING (blank completion, no error).
+        provider.script.add(StreamEvent.Completed)
+        // Turn 2 (the retry): the real answer streams through.
+        provider.script.add(StreamEvent.Delta("The real answer."))
+
+        val (agent, _) = buildAgent(provider)
+        val events = withTimeout(5_000) {
+            collect(agent, AgentGoal(instruction = "hi", conversationId = "c1"))
+        }
+
+        // Two model calls happened and the retry SURFACED the answer instead
+        // of a Finished("") that the UI reads as "model returned an empty
+        // response".
+        assertEquals(2, provider.requests.size)
+        assertEquals("The real answer.", events.filterIsInstance<AgentEvent.Finished>().single().summary)
+    }
+
+    @Test
+    fun `persistent empty turns surface a clear failure instead of finishing blank`() = runTest {
+        val provider = ScriptedProvider()
+        provider.script.add(StreamEvent.Completed)
+        provider.script.add(StreamEvent.Completed)
+
+        val (agent, _) = buildAgent(provider)
+        val events = withTimeout(5_000) {
+            collect(agent, AgentGoal(instruction = "hi", conversationId = "c1"))
+        }
+
+        assertEquals(2, provider.requests.size) // one silent retry only
+        assertTrue(events.filterIsInstance<AgentEvent.Finished>().isEmpty())
+        val failed = events.filterIsInstance<AgentEvent.Failed>().single()
+        assertTrue(failed.message.contains("empty response"))
+    }
+
+    @Test
+    fun `tool schema rejection retries the turn without tools instead of finishing empty`() = runTest {
+        val provider = ScriptedProvider()
+        // Turn 1: provider rejects the tools schema outright.
+        provider.script.add(
+            StreamEvent.Failed(
+                com.neuron.ai.core.error.NeuronError.Provider(
+                    "400 — 'tools' is not supported for this model"
+                )
+            )
+        )
+        // Turn 2 (the retry, tools dropped): plain chat completes.
+        provider.script.add(StreamEvent.Delta("plain answer"))
+
+        val (agent, _) = buildAgent(provider)
+        val events = withTimeout(5_000) {
+            collect(agent, AgentGoal(instruction = "hi", conversationId = "c1"))
+        }
+
+        // The retry really happened, WITHOUT the tools array, and the turn
+        // completed — previously it fell through and emitted Finished("").
+        assertEquals(2, provider.requests.size)
+        assertTrue(provider.toolSpecCounts[0] > 0)
+        assertEquals(0, provider.toolSpecCounts[1])
+        assertEquals("plain answer", events.filterIsInstance<AgentEvent.Finished>().single().summary)
     }
 }

@@ -745,7 +745,12 @@ class ChatViewModel(
                         }
 
                         is AgentEvent.Finished -> {
-                            assistantBuffer = StringBuilder(event.summary)
+                            // Never shrink an already-streamed buffer: a
+                            // transient empty model turn or a stray Finished
+                            // must not erase partial output the user saw.
+                            if (event.summary.length > assistantBuffer.length) {
+                                assistantBuffer = StringBuilder(event.summary)
+                            }
                             _generation.value = GenerationState.Streaming(assistantBuffer.toString())
                         }
 
