@@ -103,7 +103,7 @@ class SearchProviderRegistry(
     var maxRetries: Int = 1
     var retryBackoffMillis: Long = 300L
 
-    private val adapters: List<Adapter> = providers.map { Adapter(it) }
+    private val adapters: List<Adapter> = providers.map { Adapter(it, cooldownMillis) }
 
     fun providerIds(): List<String> = adapters.map { it.provider.id }
 
@@ -178,7 +178,10 @@ class SearchProviderRegistry(
     }
 
     /** Wraps one provider with its failure counters and cooldown state. */
-    private class Adapter(val provider: SearchProvider) {
+    private class Adapter(
+        val provider: SearchProvider,
+        private val cooldownMillis: Long
+    ) {
         private val failures = AtomicInteger(0)
         private val cooldownUntil = AtomicLong(0)
 
