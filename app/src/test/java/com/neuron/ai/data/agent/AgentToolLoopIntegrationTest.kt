@@ -429,6 +429,68 @@ class AgentToolLoopIntegrationTest {
         )
     }
 
+    // ---- Context-overflow auto-recovery ------------------------------------
+
+    @Test
+    fun `context overflow trims history once and the turn succeeds`() = runTest {
+        val provider = ScriptedProvider()
+        // Call 1: provider rejects with the classic context-window 400.
+        // Call 2 (after trim): the model answers normally.
+        provider.script.add(
+            StreamEvent.Failed(
+                com.neuron.ai.core.error.NeuronError.Provider(
+                    "400 - This model's maximum context length is 8192 tokens"
+                )
+            )
+        )
+        provider.script.add(StreamEvent.Delta("Trimmed and answered."))
+
+        val (agent, _) = buildAgent(provider)
+        val events = withTimeout(5_000) {
+            collect(
+                agent,
+                AgentGoal(
+                    instruction = "go",
+                    conversationId = "c1",
+                    history = (1..10).map { i ->
+                        ChatMessage(ChatMessage.Role.USER, "old message $i with padding text")
+                    }
+                )
+            )
+        }
+
+        assertEquals(2, provider.requests.size)
+        // The rebuilt second request is materially smaller than the first.
+        assertTrue(
+            provider.requests[1].sumOf { it.content.length } <
+                provider.requests[0].sumOf { it.content.length }
+        )
+        // The user still gets their answer — no provider-error dead end.
+        assertEquals(
+            "Trimmed and answered.",
+            events.filterIsInstance<AgentEvent.Finished>().single().summary
+        )
+    }
+
+    @Test
+    fun `non-overflow provider errors are not masked by trimming`() = runTest {
+        val provider = ScriptedProvider()
+        provider.script.add(
+            StreamEvent.Failed(
+                com.neuron.ai.core.error.NeuronError.Provider("401 - Invalid or missing API key.")
+            )
+        )
+
+        val (agent, _) = buildAgent(provider)
+        val events = withTimeout(5_000) {
+            collect(agent, AgentGoal(instruction = "go", conversationId = "c1"))
+        }
+
+        // Auth errors surface as-is — exactly one attempt, no trim, no retry.
+        assertEquals(1, provider.requests.size)
+        assertTrue(events.filterIsInstance<AgentEvent.Failed>().isNotEmpty())
+    }
+
     // ---- Intelligent retry (think → tool → retry with revised approach) ----
 
     /** Always-failing tool for retry-budget tests. */
