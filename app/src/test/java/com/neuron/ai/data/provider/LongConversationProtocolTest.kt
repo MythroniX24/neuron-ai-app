@@ -6,6 +6,7 @@ import com.neuron.ai.core.agent.Tool
 import com.neuron.ai.core.agent.ToolResult
 import com.neuron.ai.core.conversation.Message
 import com.neuron.ai.core.conversation.MessageMetadata
+import com.neuron.ai.core.error.NeuronError
 import com.neuron.ai.core.provider.ChatMessage
 import com.neuron.ai.core.provider.CompletionRequest
 import com.neuron.ai.core.provider.Model
@@ -35,7 +36,8 @@ class LongConversationProtocolTest {
 
     // ---- Strict OpenAI wire validator (mirrors provider-side checks) -------
 
-    /** Throws with a precise reason on ANY protocol violation. */
+    /** Throws with a precise reason on ANY protocol violation. Top-level so
+     *  the nested scripted provider can call it. */
     private fun validateWireRequest(request: CompletionRequest) {
         val codec = OpenAIWireCodec(Json { ignoreUnknownKeys = true })
         val encoded = codec.encodeRequest(request)
@@ -212,7 +214,7 @@ class LongConversationProtocolTest {
     // ---- The long conversation ---------------------------------------------
 
     /** Builds 12+ turns of REALISTIC persisted history (orphan TOOL rows included). */
-    private fun longHistory(): List<ChatMessage> {
+    private suspend fun longHistory(): List<ChatMessage> {
         val engine = ChatContextEngine()
         val persisted = mutableListOf<Message>()
         repeat(6) { turn ->
