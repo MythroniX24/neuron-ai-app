@@ -45,7 +45,13 @@ class AgentToolLoopIntegrationTest {
         val toolSpecCounts = mutableListOf<Int>()
         /** One entry per model turn: tool request or plain text. */
         val script = ArrayDeque<StreamEvent>()
+        /** Multi-event turns (e.g. narration text + a tool call together). */
+        val multiScript = ArrayDeque<List<StreamEvent>>()
         var toolCallCounter = 0
+
+        fun enqueueTurn(events: List<StreamEvent>) {
+            multiScript.addLast(events)
+        }
 
         override suspend fun listModels(): List<Model> = emptyList()
 
@@ -55,16 +61,28 @@ class AgentToolLoopIntegrationTest {
         override fun stream(request: CompletionRequest): Flow<StreamEvent> = flow {
             requests.add(request.messages)
             toolSpecCounts.add(request.tools.size)
-            val next = script.removeFirstOrNull()
-                ?: StreamEvent.Failed(
-                    com.neuron.ai.core.error.NeuronError.Provider("Script exhausted")
-                )
-            // Rewrite the callId so each scripted tool call is unique.
-            if (next is StreamEvent.ToolCallRequested) {
-                toolCallCounter++
-                emit(next.copy(callId = "call-$toolCallCounter"))
+            val multi = multiScript.removeFirstOrNull()
+            if (multi != null) {
+                multi.forEach { event ->
+                    if (event is StreamEvent.ToolCallRequested) {
+                        toolCallCounter++
+                        emit(event.copy(callId = "call-$toolCallCounter"))
+                    } else {
+                        emit(event)
+                    }
+                }
             } else {
-                emit(next)
+                val next = script.removeFirstOrNull()
+                    ?: StreamEvent.Failed(
+                        com.neuron.ai.core.error.NeuronError.Provider("Script exhausted")
+                    )
+                // Rewrite the callId so each scripted tool call is unique.
+                if (next is StreamEvent.ToolCallRequested) {
+                    toolCallCounter++
+                    emit(next.copy(callId = "call-$toolCallCounter"))
+                } else {
+                    emit(next)
+                }
             }
             emit(StreamEvent.Completed)
         }
@@ -460,10 +478,15 @@ class AgentToolLoopIntegrationTest {
     @Test
     fun `revised approach after failure succeeds and resets the budget`() = runTest {
         val provider = ScriptedProvider()
-        // Turn 1: failing call. Turn 2: DIFFERENT args (revised approach).
+        // Turn 1: failing call. Turn 2: narration + REVISED args in the SAME
+        // turn (the real interleaved shape). Turn 3: final answer.
         provider.script.add(toolRequestEvent("fail.always", "{\"x\":\"1\"}"))
-        provider.script.add(StreamEvent.Delta("Let me try a different way."))
-        provider.script.add(toolRequestEvent("fail.always", "{\"x\":\"2\"}"))
+        provider.enqueueTurn(
+            listOf(
+                StreamEvent.Delta("Let me try a different way."),
+                toolRequestEvent("fail.always", "{\"x\":\"2\"}")
+            )
+        )
         provider.script.add(StreamEvent.Delta("Recovered successfully."))
 
         val registry = InMemoryToolRegistry()
@@ -505,8 +528,11 @@ class AgentToolLoopIntegrationTest {
     @Test
     fun `retry guidance reaches the model after a failure`() = runTest {
         val provider = ScriptedProvider()
+        // Turn 1 fails; turn 2 REPEATS identically (guidance is injected);
+        // turn 3 revises the approach; turn 4 answers.
         provider.script.add(toolRequestEvent("fail.always", "{\"x\":\"1\"}"))
-        provider.script.add(toolRequestEvent("fail.always", "{\"y\":\"2\"}")) // revised → allowed
+        provider.script.add(toolRequestEvent("fail.always", "{\"x\":\"1\"}"))
+        provider.script.add(toolRequestEvent("fail.always", "{\"y\":\"2\"}"))
         provider.script.add(StreamEvent.Delta("done"))
 
         val registry = InMemoryToolRegistry()
@@ -524,9 +550,10 @@ class AgentToolLoopIntegrationTest {
             collect(agent, AgentGoal(instruction = "go", conversationId = "c1"))
         }
 
-        // The SECOND model call carried the retry-policy note with the actual error.
-        val secondCall = provider.requests[1]
-        val lastUser = secondCall.last { it.role == ChatMessage.Role.USER }
+        // The THIRD model call (after the identical repeat) carried the
+        // retry-policy note with the actual error.
+        val thirdCall = provider.requests[2]
+        val lastUser = thirdCall.last { it.role == ChatMessage.Role.USER }
         assertTrue(lastUser.content.contains("retry policy"))
         assertTrue(lastUser.content.contains("persistent boom"))
         assertTrue(lastUser.content.contains("Do NOT repeat"))
