@@ -32,13 +32,83 @@ import org.junit.Test
  * providers enforce with a 400). This is the app-side replica of "test the
  * longest conversation on a real device", runnable in CI.
  */
+/**
+ * Strict OpenAI wire validator (mirrors provider-side 400 checks). Top-level
+ * so the nested scripted provider can call it.
+ */
+private fun validateWireRequest(request: CompletionRequest) {
+    val codec = OpenAIWireCodec(Json { ignoreUnknownKeys = true })
+    val encoded = codec.encodeRequest(request)
+    val messages = encoded["messages"]!!.jsonArray.map { it.jsonObject }
+    val hasTools = encoded.containsKey("tools")
+    var sawUser = false
+
+    messages.forEachIndexed { index, message ->
+        val role = message["role"].toString().trim('"')
+        val content = message["content"]
+
+        // Rule 1: content must exist and never be JSON null.
+        assertTrue(
+            "msg $index: missing/null content",
+            content != null && content.toString() != "null"
+        )
+
+        when (role) {
+            "system" -> {}
+
+            "user" -> sawUser = true
+
+            "assistant" -> {
+                val calls = message["tool_calls"]?.jsonArray
+                if (calls != null) {
+                    assertTrue("msg $index: empty tool_calls array", calls.isNotEmpty())
+                    calls.forEach { call ->
+                        val obj = call.jsonObject
+                        assertTrue("msg $index: tool_call missing id", obj.containsKey("id"))
+                        assertTrue(
+                            "msg $index: tool_call missing function.name",
+                            obj["function"]!!.jsonObject.containsKey("name")
+                        )
+                    }
+                    if (!hasTools) {
+                        throw AssertionError(
+                            "msg $index: tool_calls present but NO tools array wired"
+                        )
+                    }
+                }
+            }
+
+            "tool" -> {
+                assertTrue(
+                    "msg $index: TOOL row present but NO tools array wired",
+                    hasTools
+                )
+                assertTrue(
+                    "msg $index: empty tool content",
+                    content.toString().length > 4
+                )
+                assertTrue(
+                    "msg $index: tool row missing tool_call_id",
+                    message.containsKey("tool_call_id")
+                )
+                if (index == 0) throw AssertionError("msg 0 is a TOOL row")
+                val prev = messages[index - 1]
+                val prevIds = prev["tool_calls"]?.jsonArray
+                    ?.map { it.jsonObject["id"].toString() }
+                    .orEmpty()
+                val myId = message["tool_call_id"].toString()
+                assertTrue(
+                    "msg $index: TOOL row not preceded by matching assistant tool_calls " +
+                        "(prev role=${prev["role"]}, ids=$prevIds, mine=$myId)",
+                    prevIds.contains(myId)
+                )
+            }
+        }
+    }
+    assertTrue("request must contain at least one user message", sawUser)
+}
+
 class LongConversationProtocolTest {
-
-    // ---- Strict OpenAI wire validator (mirrors provider-side checks) -------
-
-    /** Throws with a precise reason on ANY protocol violation. Top-level so
-     *  the nested scripted provider can call it. */
-    private fun validateWireRequest(request: CompletionRequest) {
         val codec = OpenAIWireCodec(Json { ignoreUnknownKeys = true })
         val encoded = codec.encodeRequest(request)
         val messages = encoded["messages"]!!.jsonArray.map { it.jsonObject }
