@@ -131,16 +131,14 @@ class ToolSequenceRepairTest {
         val messages = encoded["messages"]!!.jsonArray.map { it.jsonObject }
 
         messages.forEachIndexed { index, message ->
-            if (message["role"]?.toString() == "\"tool\"") {
+            val role = message["role"]?.toString()?.trim('"')
+            if (role == "tool") {
                 val prev = messages[index - 1]
-                val callIds = prev["tool_calls"]?.jsonArray
-                    ?.map { it.jsonObject["id"]?.toString() }
-                    .orEmpty()
-                assertTrue(
-                    "TOOL row at $index not preceded by matching assistant tool_calls",
-                    callIds.contains("\"${message["tool_call_id"]?.toString()!!.trim('"')}\"") ||
-                        prev["tool_calls"] != null
-                )
+                val toolCallId = message["tool_call_id"]?.toString()?.trim('"')
+                val paired = prev["tool_calls"]?.jsonArray
+                    ?.any { it.jsonObject["id"]?.toString()?.trim('"') == toolCallId }
+                    ?: false
+                assertTrue("TOOL row at $index not paired with assistant tool_calls", paired)
             }
         }
     }
