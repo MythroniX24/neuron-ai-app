@@ -77,13 +77,18 @@ android {
 
     testOptions {
         unitTests.isReturnDefaultValues = true
-        unitTests.all {
+        unitTests.all { task ->
             // Surface full assertion/exception details in CI logs — the
             // console summary only prints file:line otherwise.
-            testLogging {
-                events("failed", "skipped")
-                setExceptionFormat("full")
+            task.testLogging {
+                events(
+                    org.gradle.api.tasks.testing.logging.TestLogEvent.FAILED,
+                    org.gradle.api.tasks.testing.logging.TestLogEvent.SKIPPED
+                )
+                exceptionFormat =
+                    org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
                 showStackTraces = true
+                showCauses = true
             }
         }
     }
