@@ -410,4 +410,125 @@ class AgentToolLoopIntegrationTest {
             events.filterIsInstance<AgentEvent.Finished>().single().summary
         )
     }
+
+    // ---- Intelligent retry (think → tool → retry with revised approach) ----
+
+    /** Always-failing tool for retry-budget tests. */
+    private class AlwaysFailingTool : com.neuron.ai.core.agent.Tool {
+        override val id = "fail.always"
+        override val title = "Failing tool"
+        override val description = "Always fails — for retry tests."
+        override val requiredCapabilities = emptySet<Capability>()
+        override val riskLevel = com.neuron.ai.core.agent.RiskLevel.SAFE
+        override val timeoutMs = 1_000L
+        override val parametersSchemaJson = """{"type":"object","properties":{}}"""
+        override suspend fun execute(argumentsJson: String): ToolResult =
+            ToolResult.Failure("persistent boom")
+    }
+
+    @Test
+    fun `identical failed call beyond retry budget surfaces honest failure`() = runTest {
+        val provider = ScriptedProvider()
+        // Three turns: model repeats the IDENTICAL failing call each time.
+        repeat(3) {
+            provider.script.add(toolRequestEvent("fail.always", "{\"x\":\"1\"}"))
+        }
+
+        val registry = InMemoryToolRegistry()
+        registry.register(AlwaysFailingTool())
+        val executor = DefaultToolExecutor(registry, SessionPermissionManager(), logger = null, maxRetries = 0)
+        val agent = ToolUsingAgent(
+            provider = provider,
+            model = Model(id = "test-model", displayName = "test"),
+            toolRegistry = registry,
+            toolExecutor = executor,
+            logger = null,
+            maxAttemptsPerProblem = 2
+        )
+        val events = withTimeout(5_000) {
+            collect(agent, AgentGoal(instruction = "do the thing", conversationId = "c1"))
+        }
+
+        // Honest give-up — the failure names the tool and the attempt count.
+        val failed = events.filterIsInstance<AgentEvent.Failed>().single()
+        assertTrue(failed.message.contains("Retry budget exhausted"))
+        assertTrue(failed.message.contains("fail.always"))
+        // No final answer was fabricated after exhausted retries.
+        assertTrue(events.filterIsInstance<AgentEvent.Finished>().isEmpty())
+    }
+
+    @Test
+    fun `revised approach after failure succeeds and resets the budget`() = runTest {
+        val provider = ScriptedProvider()
+        // Turn 1: failing call. Turn 2: DIFFERENT args (revised approach).
+        provider.script.add(toolRequestEvent("fail.always", "{\"x\":\"1\"}"))
+        provider.script.add(StreamEvent.Delta("Let me try a different way."))
+        provider.script.add(toolRequestEvent("fail.always", "{\"x\":\"2\"}"))
+        provider.script.add(StreamEvent.Delta("Recovered successfully."))
+
+        val registry = InMemoryToolRegistry()
+        registry.register(object : com.neuron.ai.core.agent.Tool {
+            override val id = "fail.always"
+            override val title = "Failing tool"
+            override val description = "Fails on x=1"
+            override val requiredCapabilities = emptySet<Capability>()
+            override val riskLevel = com.neuron.ai.core.agent.RiskLevel.SAFE
+            override val timeoutMs = 1_000L
+            override val parametersSchemaJson = """{"type":"object","properties":{"x":{"type":"string"}}}"""
+            override suspend fun execute(argumentsJson: String): ToolResult =
+                if (argumentsJson.contains("\"1\"")) ToolResult.Failure("bad value")
+                else ToolResult.Success("ok")
+        })
+        val executor = DefaultToolExecutor(registry, SessionPermissionManager(), logger = null, maxRetries = 0)
+        val agent = ToolUsingAgent(
+            provider = provider,
+            model = Model(id = "test-model", displayName = "test"),
+            toolRegistry = registry,
+            toolExecutor = executor,
+            logger = null,
+            maxAttemptsPerProblem = 3
+        )
+        val events = withTimeout(5_000) {
+            collect(agent, AgentGoal(instruction = "do the thing", conversationId = "c1"))
+        }
+
+        // The revised approach ran (2 model calls with tools + final) and the
+        // narration stayed distinct from the final answer.
+        assertEquals(
+            "Recovered successfully.",
+            events.filterIsInstance<AgentEvent.Finished>().single().summary
+        )
+        val narration = events.filterIsInstance<AgentEvent.IntermediateMessage>().single()
+        assertEquals("Let me try a different way.", narration.text)
+    }
+
+    @Test
+    fun `retry guidance reaches the model after a failure`() = runTest {
+        val provider = ScriptedProvider()
+        provider.script.add(toolRequestEvent("fail.always", "{\"x\":\"1\"}"))
+        provider.script.add(toolRequestEvent("fail.always", "{\"y\":\"2\"}")) // revised → allowed
+        provider.script.add(StreamEvent.Delta("done"))
+
+        val registry = InMemoryToolRegistry()
+        registry.register(AlwaysFailingTool())
+        val executor = DefaultToolExecutor(registry, SessionPermissionManager(), logger = null, maxRetries = 0)
+        val agent = ToolUsingAgent(
+            provider = provider,
+            model = Model(id = "test-model", displayName = "test"),
+            toolRegistry = registry,
+            toolExecutor = executor,
+            logger = null,
+            maxAttemptsPerProblem = 3
+        )
+        withTimeout(5_000) {
+            collect(agent, AgentGoal(instruction = "go", conversationId = "c1"))
+        }
+
+        // The SECOND model call carried the retry-policy note with the actual error.
+        val secondCall = provider.requests[1]
+        val lastUser = secondCall.last { it.role == ChatMessage.Role.USER }
+        assertTrue(lastUser.content.contains("retry policy"))
+        assertTrue(lastUser.content.contains("persistent boom"))
+        assertTrue(lastUser.content.contains("Do NOT repeat"))
+    }
 }

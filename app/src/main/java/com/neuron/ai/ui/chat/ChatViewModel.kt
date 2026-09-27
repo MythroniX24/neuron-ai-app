@@ -766,6 +766,26 @@ class ChatViewModel(
                             _generation.value = GenerationState.Streaming(assistantBuffer.toString())
                         }
 
+                        is AgentEvent.IntermediateMessage -> {
+                            // Mid-loop narration is ONGOING progress — show it
+                            // in the timeline as its own step, never as the
+                            // final answer bubble (Finished handles that).
+                            if (USE_LIVE_TIMELINE) {
+                                _timeline.value = _timeline.value +
+                                    com.neuron.ai.core.agent.AgentStepMapper.toRecord(
+                                        com.neuron.ai.core.agent.AgentActivity(
+                                            stepId = "narrate-${event.text.hashCode()}",
+                                            title = event.text.take(120),
+                                            state = com.neuron.ai.core.agent.AgentActivity.State.DONE,
+                                            toolId = null,
+                                            startedAtEpochMs = System.currentTimeMillis()
+                                        ),
+                                        typeOverride =
+                                            com.neuron.ai.core.conversation.AgentStepRecord.TYPE_INTERMEDIATE
+                                    )
+                            }
+                        }
+
                         is AgentEvent.TextBuffer -> {
                             // Agent repaired the stream (e.g. a tool call was
                             // recovered from plain-text markup) — show the
