@@ -36,7 +36,12 @@ internal class OpenAIWireCodec(private val json: Json) {
         toolsEnabled: Boolean = true
     ): JsonObject = buildJsonObject {
         put("model", request.model.id)
-        put("messages", buildJsonArray { request.messages.forEach { add(encodeMessage(it, imageData)) } })
+        put(
+            "messages",
+            buildJsonArray {
+                repairToolSequence(request.messages).forEach { add(encodeMessage(it, imageData)) }
+            }
+        )
         if (request.tools.isNotEmpty() && toolsEnabled) {
             put("tools", buildJsonArray {
                 request.tools.forEach { tool ->
@@ -111,6 +116,82 @@ internal class OpenAIWireCodec(private val json: Json) {
 
             ChatMessage.Role.SYSTEM -> put("content", message.content)
         }
+    }
+
+    /**
+     * Tool-sequence safety net (OpenAI protocol): a TOOL message is only
+     * valid when the previous message is an ASSISTANT carrying a matching
+     * tool_call id. The agent loop always emits valid sequences, but rebuilt
+     * histories (persisted TOOL rows, compaction, budget trimming) can break
+     * the pairing — providers then reject the WHOLE request with a 400 and
+     * the chat dies until a new conversation is opened. Repair defensively:
+     * synthesize any missing ASSISTANT(tool_calls) rows and drop unfixable
+     * TOOL rows whose call id cannot be paired.
+     */
+    internal fun repairToolSequence(messages: List<ChatMessage>): List<ChatMessage> {
+        val out = mutableListOf<ChatMessage>()
+        var synthCounter = 0
+        for (message in messages) {
+            if (message.role != ChatMessage.Role.TOOL) {
+                out += message
+                continue
+            }
+            val callId = message.toolCallId ?: "call-repair-${synthCounter++}"
+            val last = out.lastOrNull()
+            when {
+                // Already paired — nothing to do.
+                last != null && last.role == ChatMessage.Role.ASSISTANT &&
+                    last.toolCalls.any { it.callId == callId } -> Unit
+
+                // Consecutive TOOL row: register this call on the assistant
+                // row that owns the running tool block (the nearest one above).
+                last != null && last.role == ChatMessage.Role.TOOL -> {
+                    val assistantIndex = out.indexOfLast { it.role == ChatMessage.Role.ASSISTANT }
+                    if (assistantIndex < 0) continue // no assistant at all — drop orphan
+                    out[assistantIndex] = out[assistantIndex].copy(
+                        toolCalls = out[assistantIndex].toolCalls + com.neuron.ai.core.provider.ProposedToolCall(
+                            callId = callId,
+                            toolId = "tool",
+                            argumentsJson = "{}"
+                        )
+                    )
+                }
+
+                // Assistant row present but missing THIS call id: append it.
+                last != null && last.role == ChatMessage.Role.ASSISTANT ->
+                    out[out.lastIndex] = last.copy(
+                        toolCalls = last.toolCalls + com.neuron.ai.core.provider.ProposedToolCall(
+                            callId = callId,
+                            toolId = "tool",
+                            argumentsJson = "{}"
+                        )
+                    )
+
+                // No pairable assistant (start of history / after USER):
+                // synthesize the missing assistant tool-request row.
+                else -> out += ChatMessage(
+                    role = ChatMessage.Role.ASSISTANT,
+                    content = "",
+                    toolCalls = listOf(
+                        com.neuron.ai.core.provider.ProposedToolCall(
+                            callId = callId,
+                            toolId = "tool",
+                            argumentsJson = "{}"
+                        )
+                    )
+                )
+            }
+            out += message.copy(toolCallId = callId)
+        }
+        // A trailing ASSISTANT with tool_calls and NO following TOOL rows is
+        // also invalid — strip dangling tool_calls from a trailing assistant.
+        val trailing = out.lastOrNull()
+        if (trailing != null && trailing.role == ChatMessage.Role.ASSISTANT &&
+            trailing.toolCalls.isNotEmpty()
+        ) {
+            out[out.lastIndex] = trailing.copy(toolCalls = emptyList())
+        }
+        return out
     }
 
     private fun toDataUrl(att: Attachment, bytes: ByteArray): String {
