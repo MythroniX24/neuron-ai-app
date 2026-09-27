@@ -475,11 +475,15 @@ class AgentToolLoopIntegrationTest {
     @Test
     fun `non-overflow provider errors are not masked by trimming`() = runTest {
         val provider = ScriptedProvider()
-        provider.script.add(
-            StreamEvent.Failed(
-                com.neuron.ai.core.error.NeuronError.Provider("401 - Invalid or missing API key.")
+        // Both attempts fail with the SAME auth error (real-world behavior:
+        // the schema fallback re-tries without tools, the bad key still 401s).
+        repeat(2) {
+            provider.script.add(
+                StreamEvent.Failed(
+                    com.neuron.ai.core.error.NeuronError.Provider("401 - Invalid or missing API key.")
+                )
             )
-        )
+        }
 
         val (agent, _) = buildAgent(provider)
         val events = withTimeout(5_000) {
