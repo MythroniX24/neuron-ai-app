@@ -130,6 +130,63 @@ class ToolSequenceRepairTest {
     }
 
     @Test
+    fun `encoded json never carries null content or empty tool content`() {
+        val request = CompletionRequest(
+            model = Model(id = "m", displayName = "m"),
+            tools = listOf(
+                com.neuron.ai.core.provider.ToolSpec(
+                    id = "a.b", description = "d", parametersSchemaJson = "{}"
+                )
+            ),
+            messages = listOf(
+                ChatMessage(ChatMessage.Role.USER, "hi"),
+                // Assistant tool call with BLANK content → must encode as "".
+                ChatMessage(
+                    ChatMessage.Role.ASSISTANT, "",
+                    toolCalls = listOf(
+                        com.neuron.ai.core.provider.ProposedToolCall("call-1", "a.b", "{}")
+                    )
+                ),
+                // Tool result with BLANK content → must encode non-empty.
+                ChatMessage(ChatMessage.Role.TOOL, "", toolCallId = "call-1"),
+                ChatMessage(ChatMessage.Role.USER, "go on")
+            )
+        )
+        val encoded = codec.encodeRequest(request)
+        val messages = encoded["messages"]!!.jsonArray.map { it.jsonObject }
+        messages.forEach { message ->
+            val content = message["content"]
+            assertTrue(
+                "content must exist and not be JSON null",
+                content != null && content.toString() != "null"
+            )
+        }
+        val toolRow = messages.first { it["role"].toString().contains("tool") }
+        assertTrue(toolRow["content"].toString().length > 2)
+    }
+
+    @Test
+    fun `tool rows become plain text when the request carries no tools`() {
+        val request = CompletionRequest(
+            model = Model(id = "m", displayName = "m"),
+            messages = listOf(
+                ChatMessage(ChatMessage.Role.USER, "find kotlin docs"),
+                ChatMessage(ChatMessage.Role.ASSISTANT, "searching"),
+                ChatMessage(ChatMessage.Role.TOOL, "kotlin results here", toolCallId = "call-1"),
+                ChatMessage(ChatMessage.Role.USER, "summarize")
+            )
+        )
+        val encoded = codec.encodeRequest(request)
+        val messages = encoded["messages"]!!.jsonArray.map { it.jsonObject }
+        // No tool-role rows and no tool_calls may remain.
+        assertTrue(messages.none { it["role"].toString().contains("tool") })
+        assertTrue(messages.none { it.containsKey("tool_calls") })
+        // The tool result survives as narration inside an assistant row.
+        val joined = messages.joinToString(" ") { it["content"].toString() }
+        assertTrue(joined.contains("kotlin results here"))
+    }
+
+    @Test
     fun `encoded request never violates the tool sequence protocol`() {
         val request = CompletionRequest(
             model = Model(id = "m", displayName = "m"),

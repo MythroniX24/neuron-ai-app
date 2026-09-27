@@ -39,7 +39,14 @@ internal class OpenAIWireCodec(private val json: Json) {
         put(
             "messages",
             buildJsonArray {
-                repairToolSequence(request.messages).forEach { add(encodeMessage(it, imageData)) }
+                // The safety net also needs to know whether TOOL rows are
+                // legal on THIS request: when no tools are wired (schema
+                // rejection fallback, tool-less models), tool rows and
+                // tool_calls are converted to plain text instead — strict
+                // gateways reject tool messages without a tools array.
+                val toolsWired = request.tools.isNotEmpty() && toolsEnabled
+                repairToolSequence(request.messages, toolsWired)
+                    .forEach { add(encodeMessage(it, imageData)) }
             }
         )
         if (request.tools.isNotEmpty() && toolsEnabled) {
@@ -68,13 +75,18 @@ internal class OpenAIWireCodec(private val json: Json) {
         put("role", message.role.name.lowercase())
         when (message.role) {
             ChatMessage.Role.TOOL -> {
-                put("content", message.content)
+                // Never emit an empty/null TOOL content — strict validators
+                // require a non-empty string here.
+                put("content", message.content.ifBlank { "[no output]" })
                 message.toolCallId?.let { put("tool_call_id", it) }
             }
 
             ChatMessage.Role.ASSISTANT ->
                 if (message.toolCalls.isNotEmpty()) {
-                    put("content", message.content.ifBlank { null })
+                    // Empty STRING, never null: several OpenAI-compatible
+                    // servers (vLLM/llama.cpp-style) reject "content": null
+                    // on assistant messages outright.
+                    put("content", message.content.ifBlank { "" })
                     put("tool_calls", buildJsonArray {
                         message.toolCalls.forEach { call ->
                             add(buildJsonObject {
@@ -128,7 +140,11 @@ internal class OpenAIWireCodec(private val json: Json) {
      * synthesize any missing ASSISTANT(tool_calls) rows and drop unfixable
      * TOOL rows whose call id cannot be paired.
      */
-    internal fun repairToolSequence(messages: List<ChatMessage>): List<ChatMessage> {
+    internal fun repairToolSequence(
+        messages: List<ChatMessage>,
+        toolsPresent: Boolean = true
+    ): List<ChatMessage> {
+        if (!toolsPresent) return deToolify(messages)
         val out = mutableListOf<ChatMessage>()
         var synthCounter = 0
         for (message in messages) {
@@ -191,6 +207,64 @@ internal class OpenAIWireCodec(private val json: Json) {
         ) {
             out[out.lastIndex] = trailing.copy(toolCalls = emptyList())
         }
+        return out
+    }
+
+    /**
+     * Converts tool machinery to PLAIN TEXT for requests that carry NO tools
+     * array (schema-rejection fallback, tool-less models): strict gateways
+     * reject "tool" role messages and tool_calls when no tools are wired.
+     * Tool calls/results become bracketed narration inside ASSISTANT rows,
+     * merged so the output stays a valid USER/ASSISTANT conversation.
+     */
+    private fun deToolify(messages: List<ChatMessage>): List<ChatMessage> {
+        val out = mutableListOf<ChatMessage>()
+        val narration = StringBuilder()
+
+        fun flushNarration() {
+            if (narration.isNotBlank()) {
+                out += ChatMessage(ChatMessage.Role.ASSISTANT, narration.toString().trim())
+                narration.clear()
+            }
+        }
+
+        for (message in messages) {
+            when (message.role) {
+                ChatMessage.Role.TOOL -> narration
+                    .append("[tool result] ")
+                    .append(message.content.take(800))
+                    .append('\n')
+
+                ChatMessage.Role.ASSISTANT -> {
+                    message.toolCalls.forEach { call ->
+                        narration.append("[used tool: ").append(call.toolId).append("]\n")
+                    }
+                    if (message.content.isNotBlank()) {
+                        narration.append(message.content).append('\n')
+                    }
+                }
+
+                ChatMessage.Role.USER -> {
+                    flushNarration()
+                    // Merge consecutive USER rows — some strict endpoints
+                    // reject adjacent same-role messages.
+                    val last = out.lastOrNull()
+                    if (last != null && last.role == ChatMessage.Role.USER) {
+                        out[out.lastIndex] = last.copy(
+                            content = last.content + "\n" + message.content
+                        )
+                    } else {
+                        out += message
+                    }
+                }
+
+                else -> {
+                    flushNarration()
+                    out += message
+                }
+            }
+        }
+        flushNarration()
         return out
     }
 
