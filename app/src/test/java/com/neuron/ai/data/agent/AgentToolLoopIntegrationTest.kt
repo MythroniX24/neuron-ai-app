@@ -486,9 +486,13 @@ class AgentToolLoopIntegrationTest {
             collect(agent, AgentGoal(instruction = "go", conversationId = "c1"))
         }
 
-        // Auth errors surface as-is — exactly one attempt, no trim, no retry.
-        assertEquals(1, provider.requests.size)
-        assertTrue(events.filterIsInstance<AgentEvent.Failed>().isNotEmpty())
+        // The auth error is NOT treated as context overflow: no trim recovery
+        // fired (the existing schema-fallback may re-attempt without tools,
+        // but the run still surfaces the SAME provider failure — never a
+        // silently trimmed/emptied history and never a fake success).
+        assertTrue(events.filterIsInstance<AgentEvent.Finished>().isEmpty())
+        val failed = events.filterIsInstance<AgentEvent.Failed>().single()
+        assertTrue(failed.message.contains("Invalid or missing API key"))
     }
 
     // ---- Intelligent retry (think → tool → retry with revised approach) ----
