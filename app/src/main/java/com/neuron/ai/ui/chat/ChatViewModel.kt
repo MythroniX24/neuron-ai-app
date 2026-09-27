@@ -802,6 +802,15 @@ class ChatViewModel(
                                 assistantBuffer = StringBuilder(event.summary)
                             }
                             _generation.value = GenerationState.Streaming(assistantBuffer.toString())
+                            // The answer has arrived: hide the live progress
+                            // cards NOW. The (filtered) steps already persist
+                            // on the assistant message metadata and render
+                            // attached to it — leaving the live card visible
+                            // rendered a stuck "Understanding request /
+                            // Running tool" card AND a duplicate after the
+                            // response ended.
+                            _activity.value = emptyList()
+                            _timeline.value = emptyList()
                         }
 
                         is AgentEvent.Failed -> {
@@ -855,7 +864,7 @@ class ChatViewModel(
                     providerId = config.id,
                     modelId = modelId,
                     generationMs = elapsed,
-                    agentSteps = _timeline.value
+                    agentSteps = persistableSteps()
                 )
             )
         } else {
@@ -908,13 +917,28 @@ class ChatViewModel(
     }
 
     /**
+     * Persisted timeline hygiene: generic bookkeeping rows ("Understanding
+     * request", "Continuing", "Thinking") are loop machinery, not work —
+     * they only matter LIVE while the user waits. On the persisted card they
+     * read as noise after the response, so only meaningful steps survive:
+     * tool calls, narration, and failure analysis.
+     */
+    private fun persistableSteps(): List<com.neuron.ai.core.conversation.AgentStepRecord> {
+        if (!USE_LIVE_TIMELINE) return emptyList()
+        return _timeline.value.filterNot { step ->
+            step.type == com.neuron.ai.core.conversation.AgentStepRecord.TYPE_THINKING &&
+                GENERIC_THINKING_LABELS.any { step.label.startsWith(it) }
+        }
+    }
+
+    /**
      * Cancel/failure path: freeze the timeline snapshot and mark any step
      * still RUNNING as failed so the persisted timeline reflects reality —
      * cancelled work must not render as completed work.
      */
     private fun cancelStepsSnapshot(): List<com.neuron.ai.core.conversation.AgentStepRecord> {
         if (!USE_LIVE_TIMELINE) return emptyList()
-        return _timeline.value.map { step ->
+        return persistableSteps().map { step ->
             if (step.status == com.neuron.ai.core.conversation.AgentStepRecord.STATUS_RUNNING) {
                 step.copy(
                     status = com.neuron.ai.core.conversation.AgentStepRecord.STATUS_FAILED,
@@ -941,5 +965,10 @@ class ChatViewModel(
          * the UI stays lightweight and the summaries stay accurate.
          */
         private const val USE_LIVE_TIMELINE = true
+
+        /** Loop-machinery labels hidden from the PERSISTED timeline. */
+        private val GENERIC_THINKING_LABELS = listOf(
+            "Understanding request", "Continuing", "Thinking"
+        )
     }
 }
