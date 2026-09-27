@@ -357,7 +357,8 @@ class SearchPipelineTest {
         val outcome = orchestrator.search(SearchQuery(text = "no such thing"))
         assertTrue(outcome is SearchOrchestrator.SearchOutcome.Failed)
         assertTrue((outcome as SearchOrchestrator.SearchOutcome.Failed).message.contains("No results"))
-        assertEquals(1, provider.requests.size) // no retry on empty
+        // 1 raw + 1 cleaned-terms retry (query hygiene) — still honest empty.
+        assertEquals(2, provider.requests.size)
     }
 
     // ---- WebContentSanitizer ---------------------------------------------------------------
