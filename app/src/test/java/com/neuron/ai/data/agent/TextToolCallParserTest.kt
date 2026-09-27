@@ -94,11 +94,18 @@ class TextToolCallParserTest {
             "<parameter-content>line1\nline2 \"quoted\"</parameter-content>" +
             "</function></tool_call>"
         val recovered = TextToolCallParser.parse(text)
-        assertEquals(1, recovered.size)
+        if (recovered.size != 1) {
+            throw AssertionError(
+                "diag: size=${recovered.size} args=${recovered.map { it.call.argumentsJson }}"
+            )
+        }
         // The JSON must parse back without throwing.
         val obj = kotlinx.serialization.json.Json.parseToJsonElement(
             recovered[0].call.argumentsJson
         ).jsonObject
-        assertTrue(obj["content"].toString().contains("quoted"))
+        val content = obj["content"]?.toString()
+        if (content == null || !content.contains("quoted")) {
+            throw AssertionError("diag: argsJson=${recovered[0].call.argumentsJson} content=$content")
+        }
     }
 }

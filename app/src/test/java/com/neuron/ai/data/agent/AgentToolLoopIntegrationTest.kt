@@ -369,7 +369,9 @@ class AgentToolLoopIntegrationTest {
         assertEquals(2, provider.requests.size)
         // Markup was stripped from the visible buffer...
         val buffer = events.filterIsInstance<AgentEvent.TextBuffer>().single()
-        assertTrue(!buffer.text.contains("<tool_call>"))
+        if (buffer.text.contains("<tool_call>")) {
+            throw AssertionError("diag: buffer=[${buffer.text}] events=${events.map { it::class.simpleName }}")
+        }
         // ...the recovered call really executed...
         val toolRow = provider.requests[1].filter { it.role == ChatMessage.Role.TOOL }
         assertEquals(1, toolRow.size)
