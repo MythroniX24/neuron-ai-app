@@ -87,7 +87,7 @@ class ToolSequenceRepairTest {
     }
 
     @Test
-    fun `wire codec repairs leading orphan by synthesis and drops hopeless consecutive orphans`() {
+    fun `wire codec repairs leading orphan by synthesis and pairs consecutive orphans`() {
         // Leading orphan: synthesize the missing assistant row (keeps the
         // tool result available to the model — better than dropping it).
         val repaired = codec.repairToolSequence(
@@ -96,16 +96,20 @@ class ToolSequenceRepairTest {
         assertTrue(repaired.first().role == ChatMessage.Role.ASSISTANT)
         assertEquals("call-1", repaired.first().toolCalls.single().callId)
 
-        // TOOL after TOOL with NO assistant anywhere above: unfixable — the
-        // codec must NOT send protocol garbage; the orphan is dropped.
-        val dropped = codec.repairToolSequence(
+        // TOOL after TOOL with no assistant above: the FIRST orphan
+        // synthesizes its assistant row, and the SECOND consecutive orphan
+        // attaches to that same block — both results survive, validly paired.
+        val repaired2 = codec.repairToolSequence(
             listOf(
                 ChatMessage(ChatMessage.Role.TOOL, "r1", toolCallId = "call-1"),
                 ChatMessage(ChatMessage.Role.TOOL, "r2", toolCallId = "call-2")
             )
         )
-        assertEquals(2, dropped.size) // synthesized assistant + first tool row only
-        assertTrue(dropped.none { it.toolCallId == "call-2" })
+        assertEquals(3, repaired2.size)
+        val assistant = repaired2.first()
+        assertTrue(assistant.role == ChatMessage.Role.ASSISTANT)
+        assertEquals(2, assistant.toolCalls.size)
+        assertTrue(repaired2.drop(1).all { it.role == ChatMessage.Role.TOOL })
     }
 
     @Test
