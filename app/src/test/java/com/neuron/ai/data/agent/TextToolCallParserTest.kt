@@ -88,6 +88,28 @@ class TextToolCallParserTest {
     }
 
     @Test
+    fun `parses the equals-separator variant with mixed closers`() {
+        // Real-world sample: <function=web.read><parameter=url>… plus a
+        // second block whose output was cut mid-stream.
+        val text = "Let me pull actual headlines.\n" +
+            "<tool_call><function=web.read><parameter=url>https://techcrunch.com/</parameter>" +
+            "<parameter=maxChars>6000</parameter></function></tool_call>\n" +
+            "<tool_call><function=web.read><parameter=url>https://www.reuters.com/technology/</parameter>"
+        val recovered = TextToolCallParser.parse(text)
+        assertEquals(2, recovered.size)
+        assertEquals("web.read", recovered[0].call.toolId)
+        assertTrue(recovered[0].call.argumentsJson.contains("techcrunch.com"))
+        assertTrue(recovered[0].call.argumentsJson.contains("6000"))
+        // Truncated second block still recovers its url parameter.
+        assertEquals("web.read", recovered[1].call.toolId)
+        assertTrue(recovered[1].call.argumentsJson.contains("reuters.com"))
+        // The visible text keeps only the narration sentence.
+        val cleaned = TextToolCallParser.stripToolMarkup(text)
+        assertFalse(cleaned.contains("<tool_call>"))
+        assertTrue(cleaned.contains("Let me pull actual headlines."))
+    }
+
+    @Test
     fun `escaped parameter values produce valid json`() {
         val text = "<tool_call><function-fs.write>" +
             "<parameter-path>notes.txt</parameter-path>" +
