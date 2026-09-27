@@ -7,7 +7,11 @@ import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.DrawerValue
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.rememberDrawerState
@@ -81,6 +85,15 @@ fun NeuronApp(container: AppContainer) {
         drawerState = drawerState,
         drawerContent = { drawerContent() }
     ) {
+        // Every screen paints the APP theme background here at the root —
+        // screens themselves (chat, settings) have transparent roots, so
+        // without this the XML window (which follows SYSTEM night mode, not
+        // the app theme setting) bleeds through as white in app-dark mode.
+        Box(
+            Modifier
+                .fillMaxSize()
+                .background(MaterialTheme.colorScheme.background)
+        ) {
         PermissionDialogHost(container.permissionManager) {
             NavHost(
                 navController = navController,
@@ -177,6 +190,7 @@ fun NeuronApp(container: AppContainer) {
                     )
                 }
             }
+        }
         }
     }
 }
