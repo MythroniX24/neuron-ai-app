@@ -139,12 +139,21 @@ object TextToolCallParser {
             val keyEnd = block.indexOf('>', keyStart)
             if (keyEnd < 0) break
             val key = block.substring(keyStart, keyEnd).trim()
-            val valEnd = block.indexOf(PARAM_CLOSE, keyEnd + 1)
-            if (valEnd < 0) break
+            // Models close parameters BOTH ways: "</parameter>" and the
+            // named form "</parameter-query>". Accept whichever comes first.
+            val plainEnd = block.indexOf(PARAM_CLOSE, keyEnd + 1)
+            val namedCloser = "</parameter-$key>"
+            val namedEnd = if (key.isNotEmpty()) block.indexOf(namedCloser, keyEnd + 1) else -1
+            val (valEnd, closerLen) = when {
+                plainEnd >= 0 && (namedEnd < 0 || plainEnd < namedEnd) ->
+                    plainEnd to PARAM_CLOSE.length
+                namedEnd >= 0 -> namedEnd to namedCloser.length
+                else -> break
+            }
             if (key.isNotEmpty()) {
                 params[key] = block.substring(keyEnd + 1, valEnd).trim()
             }
-            i = block.indexOf(PARAM_TAG, valEnd + PARAM_CLOSE.length)
+            i = block.indexOf(PARAM_TAG, valEnd + closerLen)
         }
 
         val argumentsJson: String = if (params.isEmpty()) {
