@@ -139,6 +139,7 @@ fun ChatScreen(
     val messages by viewModel.messages.collectAsStateWithLifecycle()
     val generation by viewModel.generationState.collectAsStateWithLifecycle()
     val activity by viewModel.activity.collectAsStateWithLifecycle()
+    val timeline by viewModel.timeline.collectAsStateWithLifecycle()
     val draftAttachments by viewModel.draftAttachments.collectAsStateWithLifecycle()
     val attachmentNotice by viewModel.attachmentNotice.collectAsStateWithLifecycle()
     val queuedMessage by viewModel.queuedMessage.collectAsStateWithLifecycle()
@@ -312,13 +313,28 @@ fun ChatScreen(
                     MessageRow(
                         message = message,
                         onRetryFromHere = { viewModel.retryFrom(message.id) },
-                        onEditAndResend = { viewModel.editAndResend(message.id, message.content) }
+                        onEditAndResend = { viewModel.editAndResend(message.id, message.content) },
+                        fullResultResolver = { callId ->
+                            // Full detail resolves from the persisted TOOL
+                            // messages — the timeline never stores output.
+                            messages.lastOrNull {
+                                it.role == Message.Role.TOOL && it.metadata?.toolCallId == callId
+                            }?.content?.take(4_000)
+                        }
                     )
                 }
             }
 
-            if (activity.isNotEmpty()) {
-                item { AgentActivityCard(activity) }
+            if (timeline.isNotEmpty() || activity.isNotEmpty()) {
+                item {
+                    // Live timeline (flag-gated in the ViewModel); falls back
+                    // to the legacy step card until the rollout completes.
+                    if (timeline.isNotEmpty()) {
+                        AgentTimelineCard(steps = timeline)
+                    } else {
+                        AgentActivityCard(activity)
+                    }
+                }
             }
 
             when (val gen = generation) {
@@ -787,7 +803,8 @@ private fun MessageAttachmentTile(attachment: Attachment) {
 private fun MessageRow(
     message: Message,
     onRetryFromHere: (() -> Unit)? = null,
-    onEditAndResend: (() -> Unit)? = null
+    onEditAndResend: (() -> Unit)? = null,
+    fullResultResolver: (String) -> String? = { null }
 ) {
     val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
     var showMenu by remember { mutableStateOf(false) }
@@ -883,6 +900,15 @@ private fun MessageRow(
                         showMenu = false
                         onRetryFromHere?.invoke()
                     }
+                )
+            }
+            // Persisted activity timeline for this turn (flag-gated data —
+            // only present when the live timeline produced the message).
+            if (message.metadata?.agentSteps.orEmpty().isNotEmpty()) {
+                AgentTimelineCard(
+                    steps = message.metadata.agentSteps,
+                    fullResultResolver = fullResultResolver,
+                    modifier = Modifier.padding(bottom = Spacing.xs)
                 )
             }
             Box(

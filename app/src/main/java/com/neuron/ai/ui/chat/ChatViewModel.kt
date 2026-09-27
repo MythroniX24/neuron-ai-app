@@ -119,6 +119,15 @@ class ChatViewModel(
     private val _activity = MutableStateFlow<List<AgentActivityUi>>(emptyList())
     val activity: StateFlow<List<AgentActivityUi>> = _activity.asStateFlow()
 
+    /**
+     * Live activity timeline (Claude-style, USE_LIVE_TIMELINE): UI-safe step
+     * records streamed from the agent loop — appears the moment a step
+     * starts, updates in place when it finishes, and persists onto the
+     * assistant message metadata when the turn ends.
+     */
+    private val _timeline = MutableStateFlow<List<com.neuron.ai.core.conversation.AgentStepRecord>>(emptyList())
+    val timeline: StateFlow<List<com.neuron.ai.core.conversation.AgentStepRecord>> = _timeline.asStateFlow()
+
     private val _conversation = MutableStateFlow<Conversation?>(null)
     val conversation: StateFlow<Conversation?> = _conversation.asStateFlow()
 
@@ -658,6 +667,7 @@ class ChatViewModel(
 
         // The user's message is already in the conversation history.
         _activity.value = emptyList()
+        _timeline.value = emptyList()
         _generation.value = GenerationState.Streaming("")
 
         val started = System.currentTimeMillis()
@@ -685,6 +695,12 @@ class ChatViewModel(
             ).collect { event ->
                     when (event) {
                         is AgentEvent.ActivityStarted -> {
+                            if (USE_LIVE_TIMELINE) {
+                                val record = com.neuron.ai.core.agent.AgentStepMapper
+                                    .toRecord(event.activity)
+                                _timeline.value = _timeline.value
+                                    .filterNot { it.stepId == record.stepId } + record
+                            }
                             _activity.value = _activity.value + AgentActivityUi(
                                 stepId = event.activity.stepId,
                                 title = event.activity.title,
@@ -694,6 +710,12 @@ class ChatViewModel(
                         }
 
                         is AgentEvent.ActivityUpdated -> {
+                            if (USE_LIVE_TIMELINE) {
+                                val record = com.neuron.ai.core.agent.AgentStepMapper
+                                    .toRecord(event.activity)
+                                _timeline.value = _timeline.value
+                                    .filterNot { it.stepId == record.stepId } + record
+                            }
                             taskId?.let { tid ->
                                 tasks.reportActivity(
                                     tid,
@@ -789,7 +811,8 @@ class ChatViewModel(
                         metadata = MessageMetadata(
                             providerId = config.id,
                             modelId = modelId,
-                            generationMs = System.currentTimeMillis() - started
+                            generationMs = System.currentTimeMillis() - started,
+                            agentSteps = cancelStepsSnapshot()
                         )
                     )
                 }
@@ -811,7 +834,8 @@ class ChatViewModel(
                 metadata = MessageMetadata(
                     providerId = config.id,
                     modelId = modelId,
-                    generationMs = elapsed
+                    generationMs = elapsed,
+                    agentSteps = _timeline.value
                 )
             )
         } else {
@@ -821,6 +845,7 @@ class ChatViewModel(
         }
 
         _activity.value = emptyList()
+        // Keep the finished timeline visible until the next turn begins.
         if (_generation.value is GenerationState.Streaming) {
             _generation.value = GenerationState.Idle
         }
@@ -862,6 +887,26 @@ class ChatViewModel(
         super.onCleared()
     }
 
+    /**
+     * Cancel/failure path: freeze the timeline snapshot and mark any step
+     * still RUNNING as failed so the persisted timeline reflects reality —
+     * cancelled work must not render as completed work.
+     */
+    private fun cancelStepsSnapshot(): List<com.neuron.ai.core.conversation.AgentStepRecord> {
+        if (!USE_LIVE_TIMELINE) return emptyList()
+        return _timeline.value.map { step ->
+            if (step.status == com.neuron.ai.core.conversation.AgentStepRecord.STATUS_RUNNING) {
+                step.copy(
+                    status = com.neuron.ai.core.conversation.AgentStepRecord.STATUS_FAILED,
+                    finishedAtEpochMs = step.finishedAtEpochMs
+                        ?: System.currentTimeMillis()
+                )
+            } else {
+                step
+            }
+        }
+    }
+
     companion object {
         /**
          * Phase-3 shadow rollout switch (CONTEXT_ARCHITECTURE.md §14.3):
@@ -869,5 +914,12 @@ class ChatViewModel(
          * flip to true after the logged comparison verifies the new pipeline.
          */
         private const val USE_ORCHESTRATOR_CONTEXT = false
+
+        /**
+         * Live agent activity timeline (Claude-style) — flag-gated rollout:
+         * flip after real multi-step runs (search + terminal + coding) verify
+         * the UI stays lightweight and the summaries stay accurate.
+         */
+        private const val USE_LIVE_TIMELINE = true
     }
 }

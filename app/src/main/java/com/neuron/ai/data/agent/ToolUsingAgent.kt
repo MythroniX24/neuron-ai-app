@@ -219,6 +219,7 @@ class ToolUsingAgent(
 
             for (call in toolCalls) {
                 val tool = toolRegistry.find(call.toolId)
+                val now = System.currentTimeMillis()
                 val activity = AgentActivity(
                     stepId = call.callId,
                     title = when (tool?.riskLevel) {
@@ -226,7 +227,11 @@ class ToolUsingAgent(
                         RiskLevel.ELEVATED -> "Running ${tool.title.lowercase()}"
                         else -> tool?.title ?: call.toolId
                     },
-                    state = AgentActivity.State.RUNNING
+                    state = AgentActivity.State.RUNNING,
+                    toolId = call.toolId,
+                    actionDetail = com.neuron.ai.core.agent.AgentStepMapper
+                        .extractActionDetail(call.toolId, call.argumentsJson),
+                    startedAtEpochMs = now
                 )
                 send(AgentEvent.ActivityStarted(activity))
 
@@ -265,7 +270,15 @@ class ToolUsingAgent(
                     is com.neuron.ai.core.agent.ToolResult.TimedOut -> result.message
                     is com.neuron.ai.core.agent.ToolResult.Denied -> result.message
                 }
-                send(AgentEvent.ActivityUpdated(activity.copy(state = finalState, detail = detail)))
+                send(
+                    AgentEvent.ActivityUpdated(
+                        activity.copy(
+                            state = finalState,
+                            detail = detail,
+                            finishedAtEpochMs = System.currentTimeMillis()
+                        )
+                    )
+                )
 
                 history += ChatMessage(
                     role = ChatMessage.Role.TOOL,
@@ -308,6 +321,8 @@ class ToolUsingAgent(
     private fun understanding(step: Int) = AgentActivity(
         stepId = "think-$step",
         title = if (step == 1) "Understanding request" else "Continuing",
-        state = AgentActivity.State.RUNNING
+        state = AgentActivity.State.RUNNING,
+        toolId = null,
+        startedAtEpochMs = System.currentTimeMillis()
     )
 }
