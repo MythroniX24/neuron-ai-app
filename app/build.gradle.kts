@@ -77,6 +77,15 @@ android {
 
     testOptions {
         unitTests.isReturnDefaultValues = true
+        unitTests.all {
+            // Surface full assertion/exception details in CI logs — the
+            // console summary only prints file:line otherwise.
+            testLogging {
+                events("failed", "skipped")
+                setExceptionFormat("full")
+                showStackTraces = true
+            }
+        }
     }
 }
 
