@@ -92,12 +92,40 @@ class ChatContextEngine(
                 continue
             }
             val callId = msg.metadata?.toolCallId ?: "call-synth-${synthCounter++}"
-            val needsAssistant = out.lastOrNull()?.let { row ->
-                row.role == ChatMessage.Role.ASSISTANT &&
-                    row.toolCalls.any { it.callId == callId }
-            } != true
-            if (needsAssistant) {
-                out += ChatMessage(
+            val last = out.lastOrNull()
+            when {
+                // Already paired with its assistant tool_calls row.
+                last != null && last.role == ChatMessage.Role.ASSISTANT &&
+                    last.toolCalls.any { it.callId == callId } -> Unit
+
+                // Consecutive TOOL row: attach this call to the nearest
+                // assistant above (mirrors the live loop, where one assistant
+                // message carries ALL of the turn's tool calls).
+                last != null && last.role == ChatMessage.Role.TOOL -> {
+                    val assistantIndex = out.indexOfLast { it.role == ChatMessage.Role.ASSISTANT }
+                    if (assistantIndex < 0) continue // nothing to attach to — drop orphan
+                    out[assistantIndex] = out[assistantIndex].copy(
+                        toolCalls = out[assistantIndex].toolCalls +
+                            com.neuron.ai.core.provider.ProposedToolCall(
+                                callId = callId,
+                                toolId = msg.metadata?.toolName ?: "tool",
+                                argumentsJson = "{}"
+                            )
+                    )
+                }
+
+                // Assistant row present but missing THIS call id: append it.
+                last != null && last.role == ChatMessage.Role.ASSISTANT ->
+                    out[out.lastIndex] = last.copy(
+                        toolCalls = last.toolCalls + com.neuron.ai.core.provider.ProposedToolCall(
+                            callId = callId,
+                            toolId = msg.metadata?.toolName ?: "tool",
+                            argumentsJson = "{}"
+                        )
+                    )
+
+                // No pairable assistant: synthesize the missing row.
+                else -> out += ChatMessage(
                     role = ChatMessage.Role.ASSISTANT,
                     content = "",
                     toolCalls = listOf(
