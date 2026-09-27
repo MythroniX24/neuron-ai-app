@@ -223,9 +223,10 @@ class ToolUsingAgent(
                 // remote message). The generic userMessage hid every actual
                 // cause behind the same "provider returned an error" text,
                 // making identical-looking failures undiagnosable.
+                val failure = streamError!!
                 send(
                     AgentEvent.Failed(
-                        streamError!!.message.ifBlank { streamError.userMessage }
+                        failure.message.ifBlank { failure.userMessage }
                     )
                 )
                 return@channelFlow
