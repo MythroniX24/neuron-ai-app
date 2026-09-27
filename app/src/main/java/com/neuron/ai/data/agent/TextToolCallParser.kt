@@ -26,8 +26,8 @@ object TextToolCallParser {
 
     private const val OPEN = "<tool_call>"
     private const val CLOSE = "</tool_call>"
-    private const val FN_TAG = "<function-"
-    private const val PARAM_TAG = "<parameter-"
+    private const val FN = "<function"
+    private const val PARAM = "<parameter"
     private const val PARAM_CLOSE = "</parameter>"
 
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
@@ -94,6 +94,28 @@ object TextToolCallParser {
         return parseXmlDashBlock(block)
     }
 
+    /** Index of the next REAL opening <function-…/>=… tag (skips closers). */
+    private fun nextFnTag(text: String, from: Int): Int {
+        var i = text.indexOf(FN, from)
+        while (i >= 0) {
+            val sepIdx = i + FN.length
+            if (sepIdx < text.length && (text[sepIdx] == '-' || text[sepIdx] == '=')) return i
+            i = text.indexOf(FN, i + 1)
+        }
+        return -1
+    }
+
+    /** Index of the next REAL opening <parameter-…/>=… tag (skips closers). */
+    private fun nextParamTag(text: String, from: Int): Int {
+        var i = text.indexOf(PARAM, from)
+        while (i >= 0) {
+            val sepIdx = i + PARAM.length
+            if (sepIdx < text.length && (text[sepIdx] == '-' || text[sepIdx] == '=')) return i
+            i = text.indexOf(PARAM, i + 1)
+        }
+        return -1
+    }
+
     /** JSON style: {"name":"web.search","arguments":{...}} (or "parameters"). */
     private fun parseJsonBlock(block: String): Recovered? {
         val start = block.indexOf('{')
@@ -117,43 +139,49 @@ object TextToolCallParser {
     }
 
     /**
-     * XML-dash style (the model's actual output):
-     *   <function-web.search><parameter-query>Elon Musk net worth 2025</parameter></function>
+     * Tagged-parameter style — models emit BOTH separators:
+     *   <function-web.search><parameter-query>…</parameter-query></function>   (dash)
+     *   <function=web.read><parameter=url>…</parameter></function>             (equals)
      * Parameter values are raw text — NOT JSON; they are assembled into a
      * JSON object. When no parameter tags exist, an embedded JSON blob after
      * the first '{' is handed through as-is.
      */
     private fun parseXmlDashBlock(block: String): Recovered? {
-        val fnStart = block.indexOf(FN_TAG)
+        val fnStart = nextFnTag(block, 0)
         if (fnStart < 0) return null
-        val nameStart = fnStart + FN_TAG.length
+        val nameStart = fnStart + FN.length + 1 // skip separator ('-' or '=')
         val nameEnd = block.indexOf('>', nameStart)
         if (nameEnd < 0) return null
         val toolId = block.substring(nameStart, nameEnd).trim()
         if (toolId.isEmpty()) return null
 
         val params = LinkedHashMap<String, String>()
-        var i = block.indexOf(PARAM_TAG)
+        var i = nextParamTag(block, 0)
         while (i >= 0) {
-            val keyStart = i + PARAM_TAG.length
+            val keyStart = i + PARAM.length + 1 // skip separator
             val keyEnd = block.indexOf('>', keyStart)
             if (keyEnd < 0) break
             val key = block.substring(keyStart, keyEnd).trim()
-            // Models close parameters BOTH ways: "</parameter>" and the
-            // named form "</parameter-query>". Accept whichever comes first.
+            if (key.isEmpty()) {
+                i = nextParamTag(block, keyEnd + 1)
+                continue
+            }
+            // Models close parameters three ways: "</parameter>", and the
+            // named forms "</parameter-key>" / "</parameter=key>". Accept
+            // whichever appears first after the value starts.
             val plainEnd = block.indexOf(PARAM_CLOSE, keyEnd + 1)
-            val namedCloser = "</parameter-$key>"
-            val namedEnd = if (key.isNotEmpty()) block.indexOf(namedCloser, keyEnd + 1) else -1
+            val namedDash = block.indexOf("</parameter-$key>", keyEnd + 1)
+            val namedEq = block.indexOf("</parameter=$key>", keyEnd + 1)
+            val namedEnd = listOf(namedDash, namedEq).filter { it >= 0 }.minOrNull()
             val (valEnd, closerLen) = when {
-                plainEnd >= 0 && (namedEnd < 0 || plainEnd < namedEnd) ->
+                plainEnd >= 0 && (namedEnd == null || plainEnd < namedEnd) ->
                     plainEnd to PARAM_CLOSE.length
-                namedEnd >= 0 -> namedEnd to namedCloser.length
+                namedEnd != null ->
+                    namedEnd to (if (namedEnd == namedDash) "</parameter-$key>".length else "</parameter=$key>".length)
                 else -> break
             }
-            if (key.isNotEmpty()) {
-                params[key] = block.substring(keyEnd + 1, valEnd).trim()
-            }
-            i = block.indexOf(PARAM_TAG, valEnd + closerLen)
+            params[key] = block.substring(keyEnd + 1, valEnd).trim()
+            i = nextParamTag(block, valEnd + closerLen)
         }
 
         val argumentsJson: String = if (params.isEmpty()) {
