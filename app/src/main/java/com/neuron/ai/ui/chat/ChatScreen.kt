@@ -904,9 +904,10 @@ private fun MessageRow(
             }
             // Persisted activity timeline for this turn (flag-gated data —
             // only present when the live timeline produced the message).
-            if (message.metadata?.agentSteps.orEmpty().isNotEmpty()) {
+            val persistedSteps = message.metadata?.agentSteps.orEmpty()
+            if (persistedSteps.isNotEmpty()) {
                 AgentTimelineCard(
-                    steps = message.metadata.agentSteps,
+                    steps = persistedSteps,
                     fullResultResolver = fullResultResolver,
                     modifier = Modifier.padding(bottom = Spacing.xs)
                 )
