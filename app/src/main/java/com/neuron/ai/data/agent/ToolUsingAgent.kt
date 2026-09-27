@@ -101,6 +101,8 @@ class ToolUsingAgent(
         var problemKey = ""
         var attemptsForProblem = 0
         var lastToolFailure: LastFailure? = null
+        /** Whether the LAST executed turn carried tool calls (vs pure text). */
+        var lastTurnHadToolCalls = false
         // Survives across turns so an exhausted budget can still surface the
         // last model output instead of a bare failure.
         var lastAssistantText = ""
@@ -336,7 +338,6 @@ class ToolUsingAgent(
             // distinct event the UI renders IN SEQUENCE between the tool
             // cards, never accumulated into the final answer. A text-only
             // turn (no tool calls) remains the final response.
-            var lastTurnHadToolCalls = false
             if (toolCalls.isNotEmpty()) {
                 lastTurnHadToolCalls = true
                 if (assistantText.isNotBlank()) {
