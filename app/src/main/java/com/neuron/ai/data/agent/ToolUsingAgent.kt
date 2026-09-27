@@ -161,6 +161,32 @@ class ToolUsingAgent(
 
             lastAssistantText = assistantText.toString()
 
+            // Transport repair: some models print tool calls as PLAIN TEXT
+            // (e.g. <tool_call><function-web.search><parameter-query>…)
+            // instead of using the native function-calling channel. Recover
+            // the intended calls, strip the markup from the visible buffer
+            // and history, and run the tools — the model's intent is right,
+            // only its output channel is wrong. Recovered ids must match a
+            // REGISTERED tool; anything else stays plain text.
+            if (assistantText.isNotBlank() && toolCalls.isEmpty() &&
+                TextToolCallParser.looksLikeToolMarkup(assistantText.toString())) {
+                // Unregistered ids are NOT filtered here: they flow into the
+                // normal execution path, which answers "Unknown tool" — the
+                // model then self-corrects on the next turn.
+                val recovered = TextToolCallParser.parse(assistantText.toString())
+                if (recovered.isNotEmpty()) {
+                    val repairedText = TextToolCallParser.stripToolMarkup(assistantText.toString())
+                    assistantText = StringBuilder(repairedText)
+                    lastAssistantText = repairedText
+                    send(AgentEvent.TextBuffer(repairedText))
+                    recovered.forEach { rec -> toolCalls += rec.call }
+                    logger?.w(
+                        "Agent",
+                        "Recovered ${recovered.size} tool call(s) from plain-text markup"
+                    )
+                }
+            }
+
             // Transient empty turn: some providers occasionally return a
             // completely blank completion (nothing streamed, no error).
             // Retry ONCE silently; a second failure surfaces a clear error
@@ -275,6 +301,9 @@ class ToolUsingAgent(
             emit(AgentEvent.Failed(t.message ?: "Unexpected agent failure."))
         }
     }
+
+    /** Removes every tool-call block from [text] for the visible bubble. */
+    private fun stripToolMarkup(text: String): String = TextToolCallParser.stripToolMarkup(text)
 
     private fun understanding(step: Int) = AgentActivity(
         stepId = "think-$step",

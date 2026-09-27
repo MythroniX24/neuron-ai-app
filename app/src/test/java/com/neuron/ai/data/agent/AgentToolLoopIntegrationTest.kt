@@ -345,4 +345,67 @@ class AgentToolLoopIntegrationTest {
         assertEquals(0, provider.toolSpecCounts[1])
         assertEquals("plain answer", events.filterIsInstance<AgentEvent.Finished>().single().summary)
     }
+
+    // ---- Plain-text tool-call recovery (transport repair) -----------------
+
+    @Test
+    fun `tool call printed as plain text is recovered and executed`() = runTest {
+        val provider = ScriptedProvider()
+        provider.script.add(
+            StreamEvent.Delta(
+                "<tool_call><function-math.evaluate>" +
+                    "<parameter-expression>6*7</parameter-expression>" +
+                    "</function></tool_call>"
+            )
+        )
+        provider.script.add(StreamEvent.Delta("The answer is 42."))
+
+        val (agent, _) = buildAgent(provider)
+        val events = withTimeout(5_000) {
+            collect(agent, AgentGoal(instruction = "compute 6*7", conversationId = "c1"))
+        }
+
+        // Two model calls: markup turn + tool-result turn.
+        assertEquals(2, provider.requests.size)
+        // Markup was stripped from the visible buffer...
+        val buffer = events.filterIsInstance<AgentEvent.TextBuffer>().single()
+        assertTrue(!buffer.text.contains("<tool_call>"))
+        // ...the recovered call really executed...
+        val toolRow = provider.requests[1].filter { it.role == ChatMessage.Role.TOOL }
+        assertEquals(1, toolRow.size)
+        assertTrue(toolRow.single().content.contains("42"))
+        // ...and the run completed normally.
+        assertEquals(
+            "The answer is 42.",
+            events.filterIsInstance<AgentEvent.Finished>().single().summary
+        )
+    }
+
+    @Test
+    fun `markup for an unregistered tool stays plain text - never executed`() = runTest {
+        val provider = ScriptedProvider()
+        // web.search is NOT in this test's registry.
+        provider.script.add(
+            StreamEvent.Delta(
+                "<tool_call>{\"name\":\"web.search\",\"arguments\":{\"query\":\"x\"}}</tool_call>"
+            )
+        )
+        provider.script.add(StreamEvent.Delta("Cannot search from here."))
+
+        val (agent, _) = buildAgent(provider)
+        val events = withTimeout(5_000) {
+            collect(agent, AgentGoal(instruction = "search the web", conversationId = "c1"))
+        }
+
+        // Markup was stripped from the buffer, the unregistered id produced a
+        // structured "Unknown tool" result, and the model self-corrected.
+        assertTrue(events.any { it is AgentEvent.TextBuffer && !it.text.contains("<tool_call>") })
+        assertEquals(2, provider.requests.size)
+        val toolRow = provider.requests[1].filter { it.role == ChatMessage.Role.TOOL }
+        assertTrue(toolRow.single().content.contains("Unknown tool"))
+        assertEquals(
+            "Cannot search from here.",
+            events.filterIsInstance<AgentEvent.Finished>().single().summary
+        )
+    }
 }

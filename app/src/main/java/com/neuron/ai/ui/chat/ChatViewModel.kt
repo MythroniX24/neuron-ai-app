@@ -744,6 +744,14 @@ class ChatViewModel(
                             _generation.value = GenerationState.Streaming(assistantBuffer.toString())
                         }
 
+                        is AgentEvent.TextBuffer -> {
+                            // Agent repaired the stream (e.g. a tool call was
+                            // recovered from plain-text markup) — show the
+                            // cleaned buffer, never the raw markup.
+                            assistantBuffer = StringBuilder(event.text)
+                            _generation.value = GenerationState.Streaming(event.text)
+                        }
+
                         is AgentEvent.Finished -> {
                             // Never shrink an already-streamed buffer: a
                             // transient empty model turn or a stray Finished
