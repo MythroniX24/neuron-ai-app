@@ -74,6 +74,14 @@ sealed class AgentEvent {
     data object PermissionResolved : AgentEvent()
 
     data class TextDelta(val text: String) : AgentEvent()
+
+    /**
+     * Replaces the accumulated visible text buffer for this turn. Emitted
+     * when the agent repairs the stream (e.g. a tool call recovered from
+     * plain-text markup must not stay in the visible chat bubble). The UI
+     * simply sets its buffer to [text].
+     */
+    data class TextBuffer(val text: String) : AgentEvent()
     data class Finished(val summary: String) : AgentEvent()
     data class Failed(val message: String) : AgentEvent()
 }
