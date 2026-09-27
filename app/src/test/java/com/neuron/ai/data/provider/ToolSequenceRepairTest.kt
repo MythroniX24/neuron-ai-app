@@ -6,6 +6,7 @@ import com.neuron.ai.core.provider.ChatMessage
 import com.neuron.ai.core.provider.CompletionRequest
 import com.neuron.ai.core.provider.Model
 import com.neuron.ai.ui.chat.ChatContextEngine
+import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
@@ -146,7 +147,7 @@ class ToolSequenceRepairTest {
     // ---- Context engine repair ---------------------------------------------
 
     @Test
-    fun `context engine synthesizes assistant row above persisted tool rows`() {
+    fun `context engine synthesizes assistant row above persisted tool rows`() = runTest {
         val engine = ChatContextEngine()
         val messages = listOf(
             Message(
@@ -173,7 +174,7 @@ class ToolSequenceRepairTest {
     }
 
     @Test
-    fun `context engine keeps consecutive tool rows sharing one synthesized assistant`() {
+    fun `context engine keeps consecutive tool rows sharing one synthesized assistant`() = runTest {
         val engine = ChatContextEngine()
         val messages = listOf(
             Message(
