@@ -670,7 +670,7 @@ private fun ChatTopBar(
                                             menuExpanded = false
                                         }
                                         .background(
-                                            if (selected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)
+                                            if (selected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.65f)
                                             else Color.Transparent
                                         )
                                         .padding(horizontal = Spacing.lg, vertical = Spacing.sm)
@@ -990,7 +990,9 @@ private fun ToolMessageCard(message: Message) {
                 Text(
                     text = "Tap to view details",
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                    // Full muted color: at 60% alpha this dropped below
+                    // readable contrast on the dark surface variant.
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 2.dp)
                 )
             }
