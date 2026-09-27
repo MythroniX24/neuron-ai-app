@@ -170,9 +170,12 @@ class LongConversationProtocolTest {
                 return@flow
             }
 
-            // Scripted behavior across the long conversation.
+            // Scripted behavior across the long conversation. The overflow
+            // fires LATE (call 6+) — in reality it hits only after a lot of
+            // accumulated context, and the agent loop requires >3 history
+            // rows for trim recovery to be meaningful.
             when {
-                callsMade == failOnceAfter && !overflowEmitted -> {
+                callsMade >= failOnceAfter + 2 && !overflowEmitted -> {
                     // One turn: the classic context-overflow 400.
                     overflowEmitted = true
                     emit(
