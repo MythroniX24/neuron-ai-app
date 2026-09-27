@@ -77,7 +77,9 @@ class BingHtmlSearchProvider(
             val body = block.groupValues[1]
 
             val anchor = Regex("(?is)<a[^>]+href=\"([^\"]+)\"[^>]*>(.*?)</a>").find(body) ?: continue
-            val url = unwrap(anchor.groupValues[1]) ?: continue
+            // Entities first: href attributes carry &amp; which breaks the
+            // redirect-parameter match otherwise.
+            val url = unwrap(HtmlText.decode(anchor.groupValues[1])) ?: continue
             val key = url.substringBefore('?').substringBefore('#')
             if (!seen.add(key)) continue
 
