@@ -1,11 +1,12 @@
 package com.neuron.ai.ui.chat
 
-import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -17,9 +18,14 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.Check
+import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.Photo
@@ -37,15 +43,23 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.neuron.ai.ui.components.entrancePop
 import com.neuron.ai.ui.components.pressScale
 import com.neuron.ai.ui.theme.Spacing
 
 /**
- * Bottom sheet behind the composer's "+": fully custom panel — gradient
- * header, large tappable action cards, and grouped capability rows with
- * custom pill toggles. No default Material bottom-sheet look.
+ * Bottom sheet behind the composer's "+" — v2 redesign.
+ *
+ * Design language: a compact drag handle + title row; media actions as a
+ * vivid horizontal TILE GRID (taller touch targets, tinted icon medallions,
+ * press-scale feedback); capabilities as unified single-tap STATUS CARDS
+ * (whole card toggles — no fiddly little switch); workspace as horizontal
+ * selectable chips with inline "New" — one row, no side buttons. Sections
+ * stagger in with entrancePop so the panel feels alive on open.
  */
 @Composable
 fun AttachmentSheet(
@@ -64,8 +78,9 @@ fun AttachmentSheet(
     onCreateWorkspace: () -> Unit
 ) {
     Surface(
-        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
-        color = MaterialTheme.colorScheme.surface
+        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+        color = MaterialTheme.colorScheme.surface,
+        tonalElevation = 2.dp
     ) {
         Column(
             Modifier
@@ -73,15 +88,15 @@ fun AttachmentSheet(
                 .verticalScroll(rememberScrollState())
                 .animateContentSize(spring(dampingRatio = 0.85f, stiffness = 320f))
         ) {
-            // Gradient brand header with a custom drag handle.
+            // ---- Compact header: handle + title + close -------------------
             Box(
                 Modifier
                     .fillMaxWidth()
                     .background(
                         Brush.verticalGradient(
                             listOf(
-                                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f),
-                                MaterialTheme.colorScheme.surface
+                                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.28f),
+                                Color.Transparent
                             )
                         )
                     )
@@ -91,52 +106,87 @@ fun AttachmentSheet(
                     Box(
                         Modifier
                             .align(Alignment.CenterHorizontally)
-                            .width(40.dp)
+                            .width(44.dp)
                             .height(4.dp)
                             .clip(RoundedCornerShape(2.dp))
                             .background(MaterialTheme.colorScheme.outlineVariant)
                     )
-                    Text(
-                        text = "Add to chat",
-                        style = MaterialTheme.typography.titleMedium,
-                        modifier = Modifier.padding(start = Spacing.lg, top = Spacing.md)
-                    )
-                    Spacer(Modifier.height(Spacing.md))
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(start = Spacing.lg, end = Spacing.sm, top = Spacing.sm)
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                text = "Add to chat",
+                                style = MaterialTheme.typography.titleMedium
+                            )
+                            Text(
+                                text = "Media, tools and workspace for this conversation",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        // Explicit close affordance — the scrim taps back too.
+                        Box(
+                            contentAlignment = Alignment.Center,
+                            modifier = Modifier
+                                .size(32.dp)
+                                .clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.surfaceVariant)
+                                .clickable { onDismiss() }
+                        ) {
+                            Icon(
+                                Icons.Outlined.Close,
+                                contentDescription = "Close",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(Spacing.sm))
                 }
             }
 
-            // ---- Big action cards -------------------------------------------
+            // ---- Media tiles -----------------------------------------------
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = Spacing.lg),
                 horizontalArrangement = Arrangement.spacedBy(Spacing.md)
             ) {
-                ActionCard(
+                MediaTile(
                     icon = Icons.Outlined.PhotoCamera,
                     label = "Camera",
                     tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier
+                        .weight(1f)
+                        .entrancePop(delayMs = 0),
                     onClick = {
                         onDismiss()
                         onCamera()
                     }
                 )
-                ActionCard(
+                MediaTile(
                     icon = Icons.Outlined.Photo,
                     label = "Photos",
                     tint = MaterialTheme.colorScheme.tertiary,
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier
+                        .weight(1f)
+                        .entrancePop(delayMs = 40),
                     onClick = {
                         onDismiss()
                         onPhotos()
                     }
                 )
-                ActionCard(
+                MediaTile(
                     icon = Icons.Outlined.Description,
                     label = "Files",
                     tint = MaterialTheme.colorScheme.secondary,
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier
+                        .weight(1f)
+                        .entrancePop(delayMs = 80),
                     onClick = {
                         onDismiss()
                         onFiles()
@@ -146,106 +196,89 @@ fun AttachmentSheet(
 
             Spacer(Modifier.height(Spacing.lg))
 
-            // ---- Capability rows --------------------------------------------
-            SectionLabel("Capabilities")
-            CapabilityRow(
+            // ---- Capability status cards (single-tap toggle) ---------------
+            SectionHeader("Capabilities")
+            CapabilityCard(
                 icon = Icons.Outlined.Terminal,
-                title = "Terminal access",
-                subtitle = "Let AI run commands in this chat",
-                iconTint = MaterialTheme.colorScheme.primary,
-                checked = terminalEnabled,
-                onChecked = onToggleTerminal
+                title = "Terminal",
+                subtitle = "AI runs commands in this chat",
+                tint = MaterialTheme.colorScheme.primary,
+                enabled = terminalEnabled,
+                onToggle = { onToggleTerminal(!terminalEnabled) },
+                modifier = Modifier
+                    .padding(horizontal = Spacing.lg, vertical = Spacing.xs)
+                    .entrancePop(delayMs = 120)
             )
-            CapabilityRow(
+            CapabilityCard(
                 icon = Icons.Outlined.Public,
-                title = "Browser access",
-                subtitle = "Let AI open and read web pages",
-                iconTint = MaterialTheme.colorScheme.tertiary,
-                checked = browserEnabled,
-                onChecked = onToggleBrowser
+                title = "Browser",
+                subtitle = "AI opens and reads web pages",
+                tint = MaterialTheme.colorScheme.tertiary,
+                enabled = browserEnabled,
+                onToggle = { onToggleBrowser(!browserEnabled) },
+                modifier = Modifier
+                    .padding(horizontal = Spacing.lg, vertical = Spacing.xs)
+                    .entrancePop(delayMs = 160)
             )
 
             Spacer(Modifier.height(Spacing.md))
 
-            // ---- Workspace ----------------------------------------------------
-            SectionLabel("Workspace")
+            // ---- Workspace chips -------------------------------------------
+            SectionHeader("Workspace")
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = Spacing.lg, vertical = Spacing.xs)
             ) {
-                Box(
-                    Modifier
-                        .size(38.dp)
-                        .clip(CircleShape)
-                        .background(MaterialTheme.colorScheme.surfaceVariant),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        Icons.Outlined.FolderOpen,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.secondary,
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
-                Column(
-                    Modifier
-                        .weight(1f)
-                        .padding(horizontal = Spacing.md)
-                ) {
-                    Text(
-                        activeWorkspaceId?.let { id -> workspaces.find { it.id == id }?.name }
-                            ?: "None attached",
-                        style = MaterialTheme.typography.bodyMedium
-                    )
-                    Text(
-                        if (activeWorkspaceId != null) "Tap a project below to switch"
-                        else "Attach a project for file + terminal tools",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                if (activeWorkspaceId != null) {
-                    CustomPillButton(
-                        text = "Detach",
-                        outlined = true,
-                        onClick = onDetachWorkspace
-                    )
-                }
-                CustomPillButton(text = "+ New", onClick = onCreateWorkspace)
-            }
-            if (workspaces.isNotEmpty()) {
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
+                Icon(
+                    Icons.Outlined.FolderOpen,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(16.dp)
+                )
+                Text(
+                    text = activeWorkspaceId?.let { id -> workspaces.find { it.id == id }?.name }
+                        ?: "No project attached",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = Spacing.lg, vertical = Spacing.xs)
-                ) {
-                    workspaces.take(3).forEach { ws ->
-                        val selected = ws.id == activeWorkspaceId
-                        Surface(
-                            shape = RoundedCornerShape(10.dp),
-                            color = if (selected) MaterialTheme.colorScheme.primaryContainer
-                            else MaterialTheme.colorScheme.surfaceVariant,
-                            border = androidx.compose.foundation.BorderStroke(
-                                1.dp,
-                                if (selected) MaterialTheme.colorScheme.primary
-                                else MaterialTheme.colorScheme.outline
-                            ),
-                            onClick = { onAttachWorkspace(ws.id) }
-                        ) {
-                            Text(
-                                ws.name,
-                                maxLines = 1,
-                                style = MaterialTheme.typography.labelMedium,
-                                modifier = Modifier.padding(
-                                    horizontal = Spacing.md, vertical = Spacing.xs
-                                )
-                            )
+                        .weight(1f)
+                        .padding(start = Spacing.xs)
+                )
+            }
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = Spacing.lg, vertical = Spacing.xs)
+            ) {
+                workspaces.take(4).forEach { ws ->
+                    WorkspaceChip(
+                        name = ws.name,
+                        selected = ws.id == activeWorkspaceId,
+                        onClick = {
+                            if (ws.id == activeWorkspaceId) onDetachWorkspace()
+                            else onAttachWorkspace(ws.id)
                         }
-                    }
+                    )
                 }
+                WorkspaceChip(
+                    name = "New",
+                    selected = false,
+                    leadingIcon = Icons.Outlined.Add,
+                    onClick = onCreateWorkspace
+                )
+            }
+            if (activeWorkspaceId != null) {
+                Text(
+                    text = "Tap the active chip again to detach",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = Spacing.lg, vertical = Spacing.xs)
+                )
             }
 
             Spacer(Modifier.height(Spacing.xl))
@@ -253,12 +286,12 @@ fun AttachmentSheet(
     }
 }
 
-/** Large gradient-accented action card with press feedback. */
+/** Vivid media tile: tinted medallion icon over a labeled column. */
 @Composable
-private fun ActionCard(
+private fun MediaTile(
     icon: ImageVector,
     label: String,
-    tint: androidx.compose.ui.graphics.Color,
+    tint: Color,
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -266,14 +299,11 @@ private fun ActionCard(
     Surface(
         onClick = onClick,
         interactionSource = interaction,
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(20.dp),
         color = MaterialTheme.colorScheme.surfaceVariant,
-        border = androidx.compose.foundation.BorderStroke(
-            1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)
-        ),
         modifier = modifier
-            .height(92.dp)
-            .pressScale(interaction, pressedScale = 0.95f)
+            .height(96.dp)
+            .pressScale(interaction, pressedScale = 0.94f)
     ) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -281,9 +311,13 @@ private fun ActionCard(
         ) {
             Box(
                 Modifier
-                    .size(40.dp)
+                    .size(44.dp)
                     .clip(CircleShape)
-                    .background(tint.copy(alpha = 0.14f)),
+                    .background(
+                        Brush.linearGradient(
+                            listOf(tint.copy(alpha = 0.22f), tint.copy(alpha = 0.10f))
+                        )
+                    ),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(icon, contentDescription = label, tint = tint, modifier = Modifier.size(22.dp))
@@ -295,46 +329,67 @@ private fun ActionCard(
 }
 
 @Composable
-private fun SectionLabel(text: String) {
+private fun SectionHeader(text: String) {
     Text(
-        text = text,
-        style = MaterialTheme.typography.labelMedium,
+        text = text.uppercase(),
+        style = MaterialTheme.typography.labelSmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.padding(horizontal = Spacing.lg, vertical = Spacing.xs)
     )
 }
 
-/** Capability row with icon chip + custom pill toggle (no M3 Switch). */
+/**
+ * Capability card: the WHOLE card is the toggle — a leading medallion, title
+ * + subtitle, and an animated status badge on the right. No separate switch
+ * to aim for; one big tap target with clear on/off color language.
+ */
 @Composable
-private fun CapabilityRow(
+private fun CapabilityCard(
     icon: ImageVector,
     title: String,
     subtitle: String,
-    iconTint: androidx.compose.ui.graphics.Color,
-    checked: Boolean,
-    onChecked: (Boolean) -> Unit
+    tint: Color,
+    enabled: Boolean,
+    onToggle: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
     val interaction = remember { MutableInteractionSource() }
+    val badgeColor by animateColorAsState(
+        targetValue = if (enabled) tint else MaterialTheme.colorScheme.surfaceVariant,
+        animationSpec = tween(220),
+        label = "capBadge"
+    )
+    val badgeIcon by animateFloatAsState(
+        targetValue = if (enabled) 1f else 0f,
+        animationSpec = spring(dampingRatio = 0.6f, stiffness = 380f),
+        label = "capBadgeIcon"
+    )
     Surface(
-        onClick = { onChecked(!checked) },
+        onClick = onToggle,
         interactionSource = interaction,
-        color = androidx.compose.ui.graphics.Color.Transparent,
-        modifier = Modifier
+        shape = RoundedCornerShape(18.dp),
+        color = if (enabled) tint.copy(alpha = 0.10f)
+        else MaterialTheme.colorScheme.surfaceVariant,
+        border = androidx.compose.foundation.BorderStroke(
+            1.dp,
+            if (enabled) tint.copy(alpha = 0.55f) else MaterialTheme.colorScheme.outline.copy(alpha = 0.4f)
+        ),
+        modifier = modifier
             .fillMaxWidth()
-            .pressScale(interaction, pressedScale = 0.985f)
+            .pressScale(interaction, pressedScale = 0.98f)
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.padding(horizontal = Spacing.lg, vertical = Spacing.sm)
+            modifier = Modifier.padding(horizontal = Spacing.md, vertical = Spacing.sm)
         ) {
             Box(
                 Modifier
                     .size(38.dp)
                     .clip(CircleShape)
-                    .background(iconTint.copy(alpha = 0.14f)),
+                    .background(tint.copy(alpha = if (enabled) 0.20f else 0.12f)),
                 contentAlignment = Alignment.Center
             ) {
-                Icon(icon, contentDescription = null, tint = iconTint, modifier = Modifier.size(20.dp))
+                Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(20.dp))
             }
             Column(
                 Modifier
@@ -348,59 +403,77 @@ private fun CapabilityRow(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-            // Custom pill toggle — track + thumb drawn by hand.
+            // Animated ON/OFF status badge.
             Box(
+                contentAlignment = Alignment.Center,
                 modifier = Modifier
-                    .size(width = 46.dp, height = 26.dp)
+                    .size(width = 52.dp, height = 26.dp)
                     .clip(RoundedCornerShape(13.dp))
-                    .background(
-                        if (checked) MaterialTheme.colorScheme.primary
-                        else MaterialTheme.colorScheme.outline
-                    )
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null
-                    ) { onChecked(!checked) },
-                contentAlignment = Alignment.CenterStart
+                    .background(badgeColor)
             ) {
-                Box(
-                    Modifier
-                        .padding(start = if (checked) 22.dp else 3.dp)
-                        .size(20.dp)
-                        .clip(CircleShape)
-                        .background(
-                            if (checked) MaterialTheme.colorScheme.onPrimary
-                            else MaterialTheme.colorScheme.surface
-                        )
+                Text(
+                    text = if (badgeIcon > 0.5f) "ON" else "OFF",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (enabled) Color.White else MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         }
     }
 }
 
-/** Small hand-drawn pill button used for Detach / + New. */
+/** Selectable workspace chip; the active chip re-taps to detach. */
 @Composable
-private fun CustomPillButton(
-    text: String,
+private fun WorkspaceChip(
+    name: String,
+    selected: Boolean,
     onClick: () -> Unit,
-    outlined: Boolean = false
+    leadingIcon: ImageVector? = null
 ) {
+    val interaction = remember { MutableInteractionSource() }
     Surface(
         onClick = onClick,
+        interactionSource = interaction,
         shape = RoundedCornerShape(12.dp),
-        color = if (outlined) androidx.compose.ui.graphics.Color.Transparent
-        else MaterialTheme.colorScheme.primary,
-        border = if (outlined) androidx.compose.foundation.BorderStroke(
-            1.dp, MaterialTheme.colorScheme.outline
-        ) else null,
-        modifier = Modifier.padding(start = Spacing.xs)
+        color = if (selected) MaterialTheme.colorScheme.primaryContainer
+        else MaterialTheme.colorScheme.surfaceVariant,
+        border = androidx.compose.foundation.BorderStroke(
+            1.dp,
+            if (selected) MaterialTheme.colorScheme.primary
+            else MaterialTheme.colorScheme.outline.copy(alpha = 0.4f)
+        ),
+        modifier = Modifier.pressScale(interaction, pressedScale = 0.94f)
     ) {
-        Text(
-            text,
-            style = MaterialTheme.typography.labelMedium,
-            color = if (outlined) MaterialTheme.colorScheme.onSurfaceVariant
-            else MaterialTheme.colorScheme.onPrimary,
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.padding(horizontal = Spacing.md, vertical = Spacing.xs)
-        )
+        ) {
+            if (selected) {
+                Icon(
+                    Icons.Outlined.Check,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier
+                        .size(13.dp)
+                        .padding(end = 2.dp)
+                )
+            }
+            if (leadingIcon != null) {
+                Icon(
+                    leadingIcon,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier
+                        .size(13.dp)
+                        .padding(end = 2.dp)
+                )
+            }
+            Text(
+                name,
+                maxLines = 1,
+                style = MaterialTheme.typography.labelMedium,
+                color = if (selected) MaterialTheme.colorScheme.onPrimaryContainer
+                else MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
     }
 }
