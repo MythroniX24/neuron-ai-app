@@ -414,7 +414,10 @@ private fun CapabilityCard(
                 Text(
                     text = if (badgeIcon > 0.5f) "ON" else "OFF",
                     style = MaterialTheme.typography.labelSmall,
-                    color = if (enabled) Color.White else MaterialTheme.colorScheme.onSurfaceVariant
+                    // onPrimary adapts per theme: white on the deep indigo
+                    // (light), dark ink on the lifted lavender (dark).
+                    color = if (enabled) MaterialTheme.colorScheme.onPrimary
+                    else MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         }
