@@ -66,7 +66,7 @@ object AgentStepMapper {
             com.neuron.ai.core.conversation.AgentStepRecord.TYPE_COMMAND
         toolId.startsWith("web.search") || toolId.startsWith("browser.") ->
             com.neuron.ai.core.conversation.AgentStepRecord.TYPE_WEB_SEARCH
-        toolId.startsWith("web.read") ->
+        toolId == "web.read" || toolId == "fs.read" || toolId == "fs.readfile" ->
             com.neuron.ai.core.conversation.AgentStepRecord.TYPE_FILE_READ
         toolId in FILE_WRITE_TOOLS ->
             com.neuron.ai.core.conversation.AgentStepRecord.TYPE_FILE_EDIT
@@ -123,7 +123,7 @@ object AgentStepMapper {
             toolId == "web.read" || toolId.startsWith("browser.") -> listOf("url")
             toolId.startsWith("fs.") || toolId.startsWith("code.") ->
                 listOf("path", "task", "pattern")
-            else -> listOf("query", "command", "url", "path", "task", "pattern", "text")
+            else -> listOf("query", "command", "url", "path", "task", "pattern", "expression", "text")
         }
         for (key in keys) {
             val value = obj[key] ?: continue
