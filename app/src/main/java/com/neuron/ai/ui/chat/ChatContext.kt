@@ -39,25 +39,7 @@ class ChatContextEngine(
         val prior = messages.subList(0, maxOf(0, end - 1))
             .filter { it.metadata?.isError != true }
 
-        val chat: List<ChatMessage> = prior
-            .takeLast(MAX_HISTORY_TURNS)
-            .map { msg ->
-                when (msg.role) {
-                    Message.Role.TOOL -> ChatMessage(
-                        role = ChatMessage.Role.TOOL,
-                        // Phase-1 context orchestration: structured tool-result
-                        // compression (summary + key lines + full-ref hint).
-                        content = com.neuron.ai.context.compression.ToolResultProcessor
-                            .process(msg),
-                        toolCallId = msg.metadata?.toolCallId
-                    )
-                    else -> ChatMessage(
-                        role = toWireRole(msg.role),
-                        content = msg.content,
-                        attachments = msg.attachments
-                    )
-                }
-            }
+        val chat = buildValidatedChat(prior.takeLast(MAX_HISTORY_TURNS))
 
         val out = mutableListOf<ChatMessage>()
         if (!memory.isNullOrBlank()) {
@@ -82,6 +64,61 @@ class ChatContextEngine(
             .computeBudget(contextWindowTokens ?: 8_000)
             .usableForInput * 4
         return applyBudget(out, maxOf(charBudget, MIN_CONTEXT_CHARS))
+    }
+
+    /**
+     * Maps persisted messages to wire messages AND repairs the tool-call
+     * sequence: OpenAI-compatible APIs reject any TOOL message that is not
+     * preceded by an ASSISTANT message carrying matching tool_calls — and the
+     * persisted history contains only TOOL rows (the assistant's tool-request
+     * row is never stored). Without repair, the FIRST message after any
+     * tool-using turn fails with a provider 400 while brand-new chats work —
+     * exactly the "works in a new chat, dies later" bug.
+     *
+     * Repair: before each orphan TOOL row, synthesize the missing
+     * ASSISTANT(tool_calls) row from the persisted metadata (toolCallId +
+     * toolName). Consecutive TOOL rows of one turn share one synthesized row.
+     */
+    private fun buildValidatedChat(messages: List<Message>): List<ChatMessage> {
+        val out = mutableListOf<ChatMessage>()
+        var synthCounter = 0
+        for (msg in messages) {
+            if (msg.role != Message.Role.TOOL) {
+                out += ChatMessage(
+                    role = toWireRole(msg.role),
+                    content = msg.content,
+                    attachments = msg.attachments
+                )
+                continue
+            }
+            val callId = msg.metadata?.toolCallId ?: "call-synth-${synthCounter++}"
+            val needsAssistant = out.lastOrNull()?.let { row ->
+                row.role == ChatMessage.Role.ASSISTANT &&
+                    row.toolCalls.any { it.callId == callId }
+            } != true
+            if (needsAssistant) {
+                out += ChatMessage(
+                    role = ChatMessage.Role.ASSISTANT,
+                    content = "",
+                    toolCalls = listOf(
+                        com.neuron.ai.core.provider.ProposedToolCall(
+                            callId = callId,
+                            toolId = msg.metadata?.toolName ?: "tool",
+                            argumentsJson = "{}"
+                        )
+                    )
+                )
+            }
+            out += ChatMessage(
+                role = ChatMessage.Role.TOOL,
+                // Phase-1 context orchestration: structured tool-result
+                // compression (summary + key lines + full-ref hint).
+                content = com.neuron.ai.context.compression.ToolResultProcessor
+                    .process(msg),
+                toolCallId = callId
+            )
+        }
+        return out
     }
 
     /** Returns an engine bound to a specific model context window (tokens). */
