@@ -42,7 +42,7 @@ object TextToolCallParser {
     fun parse(text: String): List<Recovered> {
         if (!text.contains("<tool_call>")) return emptyList()
         val recovered = mutableListOf<Recovered>()
-        val unclosed = BLOCK.findAll(text).isEmpty()
+        val unclosed = BLOCK.findAll(text).none()
         val blocks = BLOCK.findAll(text).map { it.groupValues[1] } +
             (if (unclosed) listOf(text.substringAfter("<tool_call>")) else emptyList())
 
