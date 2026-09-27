@@ -43,16 +43,13 @@ class ToolUsingAgent(
      * (search → read → edit → build → test → fix) complete in one turn;
      * still bounded to cap cost and runaway loops.
      */
-    private val maxSteps: Int = 16,
+    private val maxSteps: Int = 24,
     /**
      * Max attempts per DISTINCT sub-problem (intelligent retry, spec §
      * Required retry behavior): retries on one failing call must not consume
      * the budget of an unrelated later failure in the same run.
      */
-    private val maxAttemptsPerProblem: Int = 3,
-    /** Mid-loop text at most this long, sent alongside tool calls, is treated
-     *  as ongoing narration rather than the final answer. */
-    private val intermediateMaxChars: Int = 400
+    private val maxAttemptsPerProblem: Int = 3
 ) : Agent {
 
     override val id: String = "agent.tool-using"
@@ -334,17 +331,25 @@ class ToolUsingAgent(
                 )
                 return@channelFlow
             }
-            // Ongoing narration (spec § loop behavior): short text streamed
+            // Ongoing narration (spec § loop behavior): text streamed
             // ALONGSIDE tool calls is mid-work narration — surfaced as a
-            // distinct event, never mistaken for the final answer. A
-            // text-only turn (no tool calls) remains the final response.
-            if (toolCalls.isNotEmpty() && assistantText.isNotBlank() &&
-                assistantText.length <= intermediateMaxChars
-            ) {
-                send(AgentEvent.IntermediateMessage(assistantText.toString()))
+            // distinct event the UI renders IN SEQUENCE between the tool
+            // cards, never accumulated into the final answer. A text-only
+            // turn (no tool calls) remains the final response.
+            var lastTurnHadToolCalls = false
+            if (toolCalls.isNotEmpty()) {
+                lastTurnHadToolCalls = true
+                if (assistantText.isNotBlank()) {
+                    send(AgentEvent.IntermediateMessage(assistantText.toString()))
+                }
             }
             if (toolCalls.isEmpty()) {
-                send(AgentEvent.Finished(assistantText.toString()))
+                // Models sometimes echo the narration markers they saw in
+                // tool-result context ([used tool: …], [tool result] …) —
+                // those are timeline artifacts, never part of the answer.
+                val finalText = stripNarrationEcho(assistantText.toString())
+                    .ifBlank { assistantText.toString() }
+                send(AgentEvent.Finished(finalText))
                 return@channelFlow
             }
 
@@ -458,15 +463,19 @@ class ToolUsingAgent(
             // Loop continues: the model now sees the tool results.
         }
 
-        // Step budget exhausted with no final answer: surface whatever the
-        // model DID produce instead of reporting a pure failure.
-        if (lastAssistantText.isNotBlank()) {
-            send(AgentEvent.Finished(lastAssistantText))
+        // Step budget exhausted with no final answer: be HONEST about it
+        // (spec § honesty). Narration text from a tool turn is progress
+        // narration, NOT an answer — emitting it as Finished looked like a
+        // cut-off response. State what happened and how to continue.
+        val lastMeaningful = stripNarrationEcho(lastAssistantText)
+        if (!lastTurnHadToolCalls && lastMeaningful.isNotBlank()) {
+            send(AgentEvent.Finished(lastMeaningful))
         } else {
             send(
                 AgentEvent.Failed(
-                    "The agent needed too many steps for this request. " +
-                        "Try breaking it into smaller questions."
+                    "I reached the step limit for this run after $step tool steps. " +
+                        "Last status: \"${lastAssistantText.take(200)}\". " +
+                        "Ask me to continue and I'll pick up where I stopped."
                 )
             )
         }
@@ -498,6 +507,20 @@ class ToolUsingAgent(
             (m.contains("token") && m.contains("too long")) ||
             (m.contains("token") && m.contains("too many"))
     }
+
+    /**
+     * Removes narration-marker echo lines from model output: when tool
+     * results appear in context, models sometimes copy the bracketed record
+     * style into their visible answer. Those lines are timeline artifacts.
+     */
+    private fun stripNarrationEcho(text: String): String =
+        text.lines()
+            .filterNot { line ->
+                val t = line.trimStart()
+                t.startsWith("[used tool:") || t.startsWith("[tool result]")
+            }
+            .joinToString("\n")
+            .trim()
 
     /** Normalizes args so whitespace differences don't defeat repeat detection. */
     private fun normalizeForCompare(json: String): String =

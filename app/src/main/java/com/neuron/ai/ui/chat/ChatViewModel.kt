@@ -767,9 +767,12 @@ class ChatViewModel(
                         }
 
                         is AgentEvent.IntermediateMessage -> {
-                            // Mid-loop narration is ONGOING progress — show it
-                            // in the timeline as its own step, never as the
-                            // final answer bubble (Finished handles that).
+                            // Mid-loop narration is ONGOING progress — persist
+                            // it as its own ASSISTANT message so the transcript
+                            // reads IN SEQUENCE: narration → tool card →
+                            // narration → tool card → final answer. It also
+                            // lands in the live timeline as a step. It is never
+                            // merged into the final answer bubble.
                             if (USE_LIVE_TIMELINE) {
                                 _timeline.value = _timeline.value +
                                     com.neuron.ai.core.agent.AgentStepMapper.toRecord(
@@ -784,6 +787,22 @@ class ChatViewModel(
                                             com.neuron.ai.core.conversation.AgentStepRecord.TYPE_INTERMEDIATE
                                     )
                             }
+                            runCatching {
+                                conversations.appendMessage(
+                                    conversationId,
+                                    Message.Role.ASSISTANT,
+                                    event.text.trim(),
+                                    metadata = MessageMetadata(
+                                        providerId = config.id,
+                                        modelId = modelId,
+                                        isError = false
+                                    )
+                                )
+                            }
+                            // The streaming bubble must not carry narration
+                            // forward: each turn's text stands alone.
+                            assistantBuffer = StringBuilder()
+                            _generation.value = GenerationState.Streaming("")
                         }
 
                         is AgentEvent.TextBuffer -> {
