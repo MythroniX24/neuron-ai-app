@@ -233,8 +233,8 @@ class SearchOrchestrator(
             return SearchOutcome.Cached(cached, corroborated = cached.count { it.seenInProviders.size >= 2 })
         }
 
-        val fanOut = registry.searchFanOut(query, perProviderTimeoutMs)
-        val providerResults = fanOut.mapNotNull { (id, response) ->
+        var fanOut = registry.searchFanOut(query, perProviderTimeoutMs)
+        var providerResults = fanOut.mapNotNull { (id, response) ->
             when (response) {
                 is SearchResponse.Success -> {
                     if (response.results.isNotEmpty()) id to response.results else null
@@ -246,8 +246,24 @@ class SearchOrchestrator(
             }
         }
 
-        // Empty results from every healthy provider is a VALID answer —
-        // never retried, never cached (§ Reliability: retry is transient-only).
+        // Query hygiene (quality): when every engine ANSWERED but found
+        // nothing, the raw natural-language phrasing is usually the problem
+        // — keyword engines want terms, not questions. One cleaned retry;
+        // still no blind transient retries and no caching of emptiness.
+        if (providerResults.isEmpty() && fanOut.any { it.second is SearchResponse.Success }) {
+            cleanedQuery(query.text)?.let { cleaned ->
+                logger?.d(TAG, "empty for raw query — retrying with cleaned terms: \"$cleaned\"")
+                fanOut = registry.searchFanOut(query.copy(text = cleaned), perProviderTimeoutMs)
+                providerResults = fanOut.mapNotNull { (id, response) ->
+                    when (response) {
+                        is SearchResponse.Success ->
+                            if (response.results.isNotEmpty()) id to response.results else null
+                        is SearchResponse.Failure -> null
+                    }
+                }
+            }
+        }
+
         if (providerResults.isEmpty()) {
             val anyResponded = fanOut.any { it.second is SearchResponse.Success }
             return SearchOutcome.Failed(
@@ -270,6 +286,19 @@ class SearchOrchestrator(
             providersResponded = providerResults.map { it.first },
             corroboratedCount = corroborated
         )
+    }
+
+    /**
+     * ChatGPT-style query hygiene: natural-language questions ("what is the
+     * quokka habitat size?") search poorly on keyword engines. Drops
+     * stopwords/question words, keeps up to 8 informative terms. Returns
+     * null when cleaning changes nothing (no pointless retry).
+     */
+    internal fun cleanedQuery(text: String): String? {
+        val terms = SearchReranker.queryTerms(text).take(8)
+        if (terms.isEmpty()) return null
+        val cleaned = terms.joinToString(" ")
+        return cleaned.takeIf { !it.equals(text.trim(), ignoreCase = true) }
     }
 
     /** Pipeline outcome — callers pattern-match instead of catching. */

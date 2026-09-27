@@ -86,6 +86,27 @@ class HttpPageFetcher(
 }
 
 /**
+ * Shared OkHttp client for keyless HTML search endpoints (DDG/Bing/Mojeek):
+ * browser-like UA, bounded timeouts. No keys, no accounts — the request goes
+ * out from the user's own device/network.
+ */
+internal object SearchHttp {
+    fun client(): OkHttpClient = OkHttpClient().newBuilder()
+        .connectTimeout(10, TimeUnit.SECONDS)
+        .readTimeout(20, TimeUnit.SECONDS)
+        .addInterceptor { chain ->
+            chain.proceed(
+                chain.request().newBuilder()
+                    .header("User-Agent", USER_AGENT)
+                    .build()
+            )
+        }
+        .build()
+
+    private const val USER_AGENT = HttpPageFetcher.USER_AGENT
+}
+
+/**
  * Dependency-free HTML → readable text reduction: drops script/style/noscript,
  * converts block tags to newlines, strips remaining tags, decodes entities,
  * collapses whitespace. Not a full DOM — deliberately, for mobile memory.
@@ -95,6 +116,14 @@ object HtmlText {
     fun extractTitle(html: String): String? {
         val match = Regex("(?is)<title[^>]*>(.*?)</title>").find(html) ?: return null
         return decode(match.groupValues[1]).trim().take(200).ifBlank { null }
+    }
+
+    /** Inline fragment → plain text: tags stripped, entities decoded, whitespace collapsed. */
+    fun fragmentText(html: String, maxChars: Int): String {
+        var s = Regex("(?is)<[^>]+>").replace(html, " ")
+        s = decode(s)
+        s = s.replace(Regex("\\s+"), " ").trim()
+        return if (s.length > maxChars) s.take(maxChars) + "…" else s
     }
 
     fun extractText(html: String, maxChars: Int): String {

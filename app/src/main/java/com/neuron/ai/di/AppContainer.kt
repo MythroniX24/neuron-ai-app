@@ -101,7 +101,11 @@ class AppContainer(context: Context) {
     val searchOrchestrator: com.neuron.ai.data.web.SearchOrchestrator =
         com.neuron.ai.data.web.SearchOrchestrator(
             registry = com.neuron.ai.data.web.SearchProviderRegistry(
-                providers = listOf(searchProvider),
+                providers = listOf(
+                    searchProvider, // DuckDuckGo HTML — keyless scrape
+                    com.neuron.ai.data.web.BingHtmlSearchProvider(dispatchers), // keyless scrape
+                    com.neuron.ai.data.web.MojeekSearchProvider(dispatchers) // keyless, independent index
+                ),
                 logger = logger
             ),
             cache = com.neuron.ai.data.web.SearchCache(),
