@@ -275,7 +275,15 @@ class LongConversationProtocolTest {
         // 1. The overflow 400 triggered the trim-recovery and the turn went on.
         val recoverSteps = events.filterIsInstance<AgentEvent.ActivityStarted>()
             .filter { it.activity.title.startsWith("Trimming context") }
-        assertTrue("overflow recovery never fired", recoverSteps.isNotEmpty())
+        if (recoverSteps.isEmpty()) {
+            throw AssertionError(
+                "overflow recovery never fired; callsMade=${provider.callsMade} " +
+                    "overflowEmitted=${provider.overflowEmitted} " +
+                    "failures=${events.filterIsInstance<AgentEvent.Failed>().map { it.message }} " +
+                    "finished=${events.filterIsInstance<AgentEvent.Finished>().map { it.summary.take(40) }}"
+            )
+        }
+        assertTrue(recoverSteps.isNotEmpty())
 
         // 2. The failing tool call was recovered via the revised-approach path
         //    (narration surfaced, tool error fed back) — no dead end.
