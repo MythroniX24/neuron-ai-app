@@ -245,12 +245,15 @@ class SearchOrchestrator(
                 }
             }
         }
+        // Remember ANY engine answering across attempts so an unlucky cleaned
+        // retry can't mask an honest "no results" as a total outage.
+        var anyEngineAnswered = fanOut.any { it.second is SearchResponse.Success }
 
         // Query hygiene (quality): when every engine ANSWERED but found
         // nothing, the raw natural-language phrasing is usually the problem
         // — keyword engines want terms, not questions. One cleaned retry;
         // still no blind transient retries and no caching of emptiness.
-        if (providerResults.isEmpty() && fanOut.any { it.second is SearchResponse.Success }) {
+        if (providerResults.isEmpty() && anyEngineAnswered) {
             cleanedQuery(query.text)?.let { cleaned ->
                 logger?.d(TAG, "empty for raw query — retrying with cleaned terms: \"$cleaned\"")
                 fanOut = registry.searchFanOut(query.copy(text = cleaned), perProviderTimeoutMs)
@@ -261,13 +264,14 @@ class SearchOrchestrator(
                         is SearchResponse.Failure -> null
                     }
                 }
+                anyEngineAnswered = anyEngineAnswered ||
+                    fanOut.any { it.second is SearchResponse.Success }
             }
         }
 
         if (providerResults.isEmpty()) {
-            val anyResponded = fanOut.any { it.second is SearchResponse.Success }
             return SearchOutcome.Failed(
-                if (anyResponded) "No results found for \"${query.text}\"."
+                if (anyEngineAnswered) "No results found for \"${query.text}\"."
                 else "All search providers failed or timed out — try again in a moment."
             )
         }
