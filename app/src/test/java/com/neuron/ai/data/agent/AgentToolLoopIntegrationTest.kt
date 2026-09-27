@@ -496,6 +496,10 @@ class AgentToolLoopIntegrationTest {
         // silently trimmed/emptied history and never a fake success).
         assertTrue(events.filterIsInstance<AgentEvent.Finished>().isEmpty())
         val failed = events.filterIsInstance<AgentEvent.Failed>().single()
+        // The DETAILED reason surfaces (not the generic userMessage) — this
+        // was the exact reason every failure looked like "provider returned
+        // an error" with zero diagnostic value.
+        assertTrue(failed.message.contains("401"))
         assertTrue(failed.message.contains("Invalid or missing API key"))
     }
 

@@ -218,7 +218,16 @@ class ToolUsingAgent(
                 // response" error. Retry the turn properly instead.
                 continue@loop
             } else if (streamError != null) {
-                send(AgentEvent.Failed(streamError!!.userMessage))
+                // Surface the DETAILED provider message (mapHttpError builds
+                // a user-appropriate line with the real reason — HTTP code,
+                // remote message). The generic userMessage hid every actual
+                // cause behind the same "provider returned an error" text,
+                // making identical-looking failures undiagnosable.
+                send(
+                    AgentEvent.Failed(
+                        streamError!!.message.ifBlank { streamError.userMessage }
+                    )
+                )
                 return@channelFlow
             }
 
