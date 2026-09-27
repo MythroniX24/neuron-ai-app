@@ -23,6 +23,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Bolt
 import androidx.compose.material.icons.outlined.Build
+import androidx.compose.material.icons.outlined.Chat
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Psychology
@@ -211,6 +212,7 @@ private fun TimelineRow(
 
 private fun typeIcon(type: String): ImageVector = when (type) {
     AgentStepRecord.TYPE_THINKING -> Icons.Outlined.Psychology
+    AgentStepRecord.TYPE_INTERMEDIATE -> Icons.Outlined.Chat
     AgentStepRecord.TYPE_COMMAND -> Icons.Outlined.Terminal
     AgentStepRecord.TYPE_WEB_SEARCH -> Icons.Outlined.Search
     AgentStepRecord.TYPE_FILE_READ -> Icons.Outlined.Description

@@ -24,10 +24,12 @@ object AgentStepMapper {
      */
     fun toRecord(
         activity: AgentActivity,
-        toolTitle: String? = null
+        toolTitle: String? = null,
+        /** Overrides the type (used for mid-loop narration steps). */
+        typeOverride: String? = null
     ): com.neuron.ai.core.conversation.AgentStepRecord {
         val isThinking = activity.toolId == null || activity.stepId.startsWith("think-")
-        val type = classify(activity.toolId, isThinking)
+        val type = typeOverride ?: classify(activity.toolId, isThinking)
         val label = buildLabel(activity, toolTitle, isThinking)
         return com.neuron.ai.core.conversation.AgentStepRecord(
             stepId = activity.stepId,

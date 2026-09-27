@@ -77,6 +77,13 @@ sealed class AgentEvent {
     /** The user's permission decision let the run continue. */
     data object PermissionResolved : AgentEvent()
 
+    /**
+     * Short ONGOING narration the model sent mid-loop between tool calls
+     * ("Let me check the test output first"). Deliberately distinct from
+     * [Finished] — this is progress narration, never the final answer.
+     */
+    data class IntermediateMessage(val text: String) : AgentEvent()
+
     data class TextDelta(val text: String) : AgentEvent()
 
     /**

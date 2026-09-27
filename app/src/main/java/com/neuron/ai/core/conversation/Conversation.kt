@@ -44,6 +44,8 @@ data class AgentStepRecord(
     companion object {
         const val TYPE_THINKING = "thinking"
         const val TYPE_TOOL_CALL = "tool_call"
+        /** Mid-loop narration — ongoing progress, distinct from the final answer. */
+        const val TYPE_INTERMEDIATE = "intermediate"
         const val TYPE_COMMAND = "command"
         const val TYPE_WEB_SEARCH = "web_search"
         const val TYPE_FILE_READ = "file_read"
