@@ -23,6 +23,38 @@ data class Attachment(
     val isText: Boolean get() = kind == Kind.TEXT
 }
 
+/**
+ * One persisted agent-activity step (live activity timeline). Summary-only:
+ * full tool output lives in the conversation's TOOL messages and is resolved
+ * by [toolCallId] at display time — no duplicated storage.
+ */
+@Serializable
+data class AgentStepRecord(
+    val stepId: String,
+    /** thinking | tool_call | command | web_search | file_read | file_edit | build_test */
+    val type: String,
+    val label: String,
+    val detail: String? = null,
+    val toolId: String? = null,
+    /** running | done | failed */
+    val status: String,
+    val startedAtEpochMs: Long = 0,
+    val finishedAtEpochMs: Long? = null
+) {
+    companion object {
+        const val TYPE_THINKING = "thinking"
+        const val TYPE_TOOL_CALL = "tool_call"
+        const val TYPE_COMMAND = "command"
+        const val TYPE_WEB_SEARCH = "web_search"
+        const val TYPE_FILE_READ = "file_read"
+        const val TYPE_FILE_EDIT = "file_edit"
+        const val TYPE_BUILD_TEST = "build_test"
+        const val STATUS_RUNNING = "running"
+        const val STATUS_DONE = "done"
+        const val STATUS_FAILED = "failed"
+    }
+}
+
 /** Optional, transport-agnostic facts about how a message was produced. */
 @Serializable
 data class MessageMetadata(
@@ -32,7 +64,9 @@ data class MessageMetadata(
     val generationMs: Long? = null,
     /** For TOOL-role messages: the call id this message answers. */
     val toolCallId: String? = null,
-    val toolName: String? = null
+    val toolName: String? = null,
+    /** Steps of the agent turn that produced this assistant message. */
+    val agentSteps: List<AgentStepRecord> = emptyList()
 )
 
 /** A chat conversation. */

@@ -56,6 +56,10 @@ data class AgentActivity(
     val title: String,
     val state: State,
     val detail: String? = null,
+    /** Tool id for tool steps ("web.search") — null for thinking steps. */
+    val toolId: String? = null,
+    /** Short action context extracted from the call args (query/command/path). */
+    val actionDetail: String? = null,
     val startedAtEpochMs: Long = 0,
     val finishedAtEpochMs: Long? = null
 ) {
