@@ -17,15 +17,20 @@ import kotlinx.serialization.json.jsonObject
  * The model has the RIGHT intent — the transport is just wrong. Parsing here
  * keeps tool use working instead of dumping raw markup into the chat bubble.
  *
- * Pure functions, no I/O — trivially unit-testable. SECURITY: only tool ids
- * that exist in the registry ever execute; parsed arguments are treated as
- * untrusted model output exactly like native channel calls.
+ * Deliberately REGEX-FREE: scanning is plain indexOf/substring — deterministic
+ * across JVM/ART versions and trivially unit-testable. SECURITY: parsed ids
+ * flow through the normal executor (unregistered ids yield "Unknown tool");
+ * parsed arguments are untrusted model output exactly like native calls.
  */
 object TextToolCallParser {
 
-    private val json = Json { ignoreUnknownKeys = true; isLenient = true }
+    private const val OPEN = "<tool_call>"
+    private const val CLOSE = "</tool_call>"
+    private const val FN_TAG = "<function-"
+    private const val PARAM_TAG = "<parameter-"
+    private const val PARAM_CLOSE = "</parameter>"
 
-    private val BLOCK = Regex("(?s)<tool_call>(.*?)</tool_call>")
+    private val json = Json { ignoreUnknownKeys = true; isLenient = true }
 
     /** One recovered tool call plus the raw text it was extracted from. */
     data class Recovered(
@@ -34,43 +39,58 @@ object TextToolCallParser {
         val rawBlocks: List<String>
     )
 
+    /** True when the text contains tool-call markup worth stripping from UI. */
+    fun looksLikeToolMarkup(text: String): Boolean = text.contains(OPEN)
+
     /**
      * Scans [text] for every tool-call block it can recover, in order.
-     * Returns an empty list when nothing looks like a tool call — the text
-     * is then just ordinary assistant output.
+     * Unclosed trailing blocks are honored (models truncate sometimes).
+     * Returns an empty list when nothing parses — the text is then just
+     * ordinary assistant output.
      */
     fun parse(text: String): List<Recovered> {
-        if (!text.contains("<tool_call>")) return emptyList()
-        val recovered = mutableListOf<Recovered>()
-        val unclosed = BLOCK.findAll(text).none()
-        val blocks = BLOCK.findAll(text).map { it.groupValues[1] } +
-            (if (unclosed) listOf(text.substringAfter("<tool_call>")) else emptyList())
-
-        for (block in blocks) {
-            parseBlock(block.trim())?.let { recovered += it }
+        if (!looksLikeToolMarkup(text)) return emptyList()
+        val out = mutableListOf<Recovered>()
+        var idx = text.indexOf(OPEN)
+        while (idx >= 0) {
+            val end = text.indexOf(CLOSE, idx + OPEN.length)
+            val blockEnd = if (end >= 0) end else text.length
+            parseBlock(text.substring(idx + OPEN.length, blockEnd).trim())?.let { out += it }
+            if (end < 0) break
+            idx = text.indexOf(OPEN, end + CLOSE.length)
         }
-        return recovered
+        return out
     }
-
-    /** True when the text contains tool-call markup worth stripping from UI. */
-    fun looksLikeToolMarkup(text: String): Boolean = text.contains("<tool_call>")
 
     /**
      * Removes every tool-call block from [text] so raw markup never reaches
-     * the chat bubble. Handles unclosed blocks too. Pure text hygiene — the
-     * calls themselves are recovered separately via [parse].
+     * the chat bubble. Handles unclosed trailing blocks too.
      */
     fun stripToolMarkup(text: String): String {
         if (!looksLikeToolMarkup(text)) return text
-        var cleaned = BLOCK.replace(text, " ")
-        val opener = cleaned.indexOf("<tool_call>")
-        if (opener >= 0) cleaned = cleaned.substring(0, opener)
-        return cleaned.replace(Regex("\\n{3,}"), "\n\n").trim()
+        val sb = StringBuilder()
+        var cursor = 0
+        var idx = text.indexOf(OPEN)
+        while (idx >= 0) {
+            sb.append(text, cursor, idx)
+            val end = text.indexOf(CLOSE, idx + OPEN.length)
+            if (end < 0) {
+                cursor = text.length
+                break
+            }
+            cursor = end + CLOSE.length
+            idx = text.indexOf(OPEN, cursor)
+        }
+        sb.append(text.substring(cursor))
+        var out = sb.toString()
+        while (out.contains("\n\n\n")) out = out.replace("\n\n\n", "\n\n")
+        return out.trim()
     }
 
+    // ---- block parsing ---------------------------------------------------------------------
+
     private fun parseBlock(block: String): Recovered? {
-        val asJson = parseJsonBlock(block)
-        if (asJson != null) return asJson
+        parseJsonBlock(block)?.let { return it }
         return parseXmlDashBlock(block)
     }
 
@@ -99,20 +119,34 @@ object TextToolCallParser {
     /**
      * XML-dash style (the model's actual output):
      *   <function-web.search><parameter-query>Elon Musk net worth 2025</parameter></function>
-     * Parameter values are raw text — NOT JSON. When the whole block parses
-     * as one JSON object we hand it through; otherwise we build
-     * {"param":"value",...} from the <parameter-*> children.
+     * Parameter values are raw text — NOT JSON; they are assembled into a
+     * JSON object. When no parameter tags exist, an embedded JSON blob after
+     * the first '{' is handed through as-is.
      */
     private fun parseXmlDashBlock(block: String): Recovered? {
-        val nameRegex = Regex("<function-([A-Za-z0-9_.\\-]+)>")
-        val nameMatch = nameRegex.find(block) ?: return null
-        val toolId = nameMatch.groupValues[1]
+        val fnStart = block.indexOf(FN_TAG)
+        if (fnStart < 0) return null
+        val nameStart = fnStart + FN_TAG.length
+        val nameEnd = block.indexOf('>', nameStart)
+        if (nameEnd < 0) return null
+        val toolId = block.substring(nameStart, nameEnd).trim()
+        if (toolId.isEmpty()) return null
 
-        val paramRegex = Regex("(?s)<parameter-([A-Za-z0-9_.\\-]+)>(.*?)</parameter>")
-        val params = paramRegex.findAll(block)
-            .associate { it.groupValues[1] to it.groupValues[2].trim() }
+        val params = LinkedHashMap<String, String>()
+        var i = block.indexOf(PARAM_TAG)
+        while (i >= 0) {
+            val keyStart = i + PARAM_TAG.length
+            val keyEnd = block.indexOf('>', keyStart)
+            if (keyEnd < 0) break
+            val key = block.substring(keyStart, keyEnd).trim()
+            val valEnd = block.indexOf(PARAM_CLOSE, keyEnd + 1)
+            if (valEnd < 0) break
+            if (key.isNotEmpty()) {
+                params[key] = block.substring(keyEnd + 1, valEnd).trim()
+            }
+            i = block.indexOf(PARAM_TAG, valEnd + PARAM_CLOSE.length)
+        }
 
-        // Some models emit the parameters as ONE embedded JSON blob.
         val argumentsJson: String = if (params.isEmpty()) {
             val brace = block.indexOf('{')
             if (brace >= 0) block.substring(brace) else "{}"
