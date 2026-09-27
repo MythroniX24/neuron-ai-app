@@ -170,13 +170,17 @@ class LongConversationProtocolTest {
                 return@flow
             }
 
-            // Scripted behavior across the long conversation. The overflow
-            // fires LATE (call 6+) — in reality it hits only after a lot of
-            // accumulated context, and the agent loop requires >3 history
-            // rows for trim recovery to be meaningful.
+            // Scripted behavior across the long conversation. The loop only
+            // continues while turns carry TOOL CALLS — a text-only turn IS the
+            // final answer. So the script must drive: tool turns (with the
+            // overflow hitting one of them), narration, markup truncation,
+            // then the final text turn LAST.
             when {
-                callsMade >= failOnceAfter + 2 && !overflowEmitted -> {
-                    // One turn: the classic context-overflow 400.
+                callsMade == 1 -> {
+                    emit(StreamEvent.ToolCallRequested("c-1", "web.search", "{\"query\":\"kotlin coroutines guide\"}"))
+                }
+                callsMade == 2 -> {
+                    // Overflow 400 hits while the context is already long.
                     overflowEmitted = true
                     emit(
                         StreamEvent.Failed(
@@ -187,9 +191,13 @@ class LongConversationProtocolTest {
                     )
                 }
                 callsMade == 3 -> {
-                    // Mid-loop narration + a failing tool call together.
+                    // After trim recovery: narration + a FAILING tool call.
                     emit(StreamEvent.Delta("Checking the docs next."))
                     emit(StreamEvent.ToolCallRequested("c-f1", "web.search", "{\"query\":\"fail-me\"}"))
+                }
+                callsMade == 4 -> {
+                    // Revised approach after the failure.
+                    emit(StreamEvent.ToolCallRequested("c-f2", "web.search", "{\"query\":\"kotlin 2 docs\"}"))
                 }
                 callsMade == 5 -> {
                     // A truncated plain-text tool-call block (markup variant).
@@ -199,11 +207,12 @@ class LongConversationProtocolTest {
                         )
                     )
                 }
-                callsMade == 8 -> {
-                    emit(StreamEvent.Delta("Final: everything checked out."))
+                callsMade == 6 -> {
+                    // The recovered markup call executes; model asks one more.
+                    emit(StreamEvent.ToolCallRequested("c-6", "web.search", "{\"query\":\"android 15\"}"))
                 }
                 else -> {
-                    emit(StreamEvent.Delta("Turn $callsMade response."))
+                    emit(StreamEvent.Delta("Final: everything checked out."))
                 }
             }
             emit(StreamEvent.Completed)
@@ -251,7 +260,7 @@ class LongConversationProtocolTest {
         val history = longHistory()
         assertTrue("fixture must be a genuinely long conversation", history.size >= 8)
 
-        val provider = ValidatingProvider(failOnceAfter = 4)
+        val provider = ValidatingProvider(failOnceAfter = 0)
         val registry = com.neuron.ai.data.tool.InMemoryToolRegistry()
         registry.register(StubSearchTool())
         val executor = com.neuron.ai.data.agent.DefaultToolExecutor(
