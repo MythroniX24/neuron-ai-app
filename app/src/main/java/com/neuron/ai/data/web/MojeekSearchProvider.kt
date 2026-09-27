@@ -83,7 +83,8 @@ class MojeekSearchProvider(
             if (title.isBlank()) continue
 
             // Nearest snippet paragraph after the anchor.
-            val tail = html.substring(match.range.last + 1, minOf(html.length, match.range.last + 2_000))            val snippetMatch = Regex("(?is)<p[^>]*class=\"[^\"]*\\bs\\b[^\"]*\"[^>]*>(.*?)</p>").find(tail)
+            val tail = html.substring(match.range.last + 1, minOf(html.length, match.range.last + 2_000))
+            val snippetMatch = Regex("(?is)<p[^>]*class=\"[^\"]*\\bs\\b[^\"]*\"[^>]*>(.*?)</p>").find(tail)
             val snippet = snippetMatch?.let { HtmlText.fragmentText(it.groupValues[1], 400) }
 
             results += SearchResult(
