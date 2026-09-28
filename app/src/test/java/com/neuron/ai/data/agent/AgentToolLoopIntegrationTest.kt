@@ -25,6 +25,7 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.yield
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -673,5 +674,58 @@ class AgentToolLoopIntegrationTest {
         assertTrue(lastUser.content.contains("retry policy"))
         assertTrue(lastUser.content.contains("persistent boom"))
         assertTrue(lastUser.content.contains("Do NOT repeat"))
+    }
+
+    @Test
+    fun `echoed narration markers are stripped but shared-line content survives`() = runTest {
+        val provider = ScriptedProvider()
+        provider.script.add(toolRequestEvent("math.evaluate", "{\"expression\":\"6*7\"}"))
+        // The final answer COPIES the internal record style — the exact
+        // corruption reported from a Groq-hosted model.
+        provider.script.add(
+            StreamEvent.Delta(
+                "[used tool: web.search][used tool: web.search]\n" +
+                    "[tool result] SOURCES:\n" +
+                    "[1] Elon Musk N\n" +
+                    "Elon Musk is the richest person in the world."
+            )
+        )
+
+        val (agent, _) = buildAgent(provider)
+        val events = withTimeout(5_000) {
+            collect(agent, AgentGoal(instruction = "richest person?", conversationId = "c1"))
+        }
+
+        val finished = events.filterIsInstance<AgentEvent.Finished>().single()
+        // Markers are gone wherever they appeared…
+        assertFalse(finished.summary.contains("[used tool:"))
+        assertFalse(finished.summary.contains("[tool result]"))
+        // …while the real content sharing those lines SURVIVES.
+        assertTrue(finished.summary.contains("SOURCES:"))
+        assertTrue(finished.summary.contains("Elon Musk is the richest person"))
+    }
+
+    @Test
+    fun `marker-only answer retries once and surfaces the good retry`() = runTest {
+        val provider = ScriptedProvider()
+        provider.script.add(toolRequestEvent("math.evaluate", "{\"expression\":\"6*7\"}"))
+        // First final turn: NOTHING but echoed markers (strips to blank).
+        provider.script.add(
+            StreamEvent.Delta("[used tool: web.search][tool result] [tool result]")
+        )
+        // Retry: the model actually answers.
+        provider.script.add(StreamEvent.Delta("Elon Musk is the richest person."))
+
+        val (agent, _) = buildAgent(provider)
+        val events = withTimeout(5_000) {
+            collect(agent, AgentGoal(instruction = "richest person?", conversationId = "c1"))
+        }
+
+        assertEquals(3, provider.requests.size)
+        assertEquals(
+            "Elon Musk is the richest person.",
+            events.filterIsInstance<AgentEvent.Finished>().single().summary
+        )
+        assertTrue(events.filterIsInstance<AgentEvent.Failed>().isEmpty())
     }
 }
