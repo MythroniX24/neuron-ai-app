@@ -360,16 +360,39 @@ class ToolUsingAgent(
             // turn (no tool calls) remains the final response.
             if (toolCalls.isNotEmpty()) {
                 lastTurnHadToolCalls = true
-                if (assistantText.isNotBlank()) {
-                    send(AgentEvent.IntermediateMessage(assistantText.toString()))
+                // Narration shown in the timeline gets the same marker
+                // cleanup — the model echoes the internal record style here
+                // too, and the timeline must never show it.
+                val narration = stripNarrationEcho(assistantText.toString())
+                if (narration.isNotBlank()) {
+                    send(AgentEvent.IntermediateMessage(narration))
                 }
             }
             if (toolCalls.isEmpty()) {
                 // Models sometimes echo the narration markers they saw in
                 // tool-result context ([used tool: …], [tool result] …) —
                 // those are timeline artifacts, never part of the answer.
+                // The markers are stripped WHEREVER they appear, so real
+                // content sharing the line ("[tool result] SOURCES: …")
+                // survives; the old whole-line filter ate it. An answer made
+                // of ONLY markers gets one silent retry, then an honest
+                // failure — never the raw marker-junk bubble.
                 val finalText = stripNarrationEcho(assistantText.toString())
-                    .ifBlank { assistantText.toString() }
+                if (finalText.isBlank()) {
+                    if (!retriedEmptyTurn) {
+                        retriedEmptyTurn = true
+                        logger?.w("Agent", "Final answer was only echoed markers — retrying once")
+                        step--
+                        continue@loop
+                    }
+                    send(
+                        AgentEvent.Failed(
+                            "The model returned an unusable response (only internal " +
+                                "tool-log markers). Please try again or rephrase."
+                        )
+                    )
+                    return@channelFlow
+                }
                 send(AgentEvent.Finished(finalText))
                 return@channelFlow
             }
@@ -546,20 +569,17 @@ class ToolUsingAgent(
     }
 
     /**
-     * Removes narration-marker echo lines from model output: when tool
-     * results appear in context, models sometimes copy the bracketed record
-     * style into their visible answer. Those lines are timeline artifacts.
+     * Removes narration-marker echo from model output: when tool results
+     * appear in context, models copy the internal bracketed record style
+     * ([used tool: …], [tool result] …) into their visible answer. The
+     * marker TOKENS are removed wherever they appear — content sharing the
+     * line ("[tool result] SOURCES: …") is kept, not dropped with the line.
      */
-    private fun stripNarrationEcho(text: String): String =
-        text.lines()
-            .filterNot { line ->
-                val t = line.trimStart()
-                t.startsWith("[used tool:") || t.startsWith("[tool result]")
-            }
-            .joinToString("\n")
-            .trim()
+    private val narrationMarkerRegex = Regex("\\[used tool:[^\\]]*]|\\[tool result]")
 
-    /** Normalizes args so whitespace differences don't defeat repeat detection. */
+    private fun stripNarrationEcho(text: String): String =
+        narrationMarkerRegex.replace(text, "")
+            .trim()
     private fun normalizeForCompare(json: String): String =
         json.replace(Regex("\\s+"), "").trim()
 
