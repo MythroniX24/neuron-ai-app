@@ -94,6 +94,8 @@ class ToolUsingAgent(
         var retriedWithoutTools = false
         /** One-shot guard: some providers emit an occasional EMPTY completion. */
         var retriedEmptyTurn = false
+        /** Bounded budget for restoring tools after a toolless retry backfired. */
+        var toolsRestoredAfterToolless = 0
         /**
          * Per-sub-problem retry bookkeeping: the failing call's identity
          * (tool + normalized args) and how many times THAT call failed.
@@ -215,6 +217,24 @@ class ToolUsingAgent(
                 // THE fix: this branch previously fell through and emitted
                 // Finished("") — the user-visible "model returned an empty
                 // response" error. Retry the turn properly instead.
+                continue@loop
+            } else if (streamError != null && !toolsAvailable &&
+                toolsRestoredAfterToolless < 2 &&
+                isToolChoiceConflict(streamError!!)
+            ) {
+                // The toolless fallback backfired: the model STILL emitted
+                // a tool call even though no tools were advertised, and the
+                // server refused the output ("the tool choice is none, but
+                // model called a tool"). The model clearly needs its tools
+                // and the server demonstrably parses tool-call output, so
+                // restore the tools array and retry — without this the run
+                // dies with a raw provider error. Bounded so a provider
+                // rejecting BOTH shapes still surfaces an honest failure
+                // instead of ping-ponging forever.
+                toolsRestoredAfterToolless++
+                toolsAvailable = true
+                step--
+                logger?.w("Agent", "Toolless turn still called a tool — restoring tools: ${streamError?.message}")
                 continue@loop
             } else if (streamError != null) {
                 // Surface the DETAILED provider message (mapHttpError builds
@@ -507,6 +527,22 @@ class ToolUsingAgent(
             (m.contains("token") && m.contains("400")) ||
             (m.contains("token") && m.contains("too long")) ||
             (m.contains("token") && m.contains("too many"))
+    }
+
+    /**
+     * Detects the provider error emitted when a request WITHOUT a tools
+     * array (tool_choice = "none" on the wire) still produced a tool call —
+     * e.g. llama.cpp's "the tool choice is none, but model called a tool".
+     * The wording varies by gateway, so match the known shapes broadly.
+     */
+    private fun isToolChoiceConflict(error: NeuronError): Boolean {
+        val m = (error.message ?: "").lowercase()
+        if (m.isBlank()) return false
+        val mentionsChoice = m.contains("tool_choice") || m.contains("tool choice")
+        val saysNone = m.contains("none") || m.contains("not allowed") ||
+            m.contains("disabled") || m.contains("no tools")
+        val saysCalled = m.contains("called") || m.contains("tool call") || m.contains("invoked")
+        return mentionsChoice && saysNone && saysCalled
     }
 
     /**
