@@ -364,6 +364,48 @@ class AgentToolLoopIntegrationTest {
         assertEquals("plain answer", events.filterIsInstance<AgentEvent.Finished>().single().summary)
     }
 
+    @Test
+    fun `toolless retry that still called a tool restores tools and executes`() = runTest {
+        val provider = ScriptedProvider()
+        // Turn 1: provider rejects the tools schema outright.
+        provider.script.add(
+            StreamEvent.Failed(
+                com.neuron.ai.core.error.NeuronError.Provider(
+                    "400 — 'tools' is not supported for this model"
+                )
+            )
+        )
+        // Turn 2 (the toolless retry): the model — trained with a tool chat
+        // template — STILL emits a tool call, and the server refuses tool-call
+        // output on a request without a tools array (tool_choice = none).
+        provider.script.add(
+            StreamEvent.Failed(
+                com.neuron.ai.core.error.NeuronError.Provider(
+                    "the tool choice is none, but model called a tool"
+                )
+            )
+        )
+        // Turn 3 (tools restored): native tool call is accepted now.
+        provider.script.add(toolRequestEvent("math.evaluate", "{\"expression\":\"6*7\"}"))
+        // Turn 4: final answer after the tool result.
+        provider.script.add(StreamEvent.Delta("The answer is 42."))
+
+        val (agent, _) = buildAgent(provider)
+        val events = withTimeout(5_000) {
+            collect(agent, AgentGoal(instruction = "compute 6*7", conversationId = "c1"))
+        }
+
+        // Wire shape per turn: tools → none → tools (restored, not sticky).
+        assertEquals(4, provider.requests.size)
+        assertTrue(provider.toolSpecCounts[0] > 0)
+        assertEquals(0, provider.toolSpecCounts[1])
+        assertTrue(provider.toolSpecCounts[2] > 0)
+        assertEquals(
+            "The answer is 42.",
+            events.filterIsInstance<AgentEvent.Finished>().single().summary
+        )
+    }
+
     // ---- Plain-text tool-call recovery (transport repair) -----------------
 
     @Test
