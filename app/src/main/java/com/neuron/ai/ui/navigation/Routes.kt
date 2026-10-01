@@ -12,6 +12,7 @@ object Routes {
     const val PROVIDERS = "providers"
     const val PROVIDER_EDIT = "provider-edit?providerId={providerId}"
     const val TASKS = "tasks"
+    const val LOCAL_AI = "local-ai"
 
     fun chat(conversationId: String) = "chat/$conversationId"
 

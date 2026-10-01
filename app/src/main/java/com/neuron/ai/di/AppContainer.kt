@@ -48,6 +48,9 @@ import kotlinx.serialization.json.Json
  */
 class AppContainer(context: Context) {
 
+    /** App context exposed for ViewModels that need system services (Local AI import picker). */
+    val appContext: Context = context.applicationContext
+
     val logger: Logger = AndroidLogger()
 
     val dispatchers: DispatcherProvider = DefaultDispatcherProvider()
@@ -72,6 +75,18 @@ class AppContainer(context: Context) {
         ProviderRepository(context, secureCredentials, dispatchers, logger).apply {
             imageLoader = { attachmentId -> attachmentStore.readBytesById(attachmentId) }
         }
+
+    // ---- Local AI (on-device inference) -------------------------------------
+
+    /** GGUF model registry: imports, ticks, single-active load state. */
+    val localModelRepository: com.neuron.ai.data.local.LocalModelRepository by lazy {
+        com.neuron.ai.data.local.LocalModelRepository(context, dispatchers, logger)
+    }
+
+    /** The local model as JUST ANOTHER AiProvider for the whole stack. */
+    val localAiProvider: com.neuron.ai.data.local.LocalAiProvider by lazy {
+        com.neuron.ai.data.local.LocalAiProvider(localModelRepository)
+    }
 
     val permissionManager: PermissionManager = SessionPermissionManager()
 

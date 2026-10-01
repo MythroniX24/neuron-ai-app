@@ -1,0 +1,254 @@
+// Neuron-AI native inference bridge.
+//
+// The ONLY native surface Kotlin touches. Loads GGUF weights through
+// llama.cpp's model-loading path (mmap) and runs greedy-decoded streaming
+// text generation. No code from model files is ever executed — weights are
+// data, loaded only as tensors.
+//
+// Built two ways (CMakeLists.txt):
+//   NEURON_HAVE_LLAMA=1  full bridge against llama.cpp
+//   NEURON_HAVE_LLAMA=0  stub: reports "engine unavailable" instead of
+//                        breaking builds where llama.cpp could not be fetched
+
+#include <jni.h>
+#include <mutex>
+#include <string>
+#include <vector>
+
+#ifdef __ANDROID__
+#include <android/log.h>
+#define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, "NeuronLlama", __VA_ARGS__)
+#else
+#define LOGE(...) ((void)0)
+#endif
+
+#if NEURON_HAVE_LLAMA
+#include "llama.h"
+
+namespace {
+
+// Process-wide single-active-model state. The Kotlin loader enforces the
+// same constraint; mirroring it natively means a leaked handle can never
+// leave two large models resident.
+std::mutex g_mutex;
+llama_model *g_model = nullptr;
+llama_context *g_ctx = nullptr;
+std::string g_loadedChatTemplate;
+
+// Greedy (temperature 0) decode of the next token from the last logits.
+llama_token sampleGreedy(llama_context *ctx) {
+    const float *logits = llama_get_logits_ith(ctx, -1);
+    const int vocabSize = llama_vocab_n_tokens(llama_get_vocab(ctx));
+    int best = 0;
+    float bestVal = logits[0];
+    for (int i = 1; i < vocabSize; ++i) {
+        if (logits[i] > bestVal) {
+            bestVal = logits[i];
+            best = i;
+        }
+    }
+    return static_cast<llama_token>(best);
+}
+
+void unloadLocked() {
+    if (g_ctx != nullptr) {
+        llama_free(g_ctx);
+        g_ctx = nullptr;
+    }
+    if (g_model != nullptr) {
+        llama_model_free(g_model);
+        g_model = nullptr;
+    }
+    g_loadedChatTemplate.clear();
+}
+
+} // namespace
+#endif // NEURON_HAVE_LLAMA
+
+extern "C" {
+
+JNIEXPORT jboolean JNICALL
+Java_com_neuron_ai_data_local_LocalEngineLoader_nativeIsAvailable(JNIEnv *, jobject) {
+#if NEURON_HAVE_LLAMA
+    return JNI_TRUE;
+#else
+    return JNI_FALSE;
+#endif
+}
+
+JNIEXPORT jstring JNICALL
+Java_com_neuron_ai_data_local_LocalEngineLoader_nativeVersion(JNIEnv *env, jobject) {
+#if NEURON_HAVE_LLAMA
+    return env->NewStringUTF("llama.cpp (bundled)");
+#else
+    return env->NewStringUTF("unavailable");
+#endif
+}
+
+// Loads (mmap) a GGUF model, replacing any previously loaded one — the
+// single-active constraint lives HERE too, not only in Kotlin.
+// Returns 0 on success, negative on failure with errOut[0] set to a
+// human-readable reason.
+JNIEXPORT jint JNICALL
+Java_com_neuron_ai_data_local_LocalEngineLoader_nativeLoad(
+        JNIEnv *env, jobject, jstring jPath, jint contextTokens,
+        jint threads, jboolean useGpu, jobjectArray jErrOut) {
+#if NEURON_HAVE_LLAMA
+    const char *path = env->GetStringUTFChars(jPath, nullptr);
+    std::string modelPath = path != nullptr ? path : "";
+    env->ReleaseStringUTFChars(jPath, path);
+
+    auto fail = [&](jint code, const char *message) {
+        if (jErrOut != nullptr && env->GetArrayLength(jErrOut) > 0) {
+            env->SetObjectArrayElement(jErrOut, 0, env->NewStringUTF(message));
+        }
+        unloadLocked();
+        llama_backend_free();
+        return code;
+    };
+
+    std::lock_guard<std::mutex> lock(g_mutex);
+    if (g_model != nullptr) {
+        return 0; // already loaded; Kotlin calls unload first to switch
+    }
+
+    llama_backend_init();
+
+    llama_model_params mparams = llama_model_default_params();
+    mparams.n_gpu_layers = useGpu ? 99 : 0; // milestone 5: real GPU offload
+    mparams.use_mmap = true;                // memory-map; never fully resident up front
+    mparams.use_mlock = false;              // let the OS reclaim under memory pressure
+
+    llama_model *model = llama_model_load_from_file(modelPath.c_str(), mparams);
+    if (model == nullptr) {
+        return fail(-1, "Model file could not be loaded (corrupt or unsupported GGUF)");
+    }
+
+    llama_context_params cparams = llama_context_default_params();
+    cparams.n_ctx = static_cast<uint32_t>(contextTokens > 0 ? contextTokens : 2048);
+    cparams.n_threads = threads > 0 ? threads : 4;
+    cparams.n_threads_batch = cparams.n_threads;
+
+    llama_context *ctx = llama_init_from_model(model, cparams);
+    if (ctx == nullptr) {
+        llama_model_free(model);
+        llama_backend_free();
+        if (jErrOut != nullptr && env->GetArrayLength(jErrOut) > 0) {
+            env->SetObjectArrayElement(jErrOut, 0,
+                env->NewStringUTF("Not enough memory to run this model on this device"));
+        }
+        return -2;
+    }
+
+    g_model = model;
+    g_ctx = ctx;
+    const char *tmpl = llama_model_chat_template(model, nullptr);
+    g_loadedChatTemplate = tmpl != nullptr ? std::string(tmpl) : std::string();
+    return 0;
+#else
+    (void)jPath; (void)threads; (void)useGpu;
+    if (jErrOut != nullptr && env->GetArrayLength(jErrOut) > 0) {
+        env->SetObjectArrayElement(jErrOut, 0,
+            env->NewStringUTF("Native inference engine was not built into this APK"));
+    }
+    return -100;
+#endif
+}
+
+JNIEXPORT jboolean JNICALL
+Java_com_neuron_ai_data_local_LocalEngineLoader_nativeUnload(JNIEnv *, jobject) {
+#if NEURON_HAVE_LLAMA
+    std::lock_guard<std::mutex> lock(g_mutex);
+    if (g_ctx != nullptr || g_model != nullptr) {
+        unloadLocked();
+        llama_backend_free();
+    }
+    return JNI_TRUE;
+#else
+    return JNI_TRUE;
+#endif
+}
+
+// Chat template embedded in the loaded model's GGUF metadata ("" when none).
+JNIEXPORT jstring JNICALL
+Java_com_neuron_ai_data_local_LocalEngineLoader_nativeChatTemplate(JNIEnv *env, jobject) {
+#if NEURON_HAVE_LLAMA
+    std::lock_guard<std::mutex> lock(g_mutex);
+    return env->NewStringUTF(g_loadedChatTemplate.c_str());
+#else
+    return env->NewStringUTF("");
+#endif
+}
+
+// Streams generation: each decoded piece is delivered via Callback.text.
+// Prompt must already be rendered through the model's chat template by the
+// Kotlin caller. Returns tokens generated, or a negative error code:
+//   -3 model not loaded  -4 tokenization failed  -5 prompt exceeded context
+JNIEXPORT jint JNICALL
+Java_com_neuron_ai_data_local_LocalEngineLoader_nativeGenerate(
+        JNIEnv *env, jobject, jstring jPrompt, jint maxTokens, jobject jCallback) {
+#if NEURON_HAVE_LLAMA
+    if (jPrompt == nullptr || jCallback == nullptr) return -1;
+
+    const char *promptChars = env->GetStringUTFChars(jPrompt, nullptr);
+    std::string prompt = promptChars != nullptr ? promptChars : "";
+    env->ReleaseStringUTFChars(jPrompt, promptChars);
+
+    jclass cbClass = env->GetObjectClass(jCallback);
+    if (cbClass == nullptr) return -1;
+    jmethodID onText = env->GetMethodID(cbClass, "text", "(Ljava/lang/String;)V");
+    if (onText == nullptr) return -2;
+
+    std::lock_guard<std::mutex> lock(g_mutex);
+    if (g_model == nullptr || g_ctx == nullptr) return -3;
+
+    const llama_vocab *vocab = llama_get_vocab(g_ctx);
+
+    // Tokenize: first call with a null buffer returns the required size.
+    int n_tokens = llama_tokenize(vocab, prompt.c_str(),
+                                  static_cast<int32_t>(prompt.size()),
+                                  nullptr, 0, /* add_special */ true,
+                                  /* parse_special */ true);
+    if (n_tokens < 0) {
+        std::vector<llama_token> tokens(static_cast<size_t>(-n_tokens));
+        n_tokens = llama_tokenize(vocab, prompt.c_str(),
+                                  static_cast<int32_t>(prompt.size()),
+                                  tokens.data(), static_cast<int32_t>(tokens.size()),
+                                  true, true);
+        if (n_tokens <= 0) return -4;
+
+        if (llama_decode(g_ctx, llama_batch_get_one(tokens.data(), n_tokens)) != 0) {
+            return -5; // prompt did not fit the configured context
+        }
+    } else {
+        return -4;
+    }
+
+    char pieceBuf[256];
+    int generated = 0;
+    llama_token next = sampleGreedy(g_ctx);
+    while (generated < maxTokens) {
+        if (next == llama_vocab_eos(vocab)) break;
+
+        int n = llama_token_to_piece(vocab, next, pieceBuf, sizeof(pieceBuf), 0, true);
+        if (n < 0) break;
+        if (n > 0) {
+            jstring piece = env->NewStringUTF(std::string(pieceBuf, static_cast<size_t>(n)).c_str());
+            if (piece != nullptr) {
+                env->CallVoidMethod(jCallback, onText, piece);
+                env->DeleteLocalRef(piece);
+            }
+        }
+        ++generated;
+
+        if (llama_decode(g_ctx, llama_batch_get_one(&next, 1)) != 0) break;
+        next = sampleGreedy(g_ctx);
+    }
+    return generated;
+#else
+    (void)jPrompt; (void)maxTokens; (void)jCallback;
+    return -100;
+#endif
+}
+
+} // extern "C"

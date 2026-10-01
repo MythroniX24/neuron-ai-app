@@ -66,6 +66,7 @@ import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -258,7 +259,8 @@ fun ChatScreen(
     ) {
         ChatTopBar(
             modelName = conversation?.modelId,
-            modelOptions = viewModel.modelOptions.collectAsStateWithLifecycle().value,
+            modelOptions = viewModel.mergedModelOptions.collectAsStateWithLifecycle().value,
+            localLoadState = viewModel.localLoadState.collectAsStateWithLifecycle().value,
             selectedModelId = conversation?.modelId,
             selectedProviderId = conversation?.providerId,
             onSelectModel = { providerId, modelId -> viewModel.setModel(providerId, modelId) },
@@ -544,7 +546,9 @@ private fun ChatTopBar(
     onOpenMenu: () -> Unit,
     isThinking: Boolean,
     terminalEnabled: Boolean,
-    onOpenTerminal: () -> Unit
+    onOpenTerminal: () -> Unit,
+    localLoadState: com.neuron.ai.data.local.LocalLoadState =
+        com.neuron.ai.data.local.LocalLoadState.Idle
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
     // Window-space bounds of the title block — the dropdown anchors to its
@@ -658,7 +662,90 @@ private fun ChatTopBar(
                                 .heightIn(max = 340.dp)
                                 .verticalScroll(rememberScrollState())
                         ) {
-                            modelOptions.forEach { option ->
+                            // Local models surface under their own section, with
+                            // the live loading state while the engine mmaps weights.
+                            val localOptions = modelOptions.filter {
+                                it.providerId == com.neuron.ai.ui.chat.ChatViewModel.LOCAL_PROVIDER_ID
+                            }
+                            val cloudOptions = modelOptions.filterNot {
+                                it.providerId == com.neuron.ai.ui.chat.ChatViewModel.LOCAL_PROVIDER_ID
+                            }
+                            if (localOptions.isNotEmpty()) {
+                                Text(
+                                    text = "On-device",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.padding(
+                                        horizontal = Spacing.lg, vertical = Spacing.xs
+                                    )
+                                )
+                                localOptions.forEach { option ->
+                                    val selected = option.modelId == selectedModelId &&
+                                        selectedProviderId == ChatViewModel.LOCAL_PROVIDER_ID
+                                    val loadingThis = localLoadState is com.neuron.ai.data.local.LocalLoadState.Loading &&
+                                        localLoadState.modelId == option.modelId
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable {
+                                                onSelectModel(option.providerId, option.modelId)
+                                                menuExpanded = false
+                                            }
+                                            .background(
+                                                if (selected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.65f)
+                                                else Color.Transparent
+                                            )
+                                            .padding(horizontal = Spacing.lg, vertical = Spacing.sm)
+                                    ) {
+                                        Column(Modifier.weight(1f)) {
+                                            Text(
+                                                option.modelId.removePrefix("local-"),
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                            val subtitle = when (localLoadState) {
+                                                is com.neuron.ai.data.local.LocalLoadState.Loading ->
+                                                    if (loadingThis) "Loading…" else "On-device"
+                                                is com.neuron.ai.data.local.LocalLoadState.Failed ->
+                                                    if (localLoadState.modelId == option.modelId) {
+                                                        "Load failed — ${localLoadState.reason}"
+                                                    } else "On-device"
+                                                is com.neuron.ai.data.local.LocalLoadState.Ready ->
+                                                    if (localLoadState.modelId == option.modelId) "Active" else "On-device"
+                                                else -> "On-device"
+                                            }
+                                            Text(
+                                                subtitle,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = if (
+                                                    localLoadState is com.neuron.ai.data.local.LocalLoadState.Failed &&
+                                                    localLoadState.modelId == option.modelId
+                                                ) {
+                                                    MaterialTheme.colorScheme.error
+                                                } else {
+                                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                                }
+                                            )
+                                        }
+                                        if (selected) {
+                                            Icon(
+                                                Icons.Outlined.Check,
+                                                contentDescription = "Selected",
+                                                tint = MaterialTheme.colorScheme.primary,
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                            if (cloudOptions.isNotEmpty() && localOptions.isNotEmpty()) {
+                                HorizontalDivider(
+                                    modifier = Modifier.padding(vertical = Spacing.xs)
+                                )
+                            }
+                            cloudOptions.forEach { option ->
                                 val selected = option.modelId == selectedModelId &&
                                     (selectedProviderId == null || option.providerId == selectedProviderId)
                                 Row(

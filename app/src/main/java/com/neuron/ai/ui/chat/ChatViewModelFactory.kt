@@ -140,6 +140,8 @@ class ChatViewModelFactory(
             defaultModelId = container.providerRepository.defaultModelId.value,
             toolIdsProvider = { container.toolRegistry.tools.first().map { it.id }.toSet() },
             importAttachmentFn = { uri -> container.attachmentStore.importFromUri(uri) },
+            localModels = container.localModelRepository,
+            localAiProvider = container.localAiProvider,
             importCaptureFn = { file -> container.attachmentStore.importCapture(file) },
             workspaces = container.workspaceManager,
             terminalManager = container.terminalManager,
