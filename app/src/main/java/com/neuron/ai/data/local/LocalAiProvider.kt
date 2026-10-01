@@ -10,6 +10,7 @@ import com.neuron.ai.core.provider.StreamEvent
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 
 /**

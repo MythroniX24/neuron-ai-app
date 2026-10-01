@@ -56,6 +56,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.neuron.ai.data.local.LocalLoadState
 import com.neuron.ai.data.local.LocalModelRecord
 import com.neuron.ai.data.local.RecommendedModel
+import com.neuron.ai.data.local.RecommendedModels
 import com.neuron.ai.di.AppContainer
 import com.neuron.ai.ui.theme.Spacing
 
