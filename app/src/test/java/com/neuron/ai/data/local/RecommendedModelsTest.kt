@@ -44,7 +44,7 @@ class RecommendedModelsTest {
         // Low free memory but enough total: tight (warn, don't grey out).
         assertEquals(
             RecommendedModels.Fit.TIGHT,
-            RecommendedModels.fitForDevice(tiny, totalRamBytes = 8 * gbLong, freeRamBytes = (1.4 * gbLong).toLong())
+            RecommendedModels.fitForDevice(tiny, totalRamBytes = 8 * gbLong, freeRamBytes = gbLong)
         )
         // Below the minimum RAM: unlikely (grey out).
         assertEquals(
