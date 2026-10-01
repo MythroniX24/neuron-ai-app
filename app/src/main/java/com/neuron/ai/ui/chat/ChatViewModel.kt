@@ -26,6 +26,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -85,7 +86,14 @@ class ChatViewModel(
     /** Reads attachment bytes/text so the agent can analyse user files. */
     private val attachmentStore: com.neuron.ai.data.attachment.AttachmentStore? = null,
     /** Persists the last (provider, model) pick so it survives restarts. */
-    private val settings: SettingsRepository? = null
+    private val settings: SettingsRepository? = null,
+    /**
+     * Local AI (on-device inference): GGUF model registry + engine loader.
+     * Null in previews/tests — every local path degrades to cloud-only.
+     */
+    private val localModels: com.neuron.ai.data.local.LocalModelRepository? = null,
+    /** On-device provider; null when local inference is unavailable. */
+    private val localAiProvider: com.neuron.ai.data.local.LocalAiProvider? = null
 ) : ViewModel() {
 
     val messages: StateFlow<List<Message>> =
@@ -154,7 +162,61 @@ class ChatViewModel(
     private var lastUserPrompt: String? = null
     private var lastUserAttachments: List<Attachment> = emptyList()
 
+    // ---- Local AI (on-device) -------------------------------------------------
+
+    /** Live load lifecycle for the header loading state ("Loading <model>…"). */
+    val localLoadState: StateFlow<com.neuron.ai.data.local.LocalLoadState> =
+        localModels?.loadState
+            ?: MutableStateFlow(com.neuron.ai.data.local.LocalLoadState.Idle)
+
+    /**
+     * Switcher options: enabled cloud providers + TICKED local models —
+     * downloading alone never makes a model selectable. Re-emits whenever
+     * either side changes, so Settings ticks reflect immediately.
+     */
+    val mergedModelOptions: StateFlow<List<ModelOption>> =
+        combine(
+            providers.configs,
+            localModels?.models
+                ?: MutableStateFlow(emptyList<com.neuron.ai.data.local.LocalModelRecord>())
+        ) { configs, locals ->
+            val cloud = configs.filter { it.enabled }.flatMap { config ->
+                val ids = config.modelIds.ifEmpty { listOfNotNull(config.defaultModelId) }
+                ids.map { ModelOption(config.id, config.displayName, it) }
+            }
+            val local = locals.filter { it.enabledForChat }.map {
+                ModelOption(LOCAL_PROVIDER_ID, "On-device", it.id)
+            }
+            cloud + local
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
     init {
+        // Local AI: unticking the ACTIVE model in Settings must never leave a
+        // chat pointed at a disabled model — fall back to the default cloud
+        // selection the moment that happens.
+        localModels?.models?.let { flow ->
+            viewModelScope.launch(dispatchers.io) {
+                flow.collect { records ->
+                    val conv = _conversation.value ?: return@collect
+                    if (conv.providerId == LOCAL_PROVIDER_ID) {
+                        val stillEnabled = records.any {
+                            it.id == conv.modelId && it.enabledForChat
+                        }
+                        if (!stillEnabled) {
+                            val last = settings?.lastModelSelection?.first()
+                            if (last != null && providers.config(last.first)?.enabled == true) {
+                                conversations.setConversationModel(
+                                    conversationId, last.first, last.second
+                                )
+                                _conversation.value =
+                                    conversations.getConversation(conversationId)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         // Brand-new chats pre-select the user's LAST used model (persisted in
         // DataStore) — the selection survives app restarts and new chats.
         if (_conversation.value == null) {
@@ -302,16 +364,30 @@ class ChatViewModel(
 
     // ---- Model selection ------------------------------------------------------------
 
-    /** Effective provider/model: conversation override, else app default. */
-    fun resolveSelection(): Pair<ProviderConfig, String>? {
+    /**
+     * Effective provider/model: conversation override, else app default.
+     * A "local" providerId resolves through the local model registry —
+     * unticked/unknown local ids FALL BACK to the default cloud model so a
+     * chat never points at a disabled model.
+     */
+    fun resolveSelection(): Pair<Any, String>? {
         val conv = _conversation.value
-        val config = providers.config(conv?.providerId) ?: providers.enabledConfig() ?: return null
         val modelId = conv?.modelId
+        if (conv?.providerId == LOCAL_PROVIDER_ID) {
+            val local = localModels?.models?.value?.firstOrNull {
+                it.id == modelId && it.enabledForChat
+            }
+            if (local != null) return "local" to local.id
+            // Fall through to the cloud default below.
+        }
+        val config = providers.config(conv?.providerId) ?: providers.enabledConfig()
+            ?: return null
+        val resolved = modelId
             ?: config.defaultModelId
             ?: defaultModelId
             ?: config.modelIds.firstOrNull()
             ?: return null
-        return config to modelId
+        return config to resolved
     }
 
     /**
@@ -323,8 +399,15 @@ class ChatViewModel(
         private suspend fun buildHistory(): List<ChatMessage> {
         // Model-aware budget: the selected model's estimated context window
         // drives how much history/context is assembled (Phase-1 orchestration).
-        val window = resolveSelection()?.let { (_, modelId) ->
-            com.neuron.ai.data.provider.ModelCapabilities.estimateContextWindow(modelId)
+        val window = resolveSelection()?.let { (providerId, modelId) ->
+            if (providerId == LOCAL_PROVIDER_ID) {
+                // Local models: use the GGUF-declared context length — it
+                // feeds TokenBudgetManager exactly like a cloud window.
+                localModels?.models?.value?.firstOrNull { it.id == modelId }
+                    ?.contextLength?.toInt()
+            } else {
+                com.neuron.ai.data.provider.ModelCapabilities.estimateContextWindow(modelId)
+            }
         }
         val engine = if (window != null) contextEngine.withWindow(window) else contextEngine
         val legacy = engine.build(conversations.messagesOf(conversationId).first())
@@ -367,6 +450,13 @@ class ChatViewModel(
             _conversation.value = conversations.getConversation(conversationId)
             // Remember globally: survives restarts and pre-fills new chats.
             settings?.setLastModelSelection(providerId, modelId)
+
+            // Local switch: trigger the load sequence NOW so the header shows
+            // "Loading <model>…" immediately (repository re-emits state; the
+            // previous local model is unloaded first inside ensureLoaded).
+            if (providerId == LOCAL_PROVIDER_ID) {
+                localModels?.ensureLoaded(modelId)
+            }
         }
     }
 
@@ -503,11 +593,12 @@ class ChatViewModel(
         if (!isUntitled || prompt.isBlank()) return
 
         val selection = resolveSelection()
-        val title = if (selection != null) {
-            val (config, modelId) = selection
+        val title = if (selection != null && selection.first != LOCAL_PROVIDER_ID) {
+            @Suppress("UNCHECKED_CAST")
+            val config = selection.first as ProviderConfig
             val provider = providers.provider(config.id)
             if (provider != null) {
-                AiNaming.generate(prompt, provider, modelId)
+                AiNaming.generate(prompt, provider, selection.second)
             } else {
                 null
             }
@@ -630,8 +721,35 @@ class ChatViewModel(
                 )
             )
             return
+        }        // Local AI: route through the SAME agent loop with the on-device
+        // provider — no parallel inference path, no special-cased runtime.
+        if (selection.first == LOCAL_PROVIDER_ID) {
+            val localProvider = localAiProvider
+            if (localProvider == null) {
+                _generation.value = GenerationState.Failed(
+                    NeuronError.Provider("Local models are unavailable on this device.")
+                )
+                return
+            }
+            runAgentTurnWith(
+                provider = localProvider,
+                modelId = selection.second,
+                configId = LOCAL_PROVIDER_ID,
+                // Capability-honest: local models get text-only turns; tool
+                // markup the model prints is still recovered by the parser.
+                visionEnabled = false,
+                toolsEnabled = false,
+                prompt = prompt,
+                taskId = taskId,
+                attachments = attachments
+            )
+            return
         }
-        val (config, modelId) = selection
+
+        @Suppress("UNCHECKED_CAST")
+        val config = selection.first as ProviderConfig
+        val modelId = selection.second
+
         val provider = providers.provider(config.id) ?: run {
             taskId?.let { tid ->
                 tasks.updateStatus(tid, Task.Status.FAILED)
@@ -643,13 +761,40 @@ class ChatViewModel(
             return
         }
 
+        runAgentTurnWith(
+            provider = provider,
+            modelId = modelId,
+            configId = config.id,
+            visionEnabled = config.visionEnabled,
+            toolsEnabled = config.toolsEnabled,
+            prompt = prompt,
+            taskId = taskId,
+            attachments = attachments
+        )
+    }
+
+    /**
+     * Shared turn body for cloud AND local providers — one agent loop, one
+     * tool execution path, one context pipeline. The provider instance is
+     * the ONLY difference; there is no parallel local inference path.
+     */
+    private suspend fun runAgentTurnWith(
+        provider: AIProvider,
+        modelId: String,
+        configId: String,
+        visionEnabled: Boolean,
+        toolsEnabled: Boolean,
+        prompt: String,
+        taskId: String?,
+        attachments: List<Attachment>
+    ) {
         // Milestone 3 multimodal gate: reject inputs the model cannot accept
         // BEFORE hitting the provider — never send unsupported input blindly.
         val capabilityError = com.neuron.ai.data.provider.ModelCapabilities.validateInput(
             model = com.neuron.ai.data.provider.ModelCapabilities.estimate(
                 id = modelId,
-                visionEnabled = config.visionEnabled,
-                toolsEnabled = config.toolsEnabled
+                visionEnabled = visionEnabled,
+                toolsEnabled = toolsEnabled
             ),
             attachments = lastUserAttachments
         )
@@ -678,10 +823,10 @@ class ChatViewModel(
             provider,
             com.neuron.ai.data.provider.ModelCapabilities.estimate(
                 id = modelId,
-                visionEnabled = config.visionEnabled,
-                toolsEnabled = config.toolsEnabled
+                visionEnabled = visionEnabled,
+                toolsEnabled = toolsEnabled
             ),
-            if (config.toolsEnabled) toolIdsProvider() else emptySet()
+            if (toolsEnabled) toolIdsProvider() else emptySet()
         )
 
         try {
@@ -793,7 +938,7 @@ class ChatViewModel(
                                     Message.Role.ASSISTANT,
                                     event.text.trim(),
                                     metadata = MessageMetadata(
-                                        providerId = config.id,
+                                        providerId = configId,
                                         modelId = modelId,
                                         isError = false
                                     )
@@ -857,7 +1002,7 @@ class ChatViewModel(
                         Message.Role.ASSISTANT,
                         assistantBuffer.toString(),
                         metadata = MessageMetadata(
-                            providerId = config.id,
+                            providerId = configId,
                             modelId = modelId,
                             generationMs = System.currentTimeMillis() - started,
                             agentSteps = cancelStepsSnapshot()
@@ -880,7 +1025,7 @@ class ChatViewModel(
                 Message.Role.ASSISTANT,
                 assistantBuffer.toString(),
                 metadata = MessageMetadata(
-                    providerId = config.id,
+                    providerId = configId,
                     modelId = modelId,
                     generationMs = elapsed,
                     agentSteps = persistableSteps()
@@ -971,6 +1116,9 @@ class ChatViewModel(
     }
 
     companion object {
+        /** providerId under which ALL local models surface in the selector. */
+        const val LOCAL_PROVIDER_ID = "local"
+
         /**
          * Phase-3 shadow rollout switch (CONTEXT_ARCHITECTURE.md §14.3):
          * false = orchestrator runs in shadow only (logged, never returned);

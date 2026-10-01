@@ -18,6 +18,12 @@ android {
         targetSdk = 34
         versionCode = 3
         versionName = "0.3.1"
+
+        ndk {
+            // Local AI: 64-bit only — 32-bit ABIs would double build time and
+            // most devices shipping since minSdk 26 are 64-bit.
+            abiFilters += listOf("arm64-v8a", "x86_64")
+        }
     }
 
     // Release signing is driven entirely by CI secrets/env — the keystore
@@ -60,6 +66,17 @@ android {
         compose = true
     }
 
+    // Local AI (on-device inference): llama.cpp via JNI. Sources are
+    // commit-pinned and fetched at configure time; when the fetch fails
+    // (offline runner) the bridge compiles to a stub and the Kotlin layer
+    // reports the engine as unavailable — the app never breaks.
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
+        }
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -72,6 +89,11 @@ android {
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
+        }
+        // Keep the native inference library uncompressed in the APK so
+        // Android can load it directly from the installed APK (extractNativeLibs=false).
+        jniLibs {
+            useLegacyPackaging = false
         }
     }
 

@@ -40,7 +40,8 @@ fun SettingsScreen(
     onBack: () -> Unit,
     onOpenProviders: () -> Unit = {},
     onOpenConversations: () -> Unit = {},
-    onOpenTasks: () -> Unit = {}
+    onOpenTasks: () -> Unit = {},
+    onOpenLocalAi: () -> Unit = {}
 ) {
     val viewModel: SettingsViewModel =
         viewModel(factory = SettingsViewModelFactory(container))
@@ -183,6 +184,20 @@ fun SettingsScreen(
                 "OpenAI-compatible endpoints, keys stored in the Android Keystore"
             ) {
                 onOpenProviders()
+            }
+
+            HorizontalDivider(modifier = Modifier.padding(vertical = Spacing.lg))
+
+            Text(
+                text = "Local AI",
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            SettingsLink(
+                "On-device models",
+                "Run AI models fully on this phone — no API key, no internet at inference time"
+            ) {
+                onOpenLocalAi()
             }
 
             HorizontalDivider(modifier = Modifier.padding(vertical = Spacing.lg))
