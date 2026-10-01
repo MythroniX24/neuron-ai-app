@@ -202,6 +202,12 @@ Budget must be recomputed per request using the **currently selected model's** `
 `outputLimit` — never a constant, since Neuron-AI is provider-agnostic (OpenAI-compatible, Gemini,
 Claude-compatible, OpenRouter, local models).
 
+> **Local models (on-device):** a downloaded GGUF model feeds its GGUF-declared
+> `context_length` into the same budget path via its `LocalModelRecord` — the
+> TokenBudgetManager sees no difference between a local and a cloud window.
+> Local runs are additionally capped to a 4k runtime context by the engine
+> loader (phone RAM discipline; raise per-model once mmap pressure is measured).
+
 ---
 
 ## 7. Retrieval — Kept Lightweight for On-Device / Termux Development
