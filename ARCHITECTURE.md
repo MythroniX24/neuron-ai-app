@@ -54,11 +54,14 @@ com.neuron.ai
 │   ├── db/                     # Room entities, DAO, database, codecs
 │   ├── conversation/           # RoomConversationRepository
 │   ├── provider/               # ProviderRepository, OpenAI-compatible provider, wire codec
-│   ├── agent/                  # ToolUsingAgent, DefaultToolExecutor
+│   ├── agent/                  # ToolUsingAgent, DefaultToolExecutor, TextToolCallParser
 │   ├── tool/                   # InMemoryToolRegistry, SafeTools
 │   ├── attachment/             # AttachmentStore (app-private storage)
 │   ├── permissions/            # SessionPermissionManager
-│   └── task/                   # DefaultTaskManager
+│   ├── task/                   # DefaultTaskManager
+│   ├── web/                    # keyless search engines + orchestrator/cache
+│   ├── workspace/ terminal/    # workspace sandbox + shell sessions
+│   └── local/                  # Local AI: GGUF parser, llama.cpp bridge, HF search, downloads
 ├── di/
 │   └── AppContainer.kt         # explicit manual dependency graph
 └── ui/
@@ -347,6 +350,46 @@ Browser Chat, no Web Search Chat, no Memory Chat.
   fails loudly on a changed target (no silent overwrite).
 - **Session hygiene:** each chat's WebView browser session is closed when its
   `ChatViewModel` is cleared — no engine or session leaks across chats.
+
+## Local AI — on-device inference (data/local)
+
+Local models are **just another AIProvider** — no parallel inference path anywhere.
+
+```
+data/local/
+├── GgufReader.kt             # bounded GGUF header/metadata parser (magic, arch,
+│                             #   quantization, context length) — format-not-extension checks
+├── LocalEngineLoader.kt      # Kotlin side of the JNI bridge; single-active load/unload,
+│                             #   streaming generation, tokens/sec benchmark
+├── LocalModelRecord.kt       # persisted record + LocalLoadState lifecycle
+├── LocalModelRepository.kt   # isolated models dir, import validation, ticks,
+│                             #   load orchestration, storage, delete, benchmark
+├── HfHubClient.kt            # free HF Hub API: GGUF search + repo files (size, sha256)
+├── ModelDownloadManager.kt   # progress, pause/resume (HTTP Range), Wi-Fi-only gate,
+│                             #   sha256 verification, restart survival
+├── RecommendedModels.kt      # curated catalog with min-RAM guidance + device fit
+└── LocalAiProvider.kt        # the AIProvider implementation (capability-honest)
+```
+
+Design rules:
+
+- **Same pipeline as cloud**: local models flow through the same agent loop,
+  tool execution, ContextOrchestrator and TokenBudgetManager; the GGUF-declared
+  context length drives the budget exactly like a cloud context window.
+- **Capability-honest**: local models declare `supportsTools=false` and
+  `supportsVision=false` so routing warns/rejects unsupported inputs up front;
+  plain-text tool markup is still recovered by the existing TextToolCallParser.
+- **Single-active engine**: the previous model is fully unloaded before a new
+  one loads — enforced in BOTH Kotlin and native code.
+- **mmap weights**: llama.cpp maps the model file; weight data is never
+  executed — tensors only.
+- **Workspace isolation**: all model files live in `filesDir/local-models/`;
+  imports validate the GGUF magic + header, never just the extension.
+- **Integrity**: downloads verify sha256 against the Hub's LFS oid before a
+  model becomes usable; mismatches delete the file.
+- Native build: `app/src/main/cpp` pins a llama.cpp commit and builds via CMake;
+  if the fetch fails at build time the bridge compiles to a stub and the app
+  reports local inference as unavailable (cloud features unaffected).
 
 ## Key technical decisions
 

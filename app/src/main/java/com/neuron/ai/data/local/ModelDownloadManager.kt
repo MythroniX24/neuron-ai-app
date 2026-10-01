@@ -323,5 +323,3 @@ class ModelDownloadManager(
                 .joinToString("") { "%02x".format(it) }
     }
 }
-
-}

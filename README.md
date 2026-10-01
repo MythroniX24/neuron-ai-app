@@ -26,14 +26,26 @@ terminal agents, tool calling, workspace management, and background tasks.
 - ✅ Safe foundational tools: time, calculator, text stats, workspace file read/search
 - ✅ Permission system: tools request capabilities, user allow/deny dialog, revocable
 - ✅ Task manager: stop running tasks, clear finished, statuses surfaced in UI
-- ✅ Unit tests for the provider wire protocol, tools, permissions, tasks and storage
+- ✅ **Local AI (on-device inference)**: run GGUF models fully on-device via
+  llama.cpp — no API key, no internet at inference time. Import from file or
+  download from the Hugging Face Hub (search, variant/quantization picker,
+  progress with pause/resume, Wi-Fi-only gate, sha256 integrity checks).
+  Single-active model with mmap loading, per-model benchmark (tokens/sec),
+  curated recommended list with RAM-fit guidance, and a chat-model switcher
+  integration with a live loading state.
+- ✅ Unit tests for the provider wire protocol, tools, permissions, tasks, storage,
+  the agent tool loop, the GGUF parser and the Hub/download stack
 
 There is deliberately **no mock AI** anywhere — the chat works against real providers
 you configure yourself.
 
 ## Building
 
-Requirements: **JDK 17**, Android SDK 34.
+Requirements: **JDK 17**, Android SDK 34, **NDK + CMake 3.22** (for the bundled
+llama.cpp local-inference bridge; Android Studio installs these via SDK Manager →
+SDK Tools). If the llama.cpp sources cannot be fetched at build time the bridge
+compiles to a stub and the app reports local inference as unavailable — cloud
+features are unaffected.
 
 ```bash
 ./gradlew assembleDebug     # debug APK at app/build/outputs/apk/debug/
@@ -68,6 +80,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the full design.
 | **0 — Foundation** ✅ | Architecture, design system, abstractions, polished shell |
 | **1 — Core Neuron-AI** ✅ | Real AI providers, streaming chat, markdown + LaTeX, Room persistence, provider settings, agent tools, permissions |
 | **2 — Advanced Agent Platform** | Coding/browser/terminal agents, workspaces, project management, background execution |
+| **Local AI** 🔶 | ✅ Import/download/run GGUF models, HF search, download manager, benchmark · next: GPU acceleration, performance modes, thermal throttling |
 
 ## License
 
