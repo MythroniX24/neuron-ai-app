@@ -34,11 +34,12 @@ std::mutex g_mutex;
 llama_model *g_model = nullptr;
 llama_context *g_ctx = nullptr;
 std::string g_loadedChatTemplate;
+int g_loadedFtype = -1;
 
 // Greedy (temperature 0) decode of the next token from the last logits.
-llama_token sampleGreedy(llama_context *ctx) {
+llama_token sampleGreedy(llama_context *ctx, const llama_vocab *vocab) {
     const float *logits = llama_get_logits_ith(ctx, -1);
-    const int vocabSize = llama_vocab_n_tokens(llama_get_vocab(ctx));
+    const int vocabSize = llama_vocab_n_tokens(vocab);
     int best = 0;
     float bestVal = logits[0];
     for (int i = 1; i < vocabSize; ++i) {
@@ -60,6 +61,7 @@ void unloadLocked() {
         g_model = nullptr;
     }
     g_loadedChatTemplate.clear();
+    g_loadedFtype = -1;
 }
 
 } // namespace
@@ -116,8 +118,9 @@ Java_com_neuron_ai_data_local_LocalEngineLoader_nativeLoad(
 
     llama_model_params mparams = llama_model_default_params();
     mparams.n_gpu_layers = useGpu ? 99 : 0; // milestone 5: real GPU offload
-    mparams.use_mmap = true;                // memory-map; never fully resident up front
-    mparams.use_mlock = false;              // let the OS reclaim under memory pressure
+    // Memory-map by default (large models never fully resident up front);
+    // mlock off so the OS can reclaim under memory pressure.
+    mparams.load_mode = LLAMA_LOAD_MODE_MMAP;
 
     llama_model *model = llama_model_load_from_file(modelPath.c_str(), mparams);
     if (model == nullptr) {
@@ -144,6 +147,7 @@ Java_com_neuron_ai_data_local_LocalEngineLoader_nativeLoad(
     g_ctx = ctx;
     const char *tmpl = llama_model_chat_template(model, nullptr);
     g_loadedChatTemplate = tmpl != nullptr ? std::string(tmpl) : std::string();
+    g_loadedFtype = llama_model_ftype(model);
     return 0;
 #else
     (void)jPath; (void)threads; (void)useGpu;
@@ -202,33 +206,31 @@ Java_com_neuron_ai_data_local_LocalEngineLoader_nativeGenerate(
     std::lock_guard<std::mutex> lock(g_mutex);
     if (g_model == nullptr || g_ctx == nullptr) return -3;
 
-    const llama_vocab *vocab = llama_get_vocab(g_ctx);
+    const llama_vocab *vocab = llama_model_get_vocab(g_model);
 
     // Tokenize: first call with a null buffer returns the required size.
     int n_tokens = llama_tokenize(vocab, prompt.c_str(),
                                   static_cast<int32_t>(prompt.size()),
                                   nullptr, 0, /* add_special */ true,
                                   /* parse_special */ true);
-    if (n_tokens < 0) {
-        std::vector<llama_token> tokens(static_cast<size_t>(-n_tokens));
-        n_tokens = llama_tokenize(vocab, prompt.c_str(),
-                                  static_cast<int32_t>(prompt.size()),
-                                  tokens.data(), static_cast<int32_t>(tokens.size()),
-                                  true, true);
-        if (n_tokens <= 0) return -4;
+    if (n_tokens >= 0) return -4; // null-buffer probe must return negative
 
-        if (llama_decode(g_ctx, llama_batch_get_one(tokens.data(), n_tokens)) != 0) {
-            return -5; // prompt did not fit the configured context
-        }
-    } else {
-        return -4;
+    std::vector<llama_token> tokens(static_cast<size_t>(-n_tokens));
+    n_tokens = llama_tokenize(vocab, prompt.c_str(),
+                              static_cast<int32_t>(prompt.size()),
+                              tokens.data(), static_cast<int32_t>(tokens.size()),
+                              true, true);
+    if (n_tokens <= 0) return -4;
+
+    if (llama_decode(g_ctx, llama_batch_get_one(tokens.data(), n_tokens)) != 0) {
+        return -5; // prompt did not fit the configured context
     }
 
     char pieceBuf[256];
     int generated = 0;
-    llama_token next = sampleGreedy(g_ctx);
+    llama_token next = sampleGreedy(g_ctx, vocab);
     while (generated < maxTokens) {
-        if (next == llama_vocab_eos(vocab)) break;
+        if (llama_vocab_is_eog(vocab, next)) break;
 
         int n = llama_token_to_piece(vocab, next, pieceBuf, sizeof(pieceBuf), 0, true);
         if (n < 0) break;
@@ -242,7 +244,7 @@ Java_com_neuron_ai_data_local_LocalEngineLoader_nativeGenerate(
         ++generated;
 
         if (llama_decode(g_ctx, llama_batch_get_one(&next, 1)) != 0) break;
-        next = sampleGreedy(g_ctx);
+        next = sampleGreedy(g_ctx, vocab);
     }
     return generated;
 #else
