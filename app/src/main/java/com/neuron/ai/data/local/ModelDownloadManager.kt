@@ -183,7 +183,7 @@ class ModelDownloadManager(
 
                 val input = resp.body?.byteStream() ?: throw IOException("Empty response body")
                 input.use { stream ->
-                    partFile.outputStream(!resumed).use { output ->
+                    java.io.FileOutputStream(partFile, !resumed).use { output ->
                         val buffer = ByteArray(256 * 1024)
                         var total = if (resumed) already else 0L
                         while (true) {

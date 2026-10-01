@@ -193,7 +193,7 @@ class LocalAiViewModel(
         // Enrich each hit with its GGUF variants (grouped under one entry —
         // the user picks the quantization at download time).
         results.forEach { hit ->
-            kotlinx.coroutines.launch {
+            launch {
                 val variants = try {
                     kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                         hubClient.files(hit.repoId)
