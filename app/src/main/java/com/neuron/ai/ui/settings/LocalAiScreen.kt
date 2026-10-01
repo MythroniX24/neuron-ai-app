@@ -26,6 +26,8 @@ import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.Memory
 import androidx.compose.material.icons.outlined.PlayArrow
+import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material3.Switch
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -79,6 +81,9 @@ fun LocalAiScreen(
     ) { uri -> uri?.let { viewModel.import(it) } }
 
     var deleteTarget by remember { mutableStateOf<LocalModelRecord?>(null) }
+    var variantTarget by remember {
+        mutableStateOf<VariantTarget?>(null)
+    }
 
     Column(
         modifier = Modifier
@@ -195,26 +200,135 @@ fun LocalAiScreen(
             }
 
             // ---- Recommended (curated, shown before any search) --------------
-            item {
-                Text(
-                    "Recommended",
-                    style = MaterialTheme.typography.titleSmall,
-                    color = MaterialTheme.colorScheme.primary
-                )
-            }
-            items(viewModel.recommended, key = { it.id }) { model ->
-                RecommendedCard(
-                    model = model,
-                    fit = viewModel.fitFor(model),
-                    onDownload = {
-                        // Milestone 4: download manager. Until then, guide the
-                        // user to grab the file and import it.
+            if (state.searchQuery.isBlank()) {
+                item {
+                    Text(
+                        "Recommended",
+                        style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+                items(viewModel.recommended, key = { it.id }) { model ->
+                    RecommendedCard(
+                        model = model,
+                        fit = viewModel.fitFor(model),
+                        onDownload = { viewModel.onSearchQueryChange(model.displayName) }
+                    )
+                }
+            } else {
+                // ---- Hub search results -------------------------------------
+                item {
+                    OutlinedTextField(
+                        value = state.searchQuery,
+                        onValueChange = { viewModel.onSearchQueryChange(it) },
+                        modifier = Modifier.fillMaxWidth(),
+                        placeholder = { Text("Search Hugging Face (GGUF models)…") },
+                        singleLine = true,
+                        leadingIcon = {
+                            Icon(Icons.Outlined.Search, contentDescription = null)
+                        }
+                    )
+                }
+                state.searchError?.let { error ->
+                    item {
+                        NoticeCard(
+                            text = error,
+                            isError = true,
+                            onDismiss = { viewModel.clearSearchError() }
+                        )
                     }
-                )
+                }
+                if (state.searching) {
+                    item {
+                        Text(
+                            "Searching the Hub…",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+                items(state.searchResults, key = { it.repoId }) { hit ->
+                    SearchResultCard(
+                        hit = hit,
+                        downloads = state.downloads,
+                        onPickVariant = { repoId, variants, displayName ->
+                            variantTarget = VariantTarget(repoId, variants, displayName)
+                        },
+                        onPause = viewModel::pauseDownload,
+                        onResume = viewModel::resumeDownload,
+                        onCancel = viewModel::cancelDownload,
+                        onQueryChange = viewModel::onSearchQueryChange
+                    )
+                }
+                item {
+                    TextButton(onClick = { viewModel.onSearchQueryChange("") }) {
+                        Text("Clear search")
+                    }
+                }
+            }
+
+            // ---- Wi-Fi-only toggle -----------------------------------------
+            item {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Download over Wi-Fi only", style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            "Model files can be several GB",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(checked = state.wifiOnly, onCheckedChange = { viewModel.setWifiOnly(it) })
+                }
             }
 
             item { Spacer(Modifier.height(Spacing.xl)) }
         }
+    }
+
+    // Quantization picker when a search hit is expanded for download.
+    variantTarget?.let { target ->
+        AlertDialog(
+            onDismissRequest = { variantTarget = null },
+            title = { Text("Pick a quantization") },
+            text = {
+                Column {
+                    Text(
+                        "Lower-bit = faster, smaller, slightly lower quality.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(Modifier.height(Spacing.sm))
+                    target.variants.forEach { variant ->
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    viewModel.startDownload(
+                                        target.repoId, variant, target.displayName
+                                    )
+                                    variantTarget = null
+                                }
+                                .padding(vertical = Spacing.sm)
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text(variant.fileName, style = MaterialTheme.typography.bodySmall)
+                                Text(
+                                    viewModel.formatBytes(variant.sizeBytes),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { variantTarget = null }) { Text("Cancel") }
+            }
+        )
     }
 
     deleteTarget?.let { model ->
@@ -232,6 +346,92 @@ fun LocalAiScreen(
                 TextButton(onClick = { deleteTarget = null }) { Text("Cancel") }
             }
         )
+    }
+}
+
+/** Quantization picker target: one repo + its GGUF variants. */
+private data class VariantTarget(
+    val repoId: String,
+    val variants: List<com.neuron.ai.data.local.HfHubClient.SearchResult.Variant>,
+    val displayName: String
+)
+
+@Composable
+private fun SearchResultCard(
+    hit: com.neuron.ai.ui.settings.SearchHit,
+    downloads: List<com.neuron.ai.data.local.ModelDownloadManager.Download>,
+    onPickVariant: (String, List<com.neuron.ai.data.local.HfHubClient.SearchResult.Variant>, String) -> Unit,
+    onPause: (String) -> Unit,
+    onResume: (String) -> Unit,
+    onCancel: (String) -> Unit,
+    onQueryChange: (String) -> Unit
+) {
+    val displayName = hit.repoId.substringAfterLast('/')
+    val activeDownload = downloads.firstOrNull {
+        it.displayName == displayName && it.state !=
+            com.neuron.ai.data.local.ModelDownloadManager.Download.State.COMPLETED
+    }
+    Surface(
+        shape = RoundedCornerShape(14.dp),
+        color = MaterialTheme.colorScheme.surface,
+        tonalElevation = 1.dp
+    ) {
+        Column(Modifier.padding(Spacing.lg)) {
+            Text(displayName, style = MaterialTheme.typography.titleSmall)
+            Text(
+                listOfNotNull(
+                    "${hit.downloads} downloads",
+                    hit.license?.let { it },
+                    if (hit.loadingVariants) "loading variants…" else "${hit.variants.size} GGUF files"
+                ).joinToString(" · "),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            activeDownload?.let { dl ->
+                Column(Modifier.padding(top = Spacing.sm)) {
+                    Text(
+                        when (dl.state) {
+                            com.neuron.ai.data.local.ModelDownloadManager.Download.State.DOWNLOADING ->
+                                "Downloading… ${dl.downloadedBytes * 100 / dl.totalBytes.coerceAtLeast(1)}%"
+                            com.neuron.ai.data.local.ModelDownloadManager.Download.State.PAUSED ->
+                                "Paused"
+                            com.neuron.ai.data.local.ModelDownloadManager.Download.State.FAILED ->
+                                dl.error ?: "Failed"
+                            else -> ""
+                        },
+                        style = MaterialTheme.typography.labelSmall
+                    )
+                    if (dl.state == com.neuron.ai.data.local.ModelDownloadManager.Download.State.DOWNLOADING) {
+                        LinearProgressIndicator(
+                            progress = {
+                                (dl.downloadedBytes.toFloat() / dl.totalBytes.coerceAtLeast(1)).coerceIn(0f, 1f)
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                    Row {
+                        when (dl.state) {
+                            com.neuron.ai.data.local.ModelDownloadManager.Download.State.DOWNLOADING ->
+                                TextButton(onClick = { onPause(dl.downloadId) }) { Text("Pause") }
+                            com.neuron.ai.data.local.ModelDownloadManager.Download.State.PAUSED ->
+                                TextButton(onClick = { onResume(dl.downloadId) }) { Text("Resume") }
+                            else -> {}
+                        }
+                        TextButton(onClick = { onCancel(dl.downloadId) }) { Text("Cancel") }
+                    }
+                }
+            }
+            if (activeDownload == null && hit.variants.isNotEmpty()) {
+                TextButton(onClick = { onPickVariant(hit.repoId, hit.variants, displayName) }) {
+                    Text("Get")
+                }
+            }
+            if (!hit.loadingVariants && hit.variants.isEmpty()) {
+                TextButton(onClick = { onQueryChange(displayName) }) {
+                    Text("No GGUF files — search again")
+                }
+            }
+        }
     }
 }
 
