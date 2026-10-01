@@ -88,6 +88,18 @@ class AppContainer(context: Context) {
         com.neuron.ai.data.local.LocalAiProvider(localModelRepository)
     }
 
+    /** Hugging Face Hub search (free API, no key). */
+    val hfHubClient: com.neuron.ai.data.local.HfHubClient by lazy {
+        com.neuron.ai.data.local.HfHubClient()
+    }
+
+    /** Background GGUF downloads with pause/resume/checksum/restart survival. */
+    val downloadManager: com.neuron.ai.data.local.ModelDownloadManager by lazy {
+        com.neuron.ai.data.local.ModelDownloadManager(
+            context, localModelRepository, dispatchers, logger
+        ).also { it.restore() }
+    }
+
     val permissionManager: PermissionManager = SessionPermissionManager()
 
     val toolRegistry: ToolRegistry = InMemoryToolRegistry()

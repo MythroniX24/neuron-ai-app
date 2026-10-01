@@ -144,6 +144,41 @@ class LocalModelRepository(
             }
         }
 
+    /**
+     * Registers a file ALREADY inside the models directory (download-manager
+     * path) — validates and registers WITHOUT re-copying GB-sized files.
+     */
+    suspend fun registerExistingFile(file: File, displayName: String, source: String): Result<LocalModelRecord> =
+        withContext(dispatchers.io) {
+            if (!GgufReader.looksLikeGguf(file)) {
+                return@withContext Result.failure(
+                    GgufReader.InvalidGgufException("Downloaded file is not a valid GGUF model")
+                )
+            }
+            val info = try {
+                GgufReader.parse(file)
+            } catch (t: Throwable) {
+                return@withContext Result.failure(
+                    IllegalArgumentException("Corrupt or unsupported GGUF: ${t.message}")
+                )
+            }
+            val record = LocalModelRecord(
+                id = "local-" + UUID.randomUUID().toString().take(8),
+                displayName = displayName.take(60),
+                fileName = file.name,
+                sizeBytes = file.length(),
+                quantization = info.quantization,
+                architecture = info.architecture,
+                contextLength = info.contextLength,
+                blockCount = info.blockCount,
+                source = source,
+                importedAtEpochMs = System.currentTimeMillis()
+            )
+            _models.value = _models.value + record
+            persist()
+            Result.success(record)
+        }
+
     // ---- Enable ticks ------------------------------------------------------
 
     /** Ticking/unticking reflects in the header switcher immediately. */
