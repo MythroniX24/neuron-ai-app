@@ -11,7 +11,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # Kotlin side reports the engine as unavailable (LocalAiProvider falls back
 # to a clear "engine unavailable" error).
 # ---------------------------------------------------------------------------
-set(LLAMA_PIN "b4488"
+set(LLAMA_PIN "d775ebf363f777bc862a8659b6c55eec9419cf35"
     CACHE STRING "llama.cpp commit to build against")
 set(LLAMA_SRC "${CMAKE_CURRENT_BINARY_DIR}/llama.cpp-src" CACHE PATH "llama.cpp source dir")
 
