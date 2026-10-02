@@ -12,6 +12,7 @@ import com.neuron.ai.data.local.LocalModelRepository
 import com.neuron.ai.data.local.ModelDownloadManager
 import com.neuron.ai.data.local.RecommendedModels
 import com.neuron.ai.data.local.RecommendedModel
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -192,22 +193,26 @@ class LocalAiViewModel(
         _state.value = _state.value.copy(searching = false, searchResults = hits)
         // Enrich each hit with its GGUF variants (grouped under one entry —
         // the user picks the quantization at download time).
-        results.forEach { hit ->
-            launch {
-                val variants = try {
-                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                        hubClient.files(hit.repoId)
+        // coroutineScope gives the child launches a receiver and ties their
+        // lifetime to searchJob so a stale query's enrichment is cancelled.
+        coroutineScope {
+            results.forEach { hit ->
+                launch {
+                    val variants = try {
+                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                            hubClient.files(hit.repoId)
+                        }
+                    } catch (_: Throwable) {
+                        emptyList()
                     }
-                } catch (_: Throwable) {
-                    emptyList()
+                    _state.value = _state.value.copy(
+                        searchResults = _state.value.searchResults.map {
+                            if (it.repoId == hit.repoId) {
+                                it.copy(variants = variants, loadingVariants = false)
+                            } else it
+                        }
+                    )
                 }
-                _state.value = _state.value.copy(
-                    searchResults = _state.value.searchResults.map {
-                        if (it.repoId == hit.repoId) {
-                            it.copy(variants = variants, loadingVariants = false)
-                        } else it
-                    }
-                )
             }
         }
     }
