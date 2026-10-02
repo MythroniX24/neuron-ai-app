@@ -67,7 +67,8 @@ class DeviceHealthMonitor(
                 batteryReceiver,
                 IntentFilter().apply {
                     addAction(Intent.ACTION_BATTERY_CHANGED)
-                    addAction(Intent.ACTION_POWER_SAVE_MODE_CHANGED)
+                    // Lives on PowerManager, not Intent (API 21+).
+                    addAction(PowerManager.ACTION_POWER_SAVE_MODE_CHANGED)
                 },
                 ContextCompat.RECEIVER_NOT_EXPORTED
             )
