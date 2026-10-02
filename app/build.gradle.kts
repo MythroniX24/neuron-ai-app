@@ -24,6 +24,20 @@ android {
             // most devices shipping since minSdk 26 are 64-bit.
             abiFilters += listOf("arm64-v8a", "x86_64")
         }
+        externalNativeBuild {
+            cmake {
+                // Release + -O3 for llama.cpp/ggml: debug native builds are
+                // 3-10x slower. CPP flags live in CMakeLists.txt; this sets
+                // the toolchain-wide default for every ABI.
+                cppFlags += "-O3"
+                arguments += listOf(
+                    "-DCMAKE_BUILD_TYPE=Release",
+                    // Vulkan GPU backend (milestone 5). CMake degrades to a
+                    // CPU-only build when glslc is absent.
+                    "-DGGML_VULKAN=ON"
+                )
+            }
+        }
     }
 
     // Release signing is driven entirely by CI secrets/env — the keystore

@@ -6,6 +6,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.neuron.ai.di.AppContainer
 import com.neuron.ai.data.local.HfHubClient
+import com.neuron.ai.data.local.LocalEngineLoader
 import com.neuron.ai.data.local.LocalLoadState
 import com.neuron.ai.data.local.LocalModelRecord
 import com.neuron.ai.data.local.LocalModelRepository
@@ -50,7 +51,14 @@ data class LocalAiUiState(
     val searchResults: List<SearchHit> = emptyList(),
     val searchError: String? = null,
     val downloads: List<ModelDownloadManager.Download> = emptyList(),
-    val wifiOnly: Boolean = true
+    val wifiOnly: Boolean = true,
+    // ---- Performance (milestone 5) ----
+    /** True when the BUILD + DEVICE can do Vulkan GPU offload at all. */
+    val gpuAvailable: Boolean = false,
+    /** User's GPU offload preference (on-device pref, default ON). */
+    val useGpu: Boolean = true,
+    /** CPU threads for generation; 0 = Auto (device-sized). */
+    val cpuThreads: Int = 0
 )
 
 /**
@@ -70,7 +78,12 @@ class LocalAiViewModel(
 
     init {
         val (total, free) = repository.deviceMemory()
-        _state.value = _state.value.copy(wifiOnly = downloadManager?.wifiOnly ?: true)
+        _state.value = _state.value.copy(
+            wifiOnly = downloadManager?.wifiOnly ?: true,
+            gpuAvailable = LocalEngineLoader.gpuAvailable,
+            useGpu = repository.useGpu,
+            cpuThreads = repository.userThreads
+        )
         downloadManager?.let { dm ->
             viewModelScope.launch {
                 dm.downloads.collect { list ->
@@ -230,6 +243,37 @@ class LocalAiViewModel(
     fun setWifiOnly(enabled: Boolean) {
         downloadManager?.wifiOnly = enabled
         _state.value = _state.value.copy(wifiOnly = enabled)
+    }
+
+    // ---- Performance (milestone 5) -------------------------------------
+
+    /**
+     * Toggles GPU (Vulkan) offload. Applies IMMEDIATELY: the active model is
+     * reloaded under the new setting, so the next token is generated the new
+     * way. A failed reload falls back to CPU automatically (repository logic).
+     */
+    fun setUseGpu(enabled: Boolean) {
+        repository.useGpu = enabled
+        _state.value = _state.value.copy(useGpu = enabled)
+        applyPerfChange()
+    }
+
+    /** Sets generation CPU threads (0 = Auto) and reloads if a model is active. */
+    fun setCpuThreads(threads: Int) {
+        repository.userThreads = threads
+        _state.value = _state.value.copy(cpuThreads = threads)
+        applyPerfChange()
+    }
+
+    /**
+     * Reload of the ACTIVE model after a perf change — a perf change without
+     * a reload would silently do nothing (context params are set at load).
+     */
+    private fun applyPerfChange() {
+        val active = _state.value.loadState
+        if (active is LocalLoadState.Ready) {
+            viewModelScope.launch { repository.ensureLoaded(active.modelId) }
+        }
     }
 
     fun formatBytes(bytes: Long): String = when {

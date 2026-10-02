@@ -32,6 +32,8 @@ class LocalModelRepository(
     val modelsDir: File = File(context.filesDir, "local-models").apply { mkdirs() }
 
     private val manifestFile = File(context.filesDir, "local-models.json")
+    /** Performance prefs (GPU on/off, CPU threads) — tiny JSON, defaults below. */
+    private val perfPrefsFile = File(context.filesDir, "local-perf.json")
     private val json = Json { ignoreUnknownKeys = true; prettyPrint = true }
 
     private val _models = MutableStateFlow<List<LocalModelRecord>>(emptyList())
@@ -198,13 +200,60 @@ class LocalModelRepository(
         Unit
     }
 
+    // ---- Performance prefs (milestone 5) -----------------------------------
+
+    /**
+     * GPU (Vulkan) offload preference. Defaults ON — with the CPU retry below
+     * it degrades gracefully on devices where the GPU path fails, and every
+     * load is validated so a driver crash never leaves a half-loaded model.
+     * Backed by a 1-line pref file, not the model manifest.
+     */
+    var useGpu: Boolean
+        get() = perfPref("gpu") ?: true
+        set(value) = writePerfPref("gpu", value.toString())
+
+    /**
+     * User-selected CPU thread count for generation. 0 = Auto (device-sized
+     * default, see [defaultThreads]). Coerced to a sane 1..16 on write.
+     */
+    var userThreads: Int
+        get() = perfPref("threads")?.toIntOrNull() ?: 0
+        set(value) = writePerfPref("threads", value.coerceIn(0, 16).toString())
+
+    private fun perfPref(key: String): String? = try {
+        if (perfPrefsFile.exists()) {
+            // Tiny "key=value" lines — no serialization ceremony for 2 prefs.
+            perfPrefsFile.readLines()
+                .firstOrNull { it.startsWith("$key=") }
+                ?.substringAfter('=')
+        } else null
+    } catch (_: Throwable) {
+        null
+    }
+
+    private fun writePerfPref(key: String, value: String) {
+        try {
+            val others = if (perfPrefsFile.exists()) {
+                perfPrefsFile.readLines().filterNot { it.startsWith("$key=") || it.isBlank() }
+            } else emptyList()
+            perfPrefsFile.writeText((others + "$key=$value").joinToString("\n"))
+        } catch (t: Throwable) {
+            logger?.w("LocalModels", "Perf pref write failed", t)
+        }
+    }
+
+    /** Threads actually used: user choice when set, device default otherwise. */
+    private fun resolvedThreads(): Int =
+        if (userThreads in 1..16) userThreads else defaultThreads()
+
     // ---- Load orchestration ------------------------------------------------
 
     /**
      * Loads [modelId] as THE active model: the previous one is fully unloaded
-     * first (single-active constraint). On failure the state is consistent —
-     * unloaded with the failure reason surfaced — and the chat keeps using
-     * whatever model it resolved BEFORE the failed switch.
+     * first (single-active constraint). When GPU offload is enabled but the
+     * load fails (driver, shader or GPU OOM), it retries ONCE on CPU so the
+     * user keeps a working model instead of a hard failure. On total failure
+     * the state is consistent — unloaded with the reason surfaced.
      */
     suspend fun ensureLoaded(modelId: String): Result<Unit> = withContext(dispatchers.io) {
         engineMutex.withLock {
@@ -216,12 +265,7 @@ class LocalModelRepository(
             }
 
             _loadState.value = LocalLoadState.Loading(modelId, record.displayName)
-            val result = LocalEngineLoader.load(
-                path = File(modelsDir, record.fileName).absolutePath,
-                contextTokens = (record.contextLength?.toInt()?.coerceAtMost(4096)) ?: 2048,
-                threads = defaultThreads(),
-                useGpu = false // milestone 5: hardware acceleration toggle
-            )
+            val result = loadEngine(record)
             _loadState.value = when (result) {
                 is LocalEngineLoader.LoadResult.Success -> LocalLoadState.Ready(modelId)
                 is LocalEngineLoader.LoadResult.Failure -> {
@@ -232,6 +276,34 @@ class LocalModelRepository(
             if (result is LocalEngineLoader.LoadResult.Success) Result.success(Unit)
             else Result.failure(IllegalStateException((result as LocalEngineLoader.LoadResult.Failure).reason))
         }
+    }
+
+    /**
+     * One load attempt with the CURRENT performance prefs (GPU offload when
+     * enabled AND the device probe passes), plus a single CPU retry when the
+     * GPU path was requested and failed. Never leaves a half-loaded engine.
+     */
+    private fun loadEngine(record: LocalModelRecord): LocalEngineLoader.LoadResult {
+        val path = File(modelsDir, record.fileName).absolutePath
+        val contextTokens = (record.contextLength?.toInt()?.coerceAtMost(4096)) ?: 2048
+        val wantGpu = useGpu && LocalEngineLoader.gpuAvailable
+        var result = LocalEngineLoader.load(
+            path = path,
+            contextTokens = contextTokens,
+            threads = resolvedThreads(),
+            useGpu = wantGpu
+        )
+        if (result is LocalEngineLoader.LoadResult.Failure && wantGpu) {
+            logger?.w("LocalModels", "GPU load failed — retrying on CPU: ${result.reason}")
+            LocalEngineLoader.unload()
+            result = LocalEngineLoader.load(
+                path = path,
+                contextTokens = contextTokens,
+                threads = resolvedThreads(),
+                useGpu = false
+            )
+        }
+        return result
     }
 
     suspend fun unload() = withContext(dispatchers.io) {
@@ -251,21 +323,18 @@ class LocalModelRepository(
             val result = LocalEngineLoader.benchmarkTokensPerSec(
                 path = File(modelsDir, record.fileName).absolutePath,
                 contextTokens = (record.contextLength?.toInt()?.coerceAtMost(4096)) ?: 2048,
-                threads = defaultThreads(),
+                threads = resolvedThreads(),
                 prompt = "Write a short story about a robot who learns to paint.",
-                maxTokens = 128
+                maxTokens = 128,
+                // Benchmark measures the config the user will actually run.
+                useGpu = useGpu && LocalEngineLoader.gpuAvailable
             )
             // Restore whatever was active before the benchmark (its OWN file).
             _loadState.value = previous
             if (previous is LocalLoadState.Ready) {
                 val activeRecord = _models.value.firstOrNull { it.id == previous.modelId }
                 if (activeRecord != null) {
-                    LocalEngineLoader.load(
-                        path = File(modelsDir, activeRecord.fileName).absolutePath,
-                        contextTokens = (activeRecord.contextLength?.toInt()?.coerceAtMost(4096)) ?: 2048,
-                        threads = defaultThreads(),
-                        useGpu = false
-                    )
+                    loadEngine(activeRecord)
                 }
             }
             result

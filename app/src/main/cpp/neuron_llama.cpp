@@ -6,9 +6,10 @@
 // data, loaded only as tensors.
 //
 // Built two ways (CMakeLists.txt):
-//   NEURON_HAVE_LLAMA=1  full bridge against llama.cpp
-//   NEURON_HAVE_LLAMA=0  stub: reports "engine unavailable" instead of
-//                        breaking builds where llama.cpp could not be fetched
+//   NEURON_HAVE_LLAMA=1   full bridge against llama.cpp
+//   NEURON_HAVE_LLAMA=0   stub: reports "engine unavailable" instead of
+//                         breaking builds where llama.cpp could not be fetched
+//   NEURON_HAVE_VULKAN    (1|0) — Vulkan GPU backend compiled in (milestone 5)
 
 #include <jni.h>
 #include <mutex>
@@ -18,8 +19,14 @@
 #ifdef __ANDROID__
 #include <android/log.h>
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, "NeuronLlama", __VA_ARGS__)
+#define LOGI(...) __android_log_print(ANDROID_LOG_INFO, "NeuronLlama", __VA_ARGS__)
 #else
 #define LOGE(...) ((void)0)
+#define LOGI(...) ((void)0)
+#endif
+
+#if defined(__ANDROID__)
+#include <dlfcn.h>
 #endif
 
 #if NEURON_HAVE_LLAMA
@@ -35,6 +42,34 @@ llama_model *g_model = nullptr;
 llama_context *g_ctx = nullptr;
 std::string g_loadedChatTemplate;
 int g_loadedFtype = -1;
+
+#if defined(__ANDROID__) && NEURON_HAVE_VULKAN
+// Vulkan driver/loader presence — probed once, result cached. We dlopen
+// WITHOUT loading any bundled copy: the NDK's libvulkan.so is a build-time
+// stub and is never packaged, so the linker resolves the platform loader in
+// /system, whose platform allocator the GPU drivers expect (bundling a
+// loader copy instead can install a mismatched host allocator and crash —
+// CWE-789; the official llama.cpp Android binding hit this on Android 15).
+bool vulkanDriverPresent() {
+    static const bool present = [] {
+#if !defined(__x86_64__)
+        void *handle = dlopen("libvulkan.so", RTLD_NOW | RTLD_LOCAL);
+        if (handle == nullptr) {
+            LOGI("Vulkan: no platform loader (%s)", dlerror());
+            return false;
+        }
+        // Deliberately NOT dlclose'd: the loader must stay resident for the
+        // backend's device enumeration later in the process lifetime.
+        return true;
+#else
+        return false; // emulator images: CPU-only
+#endif
+    }();
+    return present;
+}
+#else
+bool vulkanDriverPresent() { return false; }
+#endif // __ANDROID__ && NEURON_HAVE_VULKAN
 
 // Greedy (temperature 0) decode of the next token from the last logits.
 llama_token sampleGreedy(llama_context *ctx, const llama_vocab *vocab) {
@@ -78,10 +113,25 @@ Java_com_neuron_ai_data_local_LocalEngineLoader_nativeIsAvailable(JNIEnv *, jobj
 #endif
 }
 
+// GPU acceleration usable in THIS build AND on THIS device (backend compiled
+// in + a Vulkan loader/driver actually present).
+JNIEXPORT jboolean JNICALL
+Java_com_neuron_ai_data_local_LocalEngineLoader_nativeGpuAvailable(JNIEnv *, jobject) {
+#if NEURON_HAVE_LLAMA && NEURON_HAVE_VULKAN
+    return vulkanDriverPresent() ? JNI_TRUE : JNI_FALSE;
+#else
+    return JNI_FALSE;
+#endif
+}
+
 JNIEXPORT jstring JNICALL
 Java_com_neuron_ai_data_local_LocalEngineLoader_nativeVersion(JNIEnv *env, jobject) {
 #if NEURON_HAVE_LLAMA
-    return env->NewStringUTF("llama.cpp (bundled)");
+#if NEURON_HAVE_VULKAN
+    return env->NewStringUTF("llama.cpp (bundled, Vulkan GPU enabled)");
+#else
+    return env->NewStringUTF("llama.cpp (bundled, CPU)");
+#endif
 #else
     return env->NewStringUTF("unavailable");
 #endif
@@ -104,6 +154,7 @@ Java_com_neuron_ai_data_local_LocalEngineLoader_nativeLoad(
         if (jErrOut != nullptr && env->GetArrayLength(jErrOut) > 0) {
             env->SetObjectArrayElement(jErrOut, 0, env->NewStringUTF(message));
         }
+        LOGE("load failed (%d): %s", (int) code, message);
         unloadLocked();
         llama_backend_free();
         return code;
@@ -116,8 +167,15 @@ Java_com_neuron_ai_data_local_LocalEngineLoader_nativeLoad(
 
     llama_backend_init();
 
+    const bool gpu = useGpu == JNI_TRUE;
+    if (gpu && !vulkanDriverPresent()) {
+        return fail(-6, "No Vulkan GPU driver is available on this device");
+    }
+
     llama_model_params mparams = llama_model_default_params();
-    mparams.n_gpu_layers = useGpu ? 99 : 0; // milestone 5: real GPU offload
+    // 999 = offload every layer that fits; llama.cpp falls back to CPU for
+    // whatever the GPU cannot hold, so partial offload just works.
+    mparams.n_gpu_layers = gpu ? 999 : 0;
     // Memory-map by default (large models never fully resident up front);
     // mlock off so the OS can reclaim under memory pressure.
     mparams.load_mode = LLAMA_LOAD_MODE_MMAP;
@@ -131,16 +189,22 @@ Java_com_neuron_ai_data_local_LocalEngineLoader_nativeLoad(
     cparams.n_ctx = static_cast<uint32_t>(contextTokens > 0 ? contextTokens : 2048);
     cparams.n_threads = threads > 0 ? threads : 4;
     cparams.n_threads_batch = cparams.n_threads;
+    if (gpu) {
+        // Attention runs on the GPU: flash attention halves KV memory traffic
+        // and is markedly faster there; quantized KV (Q8_0) shrinks the cache
+        // ~2x with negligible quality loss — more layers fit in the limited
+        // phone GPU memory.
+        cparams.flash_attn_type = LLAMA_FLASH_ATTN_TYPE_ENABLED;
+        cparams.type_k = GGML_TYPE_Q8_0;
+        cparams.type_v = GGML_TYPE_Q8_0;
+    }
 
     llama_context *ctx = llama_init_from_model(model, cparams);
     if (ctx == nullptr) {
         llama_model_free(model);
-        llama_backend_free();
-        if (jErrOut != nullptr && env->GetArrayLength(jErrOut) > 0) {
-            env->SetObjectArrayElement(jErrOut, 0,
-                env->NewStringUTF("Not enough memory to run this model on this device"));
-        }
-        return -2;
+        return fail(-2, gpu
+            ? "Not enough memory to run this model (GPU offload was requested)"
+            : "Not enough memory to run this model on this device");
     }
 
     g_model = model;
@@ -148,9 +212,11 @@ Java_com_neuron_ai_data_local_LocalEngineLoader_nativeLoad(
     const char *tmpl = llama_model_chat_template(model, nullptr);
     g_loadedChatTemplate = tmpl != nullptr ? std::string(tmpl) : std::string();
     g_loadedFtype = llama_model_ftype(model);
+    LOGI("loaded '%s' (gpu=%d, ctx=%d, threads=%d)",
+         modelPath.c_str(), gpu ? 1 : 0, (int) cparams.n_ctx, (int) cparams.n_threads);
     return 0;
 #else
-    (void)jPath; (void)threads; (void)useGpu;
+    (void)jPath; (void)contextTokens; (void)threads; (void)useGpu;
     if (jErrOut != nullptr && env->GetArrayLength(jErrOut) > 0) {
         env->SetObjectArrayElement(jErrOut, 0,
             env->NewStringUTF("Native inference engine was not built into this APK"));

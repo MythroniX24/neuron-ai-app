@@ -38,6 +38,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -105,7 +106,7 @@ fun LocalAiScreen(
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
             contentPadding = androidx.compose.foundation.layout.PaddingValues(Spacing.lg),
-            verticalArrangement = Arrangement.spacedBy(Spacing.sm)
+            verticalArrangement = Arrangement.spacedBy(Spacing.smm)
         ) {
             // ---- Notices -------------------------------------------------
             state.importNotice?.let { notice ->
@@ -163,7 +164,7 @@ fun LocalAiScreen(
 
             // ---- Actions ---------------------------------------------------
             item {
-                Row(horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(Spacing.smm)) {
                     OutlinedButton(
                         onClick = { importPicker.launch(arrayOf("*/*")) },
                         enabled = !state.importing
@@ -282,6 +283,70 @@ fun LocalAiScreen(
                 }
             }
 
+            // ---- Performance (milestone 5) --------------------------------
+            item {
+                Column {
+                    Text(
+                        "Performance",
+                        style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Spacer(Modifier.height(Spacing.sm))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            Icons.Outlined.Bolt,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(Modifier.size(Spacing.sm))
+                        Column(Modifier.weight(1f)) {
+                            Text("GPU acceleration (Vulkan)", style = MaterialTheme.typography.bodyMedium)
+                            Text(
+                                when {
+                                    !state.gpuAvailable -> "Not available on this device/build — CPU is used"
+                                    state.useGpu -> "Layers run on the GPU; falls back to CPU if it fails"
+                                    else -> "Disabled — everything runs on the CPU"
+                                },
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Switch(
+                            checked = state.useGpu,
+                            enabled = state.gpuAvailable,
+                            onCheckedChange = { viewModel.setUseGpu(it) }
+                        )
+                    }
+                    Spacer(Modifier.height(Spacing.sm))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            Icons.Outlined.Memory,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(Modifier.size(Spacing.sm))
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                if (state.cpuThreads == 0) "CPU threads: Auto"
+                                else "CPU threads: ${state.cpuThreads}",
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                            Text(
+                                "Auto picks the device default (2-6)",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Slider(
+                                value = state.cpuThreads.toFloat(),
+                                onValueChange = { viewModel.setCpuThreads(it.toInt()) },
+                                valueRange = 0f..8f,
+                                steps = 7
+                            )
+                        }
+                    }
+                }
+            }
+
             item { Spacer(Modifier.height(Spacing.xl)) }
         }
     }
@@ -298,7 +363,7 @@ fun LocalAiScreen(
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    Spacer(Modifier.height(Spacing.sm))
+                    Spacer(Modifier.height(Spacing.smm))
                     target.variants.forEach { variant ->
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
@@ -310,7 +375,7 @@ fun LocalAiScreen(
                                     )
                                     variantTarget = null
                                 }
-                                .padding(vertical = Spacing.sm)
+                                .padding(vertical = Spacing.smm)
                         ) {
                             Column(Modifier.weight(1f)) {
                                 Text(variant.fileName, style = MaterialTheme.typography.bodySmall)
@@ -388,7 +453,7 @@ private fun SearchResultCard(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             activeDownload?.let { dl ->
-                Column(Modifier.padding(top = Spacing.sm)) {
+                Column(Modifier.padding(top = Spacing.smm)) {
                     Text(
                         when (dl.state) {
                             com.neuron.ai.data.local.ModelDownloadManager.Download.State.DOWNLOADING ->
@@ -531,7 +596,7 @@ private fun ModelCard(
                 LinearProgressIndicator(Modifier.fillMaxWidth())
             }
 
-            Row(horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(Spacing.smm)) {
                 TextButton(onClick = onLoad, enabled = !isActive && !isLoading) {
                     Text(if (isActive) "Loaded" else "Load")
                 }
