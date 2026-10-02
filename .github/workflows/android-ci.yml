@@ -33,6 +33,18 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # Vulkan GPU backend (milestone 5): ggml compiles its SPIR-V shaders
+      # with glslc at build time. Ubuntu 24.04's shaderc-glslc 2023.8 lacks
+      # the GL_EXT_integer_dot_product extension probe target, so we vendor
+      # KhronosGroup/Vulkan-Headers source and point CMake at it; the NDK
+      # contributes the Android Vulkan headers + libvulkan stub at link time.
+      - name: Install Vulkan shader toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends glslc
+          git clone --depth 1 https://github.com/KhronosGroup/Vulkan-Headers.git "$RUNNER_TEMP/Vulkan-Headers"
+          echo "VULKAN_HEADERS_DIR=$RUNNER_TEMP/Vulkan-Headers" >> "$GITHUB_ENV"
+
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
@@ -62,6 +74,13 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Install Vulkan shader toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends glslc
+          git clone --depth 1 https://github.com/KhronosGroup/Vulkan-Headers.git "$RUNNER_TEMP/Vulkan-Headers"
+          echo "VULKAN_HEADERS_DIR=$RUNNER_TEMP/Vulkan-Headers" >> "$GITHUB_ENV"
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4

@@ -15,17 +15,26 @@ object LocalEngineLoader {
     private const val LIB_NAME = "neuron_llama"
 
     /** Present once System.loadLibrary succeeded; false on stub builds. */
-    val nativeLibraryAvailable: Boolean = try {
+    val nativeLibraryAvailable: Boolean by lazy { try {
         System.loadLibrary(LIB_NAME)
         true
     } catch (_: Throwable) {
         false
-    }
+    } }
+
+    /**
+     * Vulkan GPU acceleration usable in THIS build AND on THIS device.
+     * false on stub builds, CPU-only builds, emulators and driverless devices
+     * — the caller then never requests GPU offload.
+     */
+    val gpuAvailable: Boolean
+        get() = nativeLibraryAvailable && try { nativeGpuAvailable() } catch (_: Throwable) { false }
 
     /** Informational; from llama.cpp when built, "unavailable" otherwise. */
     external fun nativeVersion(): String
 
     private external fun nativeIsAvailable(): Boolean
+    private external fun nativeGpuAvailable(): Boolean
     private external fun nativeLoad(
         path: String,
         contextTokens: Int,
@@ -76,12 +85,14 @@ object LocalEngineLoader {
         }
         val err = arrayOfNulls<String>(1)
         val code = nativeLoad(path, contextTokens, threads, useGpu, err)
-        if (code != 0) {
-            return LoadResult.Failure(
-                err[0] ?: "Engine load failed (code $code)"
+        return when {
+            code == 0 -> LoadResult.Success
+            // New: GPU offload was requested but no Vulkan driver is present.
+            code == -6 -> LoadResult.Failure(
+                err[0] ?: "No Vulkan GPU driver is available on this device"
             )
+            else -> LoadResult.Failure(err[0] ?: "Engine load failed (code $code)")
         }
-        return LoadResult.Success
     }
 
     /** Fully unloads the active model (no-op when nothing is loaded). */
@@ -137,9 +148,10 @@ object LocalEngineLoader {
         contextTokens: Int,
         threads: Int,
         prompt: String,
-        maxTokens: Int
+        maxTokens: Int,
+        useGpu: Boolean = false
     ): Result<Double> {
-        val load = load(path, contextTokens, threads, useGpu = false)
+        val load = load(path, contextTokens, threads, useGpu)
         if (load is LoadResult.Failure) return Result.failure(IllegalStateException(load.reason))
         return try {
             val start = System.nanoTime()
