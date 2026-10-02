@@ -38,6 +38,7 @@ namespace {
 // same constraint; mirroring it natively means a leaked handle can never
 // leave two large models resident.
 std::mutex g_mutex;
+bool g_backendsInitialized = false;
 llama_model *g_model = nullptr;
 llama_context *g_ctx = nullptr;
 std::string g_loadedChatTemplate;
@@ -137,6 +138,25 @@ Java_com_neuron_ai_data_local_LocalEngineLoader_nativeVersion(JNIEnv *env, jobje
 #endif
 }
 
+// One-time discovery of runtime backends (ggml's GGML_BACKEND_DL model):
+// dlopen every libggml-{cpu,vulkan}-*.so found in [dir], scoring CPU variants
+// and keeping only the best match. No-op when already initialized.
+JNIEXPORT void JNICALL
+Java_com_neuron_ai_data_local_LocalEngineLoader_nativeInitBackends(
+        JNIEnv *env, jobject, jstring jDir) {
+#if NEURON_HAVE_LLAMA
+    const char *dir = env->GetStringUTFChars(jDir, nullptr);
+    if (dir != nullptr) {
+        std::lock_guard<std::mutex> lock(g_mutex);
+        if (!g_backendsInitialized) {
+            ggml_backend_load_all_from_path(dir);
+            g_backendsInitialized = true;
+        }
+        env->ReleaseStringUTFChars(jDir, dir);
+    }
+#endif
+}
+
 // Loads (mmap) a GGUF model, replacing any previously loaded one — the
 // single-active constraint lives HERE too, not only in Kotlin.
 // Returns 0 on success, negative on failure with errOut[0] set to a
@@ -146,6 +166,13 @@ Java_com_neuron_ai_data_local_LocalEngineLoader_nativeLoad(
         JNIEnv *env, jobject, jstring jPath, jint contextTokens,
         jint threads, jboolean useGpu, jobjectArray jErrOut) {
 #if NEURON_HAVE_LLAMA
+    if (!g_backendsInitialized) {
+        if (jErrOut != nullptr && env->GetArrayLength(jErrOut) > 0) {
+            env->SetObjectArrayElement(jErrOut, 0,
+                env->NewStringUTF("Backends were not initialized"));
+        }
+        return -7;
+    }
     const char *path = env->GetStringUTFChars(jPath, nullptr);
     std::string modelPath = path != nullptr ? path : "";
     env->ReleaseStringUTFChars(jPath, path);

@@ -30,11 +30,25 @@ object LocalEngineLoader {
     val gpuAvailable: Boolean
         get() = nativeLibraryAvailable && try { nativeGpuAvailable() } catch (_: Throwable) { false }
 
+    /**
+     * Directory ggml searches for RUNTIME backends (the app's native library
+     * dir, holding libggml-cpu-*.so variants and libggml-vulkan.so). Set once
+     * at app startup; actual dlopen happens lazily inside [load] so heavy
+     * work never runs on the main thread.
+     */
+    @Volatile
+    private var backendDir: String? = null
+
+    fun setBackendDir(dir: String?) {
+        backendDir = dir
+    }
+
     /** Informational; from llama.cpp when built, "unavailable" otherwise. */
     external fun nativeVersion(): String
 
     private external fun nativeIsAvailable(): Boolean
     private external fun nativeGpuAvailable(): Boolean
+    private external fun nativeInitBackends(dir: String)
     private external fun nativeLoad(
         path: String,
         contextTokens: Int,
@@ -83,6 +97,9 @@ object LocalEngineLoader {
                 "llama.cpp was not compiled into this APK (native fetch failed at build time)."
             )
         }
+        // Runtime backend discovery (per-ISA CPU variants + Vulkan), a no-op
+        // after the first call.
+        backendDir?.let { dir -> runCatching { nativeInitBackends(dir) } }
         val err = arrayOfNulls<String>(1)
         val code = nativeLoad(path, contextTokens, threads, useGpu, err)
         return when {

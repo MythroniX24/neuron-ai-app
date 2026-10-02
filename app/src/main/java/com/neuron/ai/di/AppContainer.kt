@@ -51,6 +51,16 @@ class AppContainer(context: Context) {
     /** App context exposed for ViewModels that need system services (Local AI import picker). */
     val appContext: Context = context.applicationContext
 
+    init {
+        // Milestone 5: ggml discovers runtime backends (per-ISA CPU variants,
+        // Vulkan GPU) by dlopen'ing the .so files shipped in the app's native
+        // library directory. The actual dlopen work happens lazily on the
+        // inference thread (inside LocalEngineLoader.load), not here.
+        com.neuron.ai.data.local.LocalEngineLoader.setBackendDir(
+            context.applicationInfo.nativeLibraryDir
+        )
+    }
+
     val logger: Logger = AndroidLogger()
 
     val dispatchers: DispatcherProvider = DefaultDispatcherProvider()
