@@ -106,6 +106,11 @@ if(EXISTS "${LLAMA_SRC}/CMakeLists.txt")
             if(DEFINED ENV{VULKAN_HEADERS_DIR} AND EXISTS "$ENV{VULKAN_HEADERS_DIR}/include/vulkan/vulkan.h")
                 list(APPEND CMAKE_PREFIX_PATH "$ENV{VULKAN_HEADERS_DIR}")
             endif()
+            # ggml's ggml-vulkan/CMakeLists.txt does find_package(SPIRV-Headers
+            # CONFIG REQUIRED) — point it at the CI-installed config package.
+            if(DEFINED ENV{SPIRV_HEADERS_DIR} AND EXISTS "$ENV{SPIRV_HEADERS_DIR}/share/cmake/SPIRV-Headers")
+                list(APPEND CMAKE_PREFIX_PATH "$ENV{SPIRV_HEADERS_DIR}")
+            endif()
         else()
             message(WARNING "glslc not found — Vulkan GPU offload disabled, CPU-only build")
         endif()
