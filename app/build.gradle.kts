@@ -32,9 +32,6 @@ android {
                 cppFlags += "-O3"
                 arguments += listOf(
                     "-DCMAKE_BUILD_TYPE=Release",
-                    // Vulkan GPU backend (milestone 5). CMake degrades to a
-                    // CPU-only build when glslc is absent.
-                    "-DGGML_VULKAN=ON",
                     // The NDK's libvulkan stub for API 26 lacks Vulkan 1.1
                     // symbols (vkGetPhysicalDeviceFeatures2...) that ggml's
                     // Vulkan backend calls — link against the API 28 stub
@@ -44,6 +41,9 @@ android {
                     // has no Vulkan backend — CPU inference is unaffected.
                     "-DANDROID_PLATFORM=android-28"
                 )
+                // GGML_VULKAN is set INSIDE CMakeLists (arm64-only, guarded by
+                // a glslc probe) — passing it here would enable the backend
+                // for x86_64 too, where the emulator build must stay CPU-only.
             }
         }
     }
