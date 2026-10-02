@@ -24,7 +24,13 @@ data class LocalModelRecord(
     val source: String = SOURCE_IMPORT,
     val importedAtEpochMs: Long = 0L,
     /** "Enable for chat" tick — ONLY ticked models appear in the switcher. */
-    val enabledForChat: Boolean = false
+    val enabledForChat: Boolean = false,
+    /**
+     * Milestone 6: the GGUF's own chat template declares tool calling. Read
+     * once at import/download time — capability-aware routing uses it instead
+     * of guessing from the model name. False for older manifests (default).
+     */
+    val supportsTools: Boolean = false
 ) {
     companion object {
         const val SOURCE_IMPORT = "import"

@@ -368,6 +368,10 @@ data/local/
 ├── ModelDownloadManager.kt   # progress, pause/resume (HTTP Range), Wi-Fi-only gate,
 │                             #   sha256 verification, restart survival
 ├── RecommendedModels.kt      # curated catalog with min-RAM guidance + device fit
+├── LocalModelRouter.kt       # capability-aware routing: what a GGUF may do, and
+│                             #   whether this turn can be served by it at all
+├── LocalThrottlePolicy.kt    # pure thermal/battery policy → threads, GPU, tokens
+├── DeviceHealthMonitor.kt    # thermal status/headroom + battery + power-save watcher
 └── LocalAiProvider.kt        # the AIProvider implementation (capability-honest)
 ```
 
@@ -376,9 +380,15 @@ Design rules:
 - **Same pipeline as cloud**: local models flow through the same agent loop,
   tool execution, ContextOrchestrator and TokenBudgetManager; the GGUF-declared
   context length drives the budget exactly like a cloud context window.
-- **Capability-honest**: local models declare `supportsTools=false` and
-  `supportsVision=false` so routing warns/rejects unsupported inputs up front;
-  plain-text tool markup is still recovered by the existing TextToolCallParser.
+- **Capability-honest (milestone 6)**: capabilities are read from the GGUF's
+  OWN metadata — the chat template decides tool support (`tokenizer.chat_template`
+  is scanned for a tools block), the architecture decides vision, the declared
+  context length is capped for phones. `LocalModelRouter` turns that into a
+  routing decision per turn: unsupported input (an image on a text-only GGUF)
+  is REFUSED with an actionable reason, everything else is degraded visibly.
+  The resolution — model, window, degradations, live throttle — is emitted as
+  the first live timeline row and persists with the answer. Plain-text tool
+  markup is still recovered by the existing TextToolCallParser.
 - **Single-active engine**: the previous model is fully unloaded before a new
   one loads — enforced in BOTH Kotlin and native code.
 - **mmap weights**: llama.cpp maps the model file; weight data is never
@@ -401,6 +411,14 @@ Design rules:
 - **Performance prefs**: GPU on/off + CPU threads (0 = Auto) persist in
   `filesDir/local-perf.json`; changing either reloads the active model so the
   next token is generated under the new setting.
+- **Thermal/battery discipline (milestone 7)**: `DeviceHealthMonitor` watches
+  thermal status (API 29+), thermal headroom (API 30+), battery and power-save
+  mode and publishes one snapshot; the PURE `LocalThrottlePolicy` turns it
+  into the load we will actually run (threads, GPU veto, token ceiling) plus a
+  one-line reason shown in Settings ("Device status") and in the chat
+  timeline. Missing platform support degrades to "no throttling", never to a
+  broken feature. The throttle applies at the NEXT load on purpose —
+  reloading mid-generation would abort an answer the user is reading.
 
 ## Key technical decisions
 

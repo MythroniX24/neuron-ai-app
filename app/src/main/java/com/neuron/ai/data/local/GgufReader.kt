@@ -25,7 +25,14 @@ object GgufReader {
         val quantization: String?,
         val contextLength: Long?,
         val blockCount: Long?,
-        val metadataKVCount: Int
+        val metadataKVCount: Int,
+        /**
+         * Milestone 6: the GGUF ships a chat template that DECLARES tool
+         * calling (a Jinja template with a tools / tool_calls block). This is
+         * the only honest signal a local file gives about tool support, so
+         * capability-aware routing keys off it instead of guessing.
+         */
+        val declaresToolCalling: Boolean = false
     )
 
     /** Hard ceiling on one metadata VALUE (strings/arrays) — malformed files fail fast. */
@@ -84,6 +91,7 @@ object GgufReader {
             var quantization: String? = null
             var contextLength: Long? = null
             var blockCount: Long? = null
+            var declaresToolCalling = false
 
             // Each KV pair: key(string) + type(uint32) + value. The TYPE is
             // ALWAYS consumed first — dispatching on it keeps the stream in
@@ -104,6 +112,11 @@ object GgufReader {
                         contextLength = readU32Le(stream)
                     key.endsWith(".block_count") && type == TYPE_UINT32 ->
                         blockCount = readU32Le(stream)
+                    // The chat template is metadata, not tensors: reading it is
+                    // cheap and tells us whether the model was TRAINED for
+                    // tool calling (its template declares the block).
+                    key == "tokenizer.chat_template" && type == TYPE_STRING ->
+                        declaresToolCalling = declaresTools(readString(stream))
                     else -> skipTypedValue(stream, type)
                 }
             }
@@ -115,9 +128,22 @@ object GgufReader {
                 quantization = quantization,
                 contextLength = contextLength,
                 blockCount = blockCount,
-                metadataKVCount = kvCount.toInt()
+                metadataKVCount = kvCount.toInt(),
+                declaresToolCalling = declaresToolCalling
             )
         }
+    }
+
+    /**
+     * True when the model's own chat template declares tool calling. Matching
+     * is deliberately conservative: a template that never mentions tools is
+     * treated as "no tool support" (under-promising, never over-promising).
+     */
+    private fun declaresTools(chatTemplate: String): Boolean {
+        val lower = chatTemplate.lowercase()
+        return lower.contains("tool_calls") ||
+            lower.contains("tools") ||
+            lower.contains("function_call")
     }
 
     // ---- Value readers (all little-endian) ---------------------------------

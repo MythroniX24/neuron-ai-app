@@ -31,7 +31,7 @@ data class Attachment(
 @Serializable
 data class AgentStepRecord(
     val stepId: String,
-    /** thinking | tool_call | command | web_search | file_read | file_edit | build_test */
+    /** thinking | routing | tool_call | command | web_search | file_read | file_edit | build_test */
     val type: String,
     val label: String,
     val detail: String? = null,
@@ -43,6 +43,13 @@ data class AgentStepRecord(
 ) {
     companion object {
         const val TYPE_THINKING = "thinking"
+        /**
+         * Milestone 6: the routing RESOLUTION — which model actually runs this
+         * turn, with which capabilities, and what got degraded (e.g. tools off,
+         * context capped, thermal throttle). Shown as the first timeline row so
+         * the user sees WHY an on-device answer looks the way it does.
+         */
+        const val TYPE_ROUTING = "routing"
         const val TYPE_TOOL_CALL = "tool_call"
         /** Mid-loop narration — ongoing progress, distinct from the final answer. */
         const val TYPE_INTERMEDIATE = "intermediate"

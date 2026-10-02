@@ -304,6 +304,7 @@ fun LocalAiScreen(
                             Text(
                                 when {
                                     !state.gpuAvailable -> "Not available on this device/build — CPU is used"
+                                    state.gpuThrottled -> "Paused while the device is hot or the battery is low"
                                     state.useGpu -> "Layers run on the GPU; falls back to CPU if it fails"
                                     else -> "Disabled — everything runs on the CPU"
                                 },
@@ -347,9 +348,65 @@ fun LocalAiScreen(
                 }
             }
 
+            // ---- Device health / thermal throttle (milestone 7) ------
+            // Live thermal + battery state and the throttle the policy WILL
+            // apply on the next on-device generation.
+            item {
+                Column {
+                    Text(
+                        "Device status",
+                        style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Spacer(Modifier.height(Spacing.sm))
+                    Column(
+                        Modifier
+                            .fillMaxWidth()
+                            .background(
+                                MaterialTheme.colorScheme.surfaceVariant,
+                                RoundedCornerShape(14.dp)
+                            )
+                            .padding(Spacing.md)
+                    ) {
+                        Text(
+                            "Thermal: ${state.thermalLabel} · Battery ${state.batteryPercent}%" +
+                                (if (state.charging) " (charging)" else ""),
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                        if (state.powerSaveMode) {
+                            Text(
+                                "Battery saver is on",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Spacer(Modifier.height(Spacing.xs))
+                        Text(
+                            state.throttleNotice
+                                ?: "No throttling — full speed on the next answer",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (state.throttleNotice != null) {
+                                MaterialTheme.colorScheme.error
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            }
+                        )
+                        if (state.effectiveThreads > 0) {
+                            Text(
+                                "Next answer: ${state.effectiveThreads} thread(s)" +
+                                    if (state.gpuThrottled) ", GPU off" else "",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            }
+
             item { Spacer(Modifier.height(Spacing.xl)) }
         }
     }
+
 
     // Quantization picker when a search hit is expanded for download.
     variantTarget?.let { target ->

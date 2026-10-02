@@ -19,6 +19,10 @@ import com.neuron.ai.core.provider.ChatMessage
 import com.neuron.ai.core.provider.Model
 import com.neuron.ai.core.provider.ProviderConfig
 import com.neuron.ai.data.provider.ProviderRepository
+import com.neuron.ai.core.conversation.AgentStepRecord
+import com.neuron.ai.data.local.LocalModelRouter
+import com.neuron.ai.data.local.LocalRouteDecision
+import com.neuron.ai.data.local.LocalRouteRequest
 import com.neuron.ai.core.task.Task
 import com.neuron.ai.core.task.TaskManager
 import kotlinx.coroutines.Job
@@ -731,17 +735,47 @@ class ChatViewModel(
                 )
                 return
             }
+            // Milestone 6: CAPABILITY-AWARE ROUTING. The selected GGUF's own
+            // metadata (chat template, architecture, declared context) decides
+            // what this turn may use; anything it cannot serve is refused or
+            // degraded VISIBLY instead of silently.
+            val record = localModels?.models?.value?.firstOrNull { it.id == selection.second }
+            val route = record?.let { model ->
+                LocalModelRouter.decide(
+                    model,
+                    LocalRouteRequest(
+                        hasImageAttachments = lastUserAttachments.any { it.isImage },
+                        wantsTools = turnWantsTools()
+                    )
+                )
+            }
+            if (route is LocalRouteDecision.Refuse) {
+                taskId?.let { tid ->
+                    tasks.updateStatus(tid, Task.Status.FAILED)
+                    tasks.reportError(tid, route.reason)
+                }
+                _generation.value = GenerationState.Failed(NeuronError.Provider(route.reason))
+                return
+            }
+            val routed = route as? LocalRouteDecision.Route
+            val capabilities = routed?.capabilities
+            val routeStep = if (USE_LIVE_TIMELINE && routed != null) {
+                buildRouteStep(routed.capabilities, routed.degraded)
+            } else {
+                null
+            }
             runAgentTurnWith(
                 provider = localProvider,
                 modelId = selection.second,
                 configId = LOCAL_PROVIDER_ID,
-                // Capability-honest: local models get text-only turns; tool
-                // markup the model prints is still recovered by the parser.
-                visionEnabled = false,
-                toolsEnabled = false,
+                // Capability-honest: whatever the GGUF declares, nothing more.
+                visionEnabled = capabilities?.supportsVision ?: false,
+                toolsEnabled = capabilities?.supportsTools ?: false,
                 prompt = prompt,
                 taskId = taskId,
-                attachments = attachments
+                attachments = attachments,
+                routeStep = routeStep,
+                contextWindowTokens = capabilities?.contextWindowTokens
             )
             return
         }
@@ -786,16 +820,26 @@ class ChatViewModel(
         toolsEnabled: Boolean,
         prompt: String,
         taskId: String?,
-        attachments: List<Attachment>
+        attachments: List<Attachment>,
+        routeStep: AgentStepRecord? = null,
+        /** True context window when the provider DECLARES one (on-device GGUF). */
+        contextWindowTokens: Int? = null
     ) {
+        // Capability-honest Model for this turn: declared flags + a declared
+        // window when the provider has one (cloud estimates from the id,
+        // on-device from the GGUF metadata — never a guess).
+        val capabilityModel = Model(
+            id = modelId,
+            displayName = modelId,
+            supportsVision = visionEnabled,
+            supportsTools = toolsEnabled,
+            contextWindowTokens = contextWindowTokens
+                ?: com.neuron.ai.data.provider.ModelCapabilities.estimateContextWindow(modelId)
+        )
         // Milestone 3 multimodal gate: reject inputs the model cannot accept
         // BEFORE hitting the provider — never send unsupported input blindly.
         val capabilityError = com.neuron.ai.data.provider.ModelCapabilities.validateInput(
-            model = com.neuron.ai.data.provider.ModelCapabilities.estimate(
-                id = modelId,
-                visionEnabled = visionEnabled,
-                toolsEnabled = toolsEnabled
-            ),
+            model = capabilityModel,
             attachments = lastUserAttachments
         )
         if (capabilityError != null) {
@@ -813,6 +857,13 @@ class ChatViewModel(
         // The user's message is already in the conversation history.
         _activity.value = emptyList()
         _timeline.value = emptyList()
+        // The routing resolution is the FIRST timeline row: which model runs,
+        // with what capabilities, and what was degraded (incl. live thermal
+        // throttle). It persists with the answer, so the transcript explains
+        // itself later.
+        routeStep?.let { step ->
+            if (USE_LIVE_TIMELINE) _timeline.value = listOf(step)
+        }
         _generation.value = GenerationState.Streaming("")
 
         val started = System.currentTimeMillis()
@@ -821,11 +872,7 @@ class ChatViewModel(
 
         val agent = agentFactory(
             provider,
-            com.neuron.ai.data.provider.ModelCapabilities.estimate(
-                id = modelId,
-                visionEnabled = visionEnabled,
-                toolsEnabled = toolsEnabled
-            ),
+            capabilityModel,
             if (toolsEnabled) toolIdsProvider() else emptySet()
         )
 
@@ -1078,6 +1125,42 @@ class ChatViewModel(
             }
         }
         super.onCleared()
+    }
+
+    /**
+     * Milestone 6: does THIS turn actually want tools? Only when the chat has
+     * a capability bound to it (Terminal / Browser / Workspace) — a plain chat
+     * never needs them, so we do not degrade the model for nothing.
+     */
+    private fun turnWantsTools(): Boolean {
+        val conv = _conversation.value ?: return false
+        return conv.terminalEnabled || conv.browserEnabled || conv.workspaceId != null
+    }
+
+    /**
+     * The routing row: which model runs this turn, with which capabilities,
+     * and everything that got degraded on the way (missing tools, capped
+     * context, or the live thermal/battery throttle from milestone 7).
+     */
+    private fun buildRouteStep(
+        capabilities: com.neuron.ai.data.local.LocalModelCapabilities,
+        degraded: List<String>
+    ): AgentStepRecord {
+        val now = System.currentTimeMillis()
+        return AgentStepRecord(
+            stepId = "route-local",
+            type = AgentStepRecord.TYPE_ROUTING,
+            label = LocalModelRouter.timelineLabel(capabilities),
+            detail = LocalModelRouter.timelineDetail(
+                capabilities = capabilities,
+                degraded = degraded,
+                throttleNote = localModels?.throttleNotice()
+            ),
+            toolId = null,
+            status = AgentStepRecord.STATUS_DONE,
+            startedAtEpochMs = now,
+            finishedAtEpochMs = now
+        )
     }
 
     /**

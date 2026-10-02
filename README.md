@@ -36,6 +36,12 @@ terminal agents, tool calling, workspace management, and background tasks.
   Single-active model with mmap loading, per-model benchmark (tokens/sec),
   curated recommended list with RAM-fit guidance, and a chat-model switcher
   integration with a live loading state.
+  Capability-aware routing: each GGUF's own chat template/architecture/context
+  decide what a turn may use (tools, vision, capped window), and the live agent
+  timeline shows that resolution plus any degradation. Thermal/battery aware:
+  the app reads thermal status, headroom, battery and power-save mode and
+  throttles the next on-device answer (fewer threads, GPU off, shorter answers)
+  instead of melting down mid-sentence.
 - ✅ Unit tests for the provider wire protocol, tools, permissions, tasks, storage,
   the agent tool loop, the GGUF parser and the Hub/download stack
 
@@ -83,7 +89,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the full design.
 | **0 — Foundation** ✅ | Architecture, design system, abstractions, polished shell |
 | **1 — Core Neuron-AI** ✅ | Real AI providers, streaming chat, markdown + LaTeX, Room persistence, provider settings, agent tools, permissions |
 | **2 — Advanced Agent Platform** | Coding/browser/terminal agents, workspaces, project management, background execution |
-| **Local AI** 🔶 | ✅ Import/download/run GGUF models, HF search, download manager, benchmark, GPU (Vulkan) offload + per-ISA CPU variants + perf prefs · next: thermal/battery monitoring, capability-aware routing |
+| **Local AI** 🔶 | ✅ Import/download/run GGUF models, HF search, download manager, benchmark, GPU (Vulkan) offload + per-ISA CPU variants + perf prefs, capability-aware routing in the agent timeline, thermal/battery throttling · next: vision projector (mmproj) support, per-model routing rules |
 
 ## License
 

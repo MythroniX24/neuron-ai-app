@@ -25,7 +25,9 @@ import kotlinx.serialization.json.Json
 class LocalModelRepository(
     private val context: Context,
     private val dispatchers: DispatcherProvider,
-    private val logger: Logger?
+    private val logger: Logger?,
+    /** Milestone 7: thermal/battery watcher; null = no thermal protection. */
+    private val healthMonitor: DeviceHealthMonitor? = null
 ) {
 
     /** Workspace-isolated models directory — nothing outside it is touched. */
@@ -135,7 +137,8 @@ class LocalModelRepository(
                     contextLength = info.contextLength,
                     blockCount = info.blockCount,
                     source = LocalModelRecord.SOURCE_IMPORT,
-                    importedAtEpochMs = System.currentTimeMillis()
+                    importedAtEpochMs = System.currentTimeMillis(),
+                    supportsTools = info.declaresToolCalling
                 )
                 _models.value = _models.value + record
                 persist()
@@ -174,7 +177,8 @@ class LocalModelRepository(
                 contextLength = info.contextLength,
                 blockCount = info.blockCount,
                 source = source,
-                importedAtEpochMs = System.currentTimeMillis()
+                importedAtEpochMs = System.currentTimeMillis(),
+                supportsTools = info.declaresToolCalling
             )
             _models.value = _models.value + record
             persist()
@@ -246,6 +250,38 @@ class LocalModelRepository(
     private fun resolvedThreads(): Int =
         if (userThreads in 1..16) userThreads else defaultThreads()
 
+    // ---- Thermal / battery throttle (milestone 7) --------------------------
+
+    /** Live device-health snapshot (nominal-ish defaults when unsupported). */
+    fun thermalState(): DeviceThermalState =
+        healthMonitor?.state?.value ?: DeviceThermalState()
+
+    /**
+     * The load the NEXT generation will actually run: user prefs filtered
+     * through [LocalThrottlePolicy] so a hot or low-battery device silently
+     * gets fewer threads / no GPU instead of melting down mid-answer.
+     */
+    fun throttleDecision(): ThrottleDecision =
+        LocalThrottlePolicy.decide(
+            state = thermalState(),
+            wantsGpu = useGpu && LocalEngineLoader.gpuAvailable,
+            requestedThreads = resolvedThreads()
+        )
+
+    /** Token ceiling for the next turn (thermal-aware). */
+    fun maxOutputTokens(): Int = throttleDecision().maxOutputTokens
+
+    /** One-line throttle reason for the UI; null when running unthrottled. */
+    fun throttleNotice(): String? = throttleDecision().reason
+
+    /**
+     * Deliberately NO auto-reload on a throttle change: context/thread/GPU
+     * params are fixed at load time, and reloading mid-generation would abort
+     * an answer the user is reading. The throttle therefore applies at the
+     * NEXT load — which the Settings UI states out loud ("Next answer: 2
+     * threads"), and the chat timeline repeats per turn.
+     */
+
     // ---- Load orchestration ------------------------------------------------
 
     /**
@@ -285,12 +321,15 @@ class LocalModelRepository(
      */
     private fun loadEngine(record: LocalModelRecord): LocalEngineLoader.LoadResult {
         val path = File(modelsDir, record.fileName).absolutePath
-        val contextTokens = (record.contextLength?.toInt()?.coerceAtMost(4096)) ?: 2048
-        val wantGpu = useGpu && LocalEngineLoader.gpuAvailable
+        // Milestone 6: the GGUF's declared context, capped to what a phone can
+        // hold. Milestone 7: threads + GPU filtered through the throttle policy.
+        val contextTokens = LocalModelRouter.effectiveContextTokens(record.contextLength)
+        val throttle = throttleDecision()
+        val wantGpu = throttle.allowGpu
         var result = LocalEngineLoader.load(
             path = path,
             contextTokens = contextTokens,
-            threads = resolvedThreads(),
+            threads = throttle.threads,
             useGpu = wantGpu
         )
         if (result is LocalEngineLoader.LoadResult.Failure && wantGpu) {
@@ -299,7 +338,7 @@ class LocalModelRepository(
             result = LocalEngineLoader.load(
                 path = path,
                 contextTokens = contextTokens,
-                threads = resolvedThreads(),
+                threads = throttle.threads,
                 useGpu = false
             )
         }
@@ -320,14 +359,15 @@ class LocalModelRepository(
                 ?: return@withLock Result.failure(IllegalArgumentException("Unknown local model"))
             val previous = _loadState.value
             _loadState.value = LocalLoadState.Loading(modelId, record.displayName)
+            val throttle = throttleDecision()
             val result = LocalEngineLoader.benchmarkTokensPerSec(
                 path = File(modelsDir, record.fileName).absolutePath,
-                contextTokens = (record.contextLength?.toInt()?.coerceAtMost(4096)) ?: 2048,
-                threads = resolvedThreads(),
+                contextTokens = LocalModelRouter.effectiveContextTokens(record.contextLength),
+                threads = throttle.threads,
                 prompt = "Write a short story about a robot who learns to paint.",
                 maxTokens = 128,
                 // Benchmark measures the config the user will actually run.
-                useGpu = useGpu && LocalEngineLoader.gpuAvailable
+                useGpu = throttle.allowGpu
             )
             // Restore whatever was active before the benchmark (its OWN file).
             _loadState.value = previous
