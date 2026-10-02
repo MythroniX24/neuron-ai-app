@@ -36,22 +36,22 @@ jobs:
       # Vulkan GPU backend (milestone 5): ggml compiles its SPIR-V shaders
       # with glslc at build time. Ubuntu 24.04's shaderc-glslc 2023.8 lacks
       # the GL_EXT_integer_dot_product extension probe target, so we vendor
-      # KhronosGroup/Vulkan-Headers source and point CMake at it; the NDK
-      # contributes the Android Vulkan headers + libvulkan stub at link time.
-      # ggml's Vulkan CMake also requires the SPIRV-Headers CONFIG package —
-      # installed here from source into a prefix CMake can find.
+      # fresh Vulkan-Headers (also what the host-side vulkan-shaders-gen
+      # tool includes). SPIRV-Headers is installed as a CONFIG package —
+      # required by ggml's ggml-vulkan/CMakeLists.txt. Both go into the
+      # SYSTEM prefix (/usr/local) instead of env vars: the Gradle daemon
+      # starts BEFORE this info would propagate and never sees step env
+      # additions, but CMake always searches the system prefix.
       - name: Install Vulkan shader toolchain
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends glslc
           git clone --depth 1 https://github.com/KhronosGroup/Vulkan-Headers.git "$RUNNER_TEMP/Vulkan-Headers"
+          cmake -S "$RUNNER_TEMP/Vulkan-Headers" -B "$RUNNER_TEMP/vkhdr-build" > /dev/null
+          sudo cmake --install "$RUNNER_TEMP/vkhdr-build" > /dev/null
           git clone --depth 1 https://github.com/KhronosGroup/SPIRV-Headers.git "$RUNNER_TEMP/SPIRV-Headers"
           cmake -S "$RUNNER_TEMP/SPIRV-Headers" -B "$RUNNER_TEMP/spirv-build" > /dev/null
-          cmake --install "$RUNNER_TEMP/spirv-build" --prefix "$RUNNER_TEMP/spirv-install" > /dev/null
-          {
-            echo "VULKAN_HEADERS_DIR=$RUNNER_TEMP/Vulkan-Headers"
-            echo "SPIRV_HEADERS_DIR=$RUNNER_TEMP/spirv-install"
-          } >> "$GITHUB_ENV"
+          sudo cmake --install "$RUNNER_TEMP/spirv-build" > /dev/null
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4

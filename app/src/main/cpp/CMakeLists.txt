@@ -99,16 +99,14 @@ if(EXISTS "${LLAMA_SRC}/CMakeLists.txt")
         if(NEURON_GLSLC)
             unset(ENV{VULKAN_SDK}) # no host SDK — NDK + system glslc only
             set(GGML_VULKAN ON CACHE BOOL "" FORCE)
-            # glslc 2023.8 (Ubuntu noble) lacks the GL_EXT_integer_dot_product
-            # probe target; building from KhronosGroup/Vulkan-Headers source
-            # (which CI vendors at $VULKAN_HEADERS_DIR) makes the probe pass
-            # and the dot-product shaders compile.
+            # CI installs KhronosGroup/Vulkan-Headers + SPIRV-Headers into the
+            # system prefix (see android-ci.yml) — CMake searches the system
+            # prefix by default, so no hints are needed there. Env-var paths
+            # are kept as an alternative for local builds.
             if(DEFINED ENV{VULKAN_HEADERS_DIR} AND EXISTS "$ENV{VULKAN_HEADERS_DIR}/include/vulkan/vulkan.h")
                 list(APPEND CMAKE_PREFIX_PATH "$ENV{VULKAN_HEADERS_DIR}")
             endif()
-            # ggml's ggml-vulkan/CMakeLists.txt does find_package(SPIRV-Headers
-            # CONFIG REQUIRED) — point it at the CI-installed config package.
-            if(DEFINED ENV{SPIRV_HEADERS_DIR} AND EXISTS "$ENV{SPIRV_HEADERS_DIR}/share/cmake/SPIRV-Headers")
+            if(DEFINED ENV{SPIRV_HEADERS_DIR})
                 list(APPEND CMAKE_PREFIX_PATH "$ENV{SPIRV_HEADERS_DIR}")
             endif()
         else()
