@@ -390,6 +390,17 @@ Design rules:
 - Native build: `app/src/main/cpp` pins a llama.cpp commit and builds via CMake;
   if the fetch fails at build time the bridge compiles to a stub and the app
   reports local inference as unavailable (cloud features unaffected).
+- **Performance (milestone 5)**: Release -O3 native builds with
+  `GGML_CPU_ALL_VARIANTS` (one optimized kernel set per ISA level — armv8.0,
+  dotprod, i8mm, SVE — plus Arm KleidiAI; the best match for the device's
+  HWCAP is dlopen'd at load time) and `GGML_BACKEND_DL` runtime backend
+  discovery from the app's native library dir. Vulkan GPU offload is a
+  runtime-loaded backend with flash attention + Q8_0 KV cache; devices
+  without a driver simply never register it. Every GPU load retries once on
+  CPU, so a driver/OOM failure degrades to slower — never to broken.
+- **Performance prefs**: GPU on/off + CPU threads (0 = Auto) persist in
+  `filesDir/local-perf.json`; changing either reloads the active model so the
+  next token is generated under the new setting.
 
 ## Key technical decisions
 
