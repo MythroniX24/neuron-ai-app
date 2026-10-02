@@ -34,7 +34,15 @@ android {
                     "-DCMAKE_BUILD_TYPE=Release",
                     // Vulkan GPU backend (milestone 5). CMake degrades to a
                     // CPU-only build when glslc is absent.
-                    "-DGGML_VULKAN=ON"
+                    "-DGGML_VULKAN=ON",
+                    // The NDK's libvulkan stub for API 26 lacks Vulkan 1.1
+                    // symbols (vkGetPhysicalDeviceFeatures2...) that ggml's
+                    // Vulkan backend calls — link against the API 28 stub
+                    // instead. Only libggml-vulkan.so is affected; the main
+                    // chain never links it (runtime dlopen), and on Android
+                    // 8.x devices that fail to load it the registry simply
+                    // has no Vulkan backend — CPU inference is unaffected.
+                    "-DANDROID_PLATFORM=android-28"
                 )
             }
         }
