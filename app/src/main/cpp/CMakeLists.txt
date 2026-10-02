@@ -148,7 +148,7 @@ if(NEURON_HAVE_LLAMA)
     # needed — the bridge speaks the raw llama.h API. Backends (CPU variants,
     # Vulkan) are NOT linked — they are dlopen'd by ggml's registry from the
     # app's native lib dir at runtime (GGML_BACKEND_DL above).
-    target_link_libraries(neuron_llama PRIVATE llama)
+    target_link_libraries(neuron_llama PRIVATE llama log)
     target_compile_definitions(neuron_llama PRIVATE
         NEURON_HAVE_LLAMA=1
         NEURON_HAVE_VULKAN=$<BOOL:${NEURON_HAVE_VULKAN}>
