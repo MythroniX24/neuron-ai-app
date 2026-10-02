@@ -88,9 +88,20 @@ class AppContainer(context: Context) {
 
     // ---- Local AI (on-device inference) -------------------------------------
 
+    /**
+     * Milestone 7: thermal/battery watcher. Started with the container so the
+     * throttle policy always sees live device health; the pure policy (not
+     * this class) decides what to do about it.
+     */
+    val deviceHealthMonitor: com.neuron.ai.data.local.DeviceHealthMonitor by lazy {
+        com.neuron.ai.data.local.DeviceHealthMonitor(context, logger).also { it.start() }
+    }
+
     /** GGUF model registry: imports, ticks, single-active load state. */
     val localModelRepository: com.neuron.ai.data.local.LocalModelRepository by lazy {
-        com.neuron.ai.data.local.LocalModelRepository(context, dispatchers, logger)
+        com.neuron.ai.data.local.LocalModelRepository(
+            context, dispatchers, logger, deviceHealthMonitor
+        )
     }
 
     /** The local model as JUST ANOTHER AiProvider for the whole stack. */

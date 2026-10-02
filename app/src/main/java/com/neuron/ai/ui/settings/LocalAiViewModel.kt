@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.neuron.ai.di.AppContainer
+import com.neuron.ai.data.local.DeviceHealthMonitor
 import com.neuron.ai.data.local.HfHubClient
 import com.neuron.ai.data.local.LocalEngineLoader
 import com.neuron.ai.data.local.LocalLoadState
@@ -58,7 +59,19 @@ data class LocalAiUiState(
     /** User's GPU offload preference (on-device pref, default ON). */
     val useGpu: Boolean = true,
     /** CPU threads for generation; 0 = Auto (device-sized). */
-    val cpuThreads: Int = 0
+    val cpuThreads: Int = 0,
+    // ---- Device health / thermal throttle (milestone 7) ----
+    /** Live thermal severity label ("Cool", "Hot", "Unknown"...). */
+    val thermalLabel: String = "Unknown",
+    val batteryPercent: Int = 100,
+    val charging: Boolean = true,
+    val powerSaveMode: Boolean = false,
+    /** Non-null while the device is throttling on-device generation. */
+    val throttleNotice: String? = null,
+    /** Threads the next generation will actually use (after throttling). */
+    val effectiveThreads: Int = 0,
+    /** True when the thermal policy vetoed GPU offload for the next load. */
+    val gpuThrottled: Boolean = false
 )
 
 /**
@@ -70,7 +83,9 @@ class LocalAiViewModel(
     private val repository: LocalModelRepository,
     private val appContext: Context?,
     private val hubClient: HfHubClient = HfHubClient(),
-    private val downloadManager: ModelDownloadManager? = null
+    private val downloadManager: ModelDownloadManager? = null,
+    /** Milestone 7: thermal/battery watcher driving the throttle policy. */
+    private val healthMonitor: DeviceHealthMonitor? = null
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(LocalAiUiState())
@@ -78,11 +93,20 @@ class LocalAiViewModel(
 
     init {
         val (total, free) = repository.deviceMemory()
+        val health = repository.thermalState()
+        val throttle = repository.throttleDecision()
         _state.value = _state.value.copy(
             wifiOnly = downloadManager?.wifiOnly ?: true,
             gpuAvailable = LocalEngineLoader.gpuAvailable,
             useGpu = repository.useGpu,
-            cpuThreads = repository.userThreads
+            cpuThreads = repository.userThreads,
+            thermalLabel = health.severityLabel(),
+            batteryPercent = health.batteryPercent,
+            charging = health.charging,
+            powerSaveMode = health.powerSaveMode,
+            throttleNotice = throttle.reason,
+            effectiveThreads = throttle.threads,
+            gpuThrottled = throttle.throttled && !throttle.allowGpu && repository.useGpu
         )
         downloadManager?.let { dm ->
             viewModelScope.launch {
@@ -104,6 +128,26 @@ class LocalAiViewModel(
         viewModelScope.launch {
             repository.loadState.collect { load ->
                 _state.value = _state.value.copy(loadState = load)
+            }
+        }
+        // Thermal / battery state → throttle status. Only the DISPLAY changes
+        // live; the throttle itself is applied at the next model load, so an
+        // answer in flight is never interrupted by a status change.
+        healthMonitor?.let { monitor ->
+            viewModelScope.launch {
+                monitor.state.collect { health ->
+                    val throttle = repository.throttleDecision()
+                    _state.value = _state.value.copy(
+                        thermalLabel = health.severityLabel(),
+                        batteryPercent = health.batteryPercent,
+                        charging = health.charging,
+                        powerSaveMode = health.powerSaveMode,
+                        throttleNotice = throttle.reason,
+                        effectiveThreads = throttle.threads,
+                        gpuThrottled = throttle.throttled && !throttle.allowGpu &&
+                            repository.useGpu
+                    )
+                }
             }
         }
     }
@@ -289,7 +333,8 @@ class LocalAiViewModel(
                 repository = container.localModelRepository,
                 appContext = container.appContext,
                 hubClient = container.hfHubClient,
-                downloadManager = container.downloadManager
+                downloadManager = container.downloadManager,
+                healthMonitor = container.deviceHealthMonitor
             ) as T
     }
 }

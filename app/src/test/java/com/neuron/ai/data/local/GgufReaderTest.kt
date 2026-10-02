@@ -119,9 +119,45 @@ class GgufReaderTest {
     }
 
     @Test
+    fun `tool calling is detected from the chat template`() {
+        // Milestone 6: the template is the only honest tool-support signal a
+        // GGUF gives, so it must be read without desyncing the stream.
+        val toolKvs = kvString("general.architecture", "llama") +
+            kvString("tokenizer.chat_template", "{{ messages }} {% if tools %}tools{% endif %}")
+        val file = tmp.newFile("tools.gguf")
+        file.writeBytes(gguf(MAGIC, u32(3), u64(0), u64(2), toolKvs))
+
+        val info = GgufReader.parse(file)
+
+        assertEquals("llama", info.architecture)
+        assertTrue(info.declaresToolCalling)
+    }
+
+    @Test
+    fun `a chatml template without tools does not claim tool support`() {
+        val kvs = kvString("general.architecture", "qwen2") +
+            kvString("tokenizer.chat_template", "<|im_start|>system\nYou are helpful<|im_end|>")
+        val file = tmp.newFile("chatml.gguf")
+        file.writeBytes(gguf(MAGIC, u32(3), u64(0), u64(2), kvs))
+
+        assertFalse(GgufReader.parse(file).declaresToolCalling)
+    }
+
+    @Test
+    fun `files without a chat template stay text and tool free`() {
+        assertFalse(GgufReader.parse(writeValid()).declaresToolCalling)
+    }
+
+    private fun writeValid(): java.io.File {
+        val file = tmp.newFile("plain.gguf")
+        file.writeBytes(validGguf())
+        return file
+    }
+
+    @Test
     fun `unknown kv types are skipped without desync`() {
         // KV 1: architecture; KV 2: a 64-bit value the reader does not care
-        // about (skipValue must consume exactly 8 bytes); KV 3: file_type.
+        // about (skipTypedValue must consume exactly 8 bytes); KV 3: file_type.
         val kvs = kvString("general.architecture", "qwen2") +
             str("some.unknown") + u32(9) + u64(0x1122334455667788L) +
             kvUInt32("general.file_type", 18)

@@ -17,9 +17,11 @@ import kotlinx.coroutines.Dispatchers
  * The on-device model as JUST ANOTHER AiProvider — it plugs into the model
  * selector, the agent loop and TokenBudgetManager with zero special-casing.
  *
- * Capability-honest by design: local models declare supportsTools=false and
- * supportsVision=false so capability-aware routing warns/routes instead of
- * silently degrading. Generation is greedy-decoded streaming text; tool
+ * Capability-honest by design (milestone 6): capabilities are read from the
+ * GGUF's own metadata — its chat template decides tool support, its
+ * architecture decides vision, its declared context length is capped for
+ * phones — so capability-aware routing surfaces every degradation instead of
+ * silently guessing. Generation is greedy-decoded streaming text; tool
  * markup the model prints as plain text is recovered upstream by the agent
  * loop's existing TextToolCallParser transport-repair path — no parallel
  * tool plumbing here.
@@ -33,14 +35,15 @@ class LocalAiProvider(
 
     override suspend fun listModels(): List<Model> =
         repository.models.value.filter { it.enabledForChat }.map { record ->
+            // Milestone 6: capabilities come from the GGUF itself (chat
+            // template + architecture + declared context), not from a guess.
+            val capabilities = LocalModelRouter.capabilities(record)
             Model(
-                id = record.id,
-                displayName = record.displayName,
-                // Honest defaults: most local models will NOT do native
-                // tool-calling or vision reliably.
-                supportsTools = false,
-                supportsVision = false,
-                contextWindowTokens = record.contextLength?.toInt()?.coerceAtMost(4096)
+                id = capabilities.modelId,
+                displayName = capabilities.displayName,
+                supportsTools = capabilities.supportsTools,
+                supportsVision = capabilities.supportsVision,
+                contextWindowTokens = capabilities.contextWindowTokens
             )
         }
 
@@ -86,7 +89,11 @@ class LocalAiProvider(
         // Render the conversation through the model's own chat template so
         // instruct-tuned models see the shape they were trained on.
         val prompt = renderPrompt(request.messages)
-        val maxTokens = (request.maxOutputTokens ?: 1024).coerceAtMost(2048)
+        // Milestone 7: a hot/low-battery device generates fewer tokens per
+        // turn, so an answer never runs the phone into a thermal wall.
+        val maxTokens = (request.maxOutputTokens ?: 1024)
+            .coerceAtMost(2048)
+            .coerceAtMost(repository.maxOutputTokens())
 
         // The JNI generate call BLOCKS its thread and delivers tokens through
         // a callback — run it in a child coroutine and bridge the tokens into
@@ -131,7 +138,9 @@ class LocalAiProvider(
     /** Synchronous generation helper used by [complete]. */
     private fun streamInternal(request: CompletionRequest, onPiece: (String) -> Unit) {
         val prompt = renderPrompt(request.messages)
-        val maxTokens = (request.maxOutputTokens ?: 1024).coerceAtMost(2048)
+        val maxTokens = (request.maxOutputTokens ?: 1024)
+            .coerceAtMost(2048)
+            .coerceAtMost(repository.maxOutputTokens())
         when (val result = LocalEngineLoader.generateStreaming(prompt, maxTokens, onPiece)) {
             is LocalEngineLoader.GenerationResult.Error ->
                 throw IllegalStateException(result.message)
