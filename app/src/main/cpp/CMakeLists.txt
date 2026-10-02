@@ -99,15 +99,17 @@ if(EXISTS "${LLAMA_SRC}/CMakeLists.txt")
         if(NEURON_GLSLC)
             unset(ENV{VULKAN_SDK}) # no host SDK — NDK + system glslc only
             set(GGML_VULKAN ON CACHE BOOL "" FORCE)
-            # CI installs KhronosGroup/Vulkan-Headers + SPIRV-Headers into the
-            # system prefix (see android-ci.yml) — CMake searches the system
-            # prefix by default, so no hints are needed there. Env-var paths
-            # are kept as an alternative for local builds.
+            # Cross-compiling, the NDK toolchain roots find_package to the NDK
+            # sysroot (FIND_ROOT_PATH_MODE_PACKAGE=ONLY) — the host's
+            # /usr/local, where CI installs Vulkan-Headers + SPIRV-Headers
+            # (see android-ci.yml), is invisible until added as a find root.
+            # Env-var overrides remain for local builds.
+            list(APPEND CMAKE_FIND_ROOT_PATH "/usr/local")
+            if(DEFINED ENV{SPIRV_HEADERS_DIR})
+                list(APPEND CMAKE_FIND_ROOT_PATH "$ENV{SPIRV_HEADERS_DIR}")
+            endif()
             if(DEFINED ENV{VULKAN_HEADERS_DIR} AND EXISTS "$ENV{VULKAN_HEADERS_DIR}/include/vulkan/vulkan.h")
                 list(APPEND CMAKE_PREFIX_PATH "$ENV{VULKAN_HEADERS_DIR}")
-            endif()
-            if(DEFINED ENV{SPIRV_HEADERS_DIR})
-                list(APPEND CMAKE_PREFIX_PATH "$ENV{SPIRV_HEADERS_DIR}")
             endif()
         else()
             message(WARNING "glslc not found — Vulkan GPU offload disabled, CPU-only build")
