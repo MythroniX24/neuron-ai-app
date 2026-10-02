@@ -111,10 +111,12 @@ object LocalThrottlePolicy {
             // ---- Soft throttle: keep the GPU, trim the CPU fan-out.
             severity >= DeviceThermalState.Severity.MODERATE -> warm(
                 baseThreads,
+                wantsGpu,
                 "Device is hot — CPU threads capped at $WARM_THREAD_CAP"
             )
             soonHot -> warm(
                 baseThreads,
+                wantsGpu,
                 "Thermal headroom is low — CPU threads capped at $WARM_THREAD_CAP"
             )
             else -> ThrottleDecision(
@@ -127,8 +129,10 @@ object LocalThrottlePolicy {
         }
     }
 
-    private fun warm(baseThreads: Int, reason: String) = ThrottleDecision(
-        allowGpu = true,
+    private fun warm(baseThreads: Int, wantsGpu: Boolean, reason: String) = ThrottleDecision(
+        // "Warm" only trims the CPU fan-out; it never ENABLES the GPU on a
+        // device where the user (or the device) said no.
+        allowGpu = wantsGpu,
         threads = baseThreads.coerceAtMost(WARM_THREAD_CAP),
         maxOutputTokens = WARM_MAX_OUTPUT_TOKENS,
         throttled = true,
