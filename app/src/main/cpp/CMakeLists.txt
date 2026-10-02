@@ -16,7 +16,10 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 #   - x86_64 emulator builds: baseline x86-64 (SIMD via SSE4.2 defaults).
 # ---------------------------------------------------------------------------
 set(CMAKE_BUILD_TYPE Release CACHE STRING "" FORCE)
-set(CMAKE_INTERPROCEDURAL_OPTIMIZATION ON) # LTO
+# LTO deliberately OFF: CMake's clang IPO path selects the gold linker +
+# LLVMgold.so plugin, which the NDK toolchain does not ship (its lld would
+# handle LTO natively but CMake's check picks gold on Linux). Plain -O3
+# Release keeps the wins that matter; GGML_LTO stays at its default OFF.
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND ANDROID_ABI STREQUAL "arm64-v8a")
     set(NEURON_ARM_FLAGS "-march=armv8.2-a+dotprod+i8mm+fp16")
     set(CMAKE_C_FLAGS   "${CMAKE_C_FLAGS} ${NEURON_ARM_FLAGS} -O3")
