@@ -30,6 +30,9 @@ terminal agents, tool calling, workspace management, and background tasks.
   llama.cpp — no API key, no internet at inference time. Import from file or
   download from the Hugging Face Hub (search, variant/quantization picker,
   progress with pause/resume, Wi-Fi-only gate, sha256 integrity checks).
+  Heavily optimized: per-ISA CPU kernel variants (KleidiAI, dotprod/i8mm/SVE
+  — best match picked per device at load time) and optional Vulkan GPU
+  offload with flash attention + Q8_0 KV cache, with automatic CPU fallback.
   Single-active model with mmap loading, per-model benchmark (tokens/sec),
   curated recommended list with RAM-fit guidance, and a chat-model switcher
   integration with a live loading state.
@@ -80,7 +83,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the full design.
 | **0 — Foundation** ✅ | Architecture, design system, abstractions, polished shell |
 | **1 — Core Neuron-AI** ✅ | Real AI providers, streaming chat, markdown + LaTeX, Room persistence, provider settings, agent tools, permissions |
 | **2 — Advanced Agent Platform** | Coding/browser/terminal agents, workspaces, project management, background execution |
-| **Local AI** 🔶 | ✅ Import/download/run GGUF models, HF search, download manager, benchmark · next: GPU acceleration, performance modes, thermal throttling |
+| **Local AI** 🔶 | ✅ Import/download/run GGUF models, HF search, download manager, benchmark, GPU (Vulkan) offload + per-ISA CPU variants + perf prefs · next: thermal/battery monitoring, capability-aware routing |
 
 ## License
 
