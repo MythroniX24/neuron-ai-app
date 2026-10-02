@@ -209,7 +209,7 @@ class LocalModelRepository(
      * Backed by a 1-line pref file, not the model manifest.
      */
     var useGpu: Boolean
-        get() = perfPref("gpu") ?: true
+        get() = perfPref("gpu")?.toBooleanStrictOrNull() ?: true
         set(value) = writePerfPref("gpu", value.toString())
 
     /**

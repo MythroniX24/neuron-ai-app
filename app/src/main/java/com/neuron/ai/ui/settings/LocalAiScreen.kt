@@ -106,7 +106,7 @@ fun LocalAiScreen(
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
             contentPadding = androidx.compose.foundation.layout.PaddingValues(Spacing.lg),
-            verticalArrangement = Arrangement.spacedBy(Spacing.smm)
+            verticalArrangement = Arrangement.spacedBy(Spacing.sm)
         ) {
             // ---- Notices -------------------------------------------------
             state.importNotice?.let { notice ->
@@ -164,7 +164,7 @@ fun LocalAiScreen(
 
             // ---- Actions ---------------------------------------------------
             item {
-                Row(horizontalArrangement = Arrangement.spacedBy(Spacing.smm)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
                     OutlinedButton(
                         onClick = { importPicker.launch(arrayOf("*/*")) },
                         enabled = !state.importing
@@ -363,7 +363,7 @@ fun LocalAiScreen(
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    Spacer(Modifier.height(Spacing.smm))
+                    Spacer(Modifier.height(Spacing.sm))
                     target.variants.forEach { variant ->
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
@@ -375,7 +375,7 @@ fun LocalAiScreen(
                                     )
                                     variantTarget = null
                                 }
-                                .padding(vertical = Spacing.smm)
+                                .padding(vertical = Spacing.sm)
                         ) {
                             Column(Modifier.weight(1f)) {
                                 Text(variant.fileName, style = MaterialTheme.typography.bodySmall)
@@ -453,7 +453,7 @@ private fun SearchResultCard(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             activeDownload?.let { dl ->
-                Column(Modifier.padding(top = Spacing.smm)) {
+                Column(Modifier.padding(top = Spacing.sm)) {
                     Text(
                         when (dl.state) {
                             com.neuron.ai.data.local.ModelDownloadManager.Download.State.DOWNLOADING ->
@@ -596,7 +596,7 @@ private fun ModelCard(
                 LinearProgressIndicator(Modifier.fillMaxWidth())
             }
 
-            Row(horizontalArrangement = Arrangement.spacedBy(Spacing.smm)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
                 TextButton(onClick = onLoad, enabled = !isActive && !isLoading) {
                     Text(if (isActive) "Loaded" else "Load")
                 }
