@@ -32,7 +32,9 @@ class ModelDownloadManager(
     private val context: Context,
     private val repository: LocalModelRepository,
     private val dispatchers: DispatcherProvider,
-    private val logger: Logger? = null
+    private val logger: Logger? = null,
+    /** Used to build resolve URLs (path-safe encoding of repo id/file name). */
+    private val hub: HfHubClient = HfHubClient()
 ) {
 
     private val scope = CoroutineScope(SupervisorJob() + dispatchers.io)
@@ -168,7 +170,7 @@ class ModelDownloadManager(
                 throw IOException("Waiting for Wi-Fi — Wi-Fi-only downloads is ON")
             }
 
-            val url = "https://huggingface.co/${entry.repoId}/resolve/main/${entry.fileName}"
+            val url = hub.downloadUrl(entry.repoId, entry.fileName)
             val already = partFile.length()
             val builder = Request.Builder().url(url)
             if (already > 0) builder.header("Range", "bytes=$already-")

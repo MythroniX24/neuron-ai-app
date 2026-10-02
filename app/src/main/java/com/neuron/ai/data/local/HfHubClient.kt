@@ -84,7 +84,7 @@ class HfHubClient(
      * Non-GGUF files (README, configs) are excluded.
      */
     fun files(repoId: String): List<SearchResult.Variant> {
-        val url = "$base/api/models/${urlEncode(repoId)}/tree/main"
+        val url = "$base/api/models/${encodePath(repoId)}/tree/main"
         val body = http.newCall(Request.Builder().url(url).build()).execute().use { resp ->
             if (!resp.isSuccessful) return emptyList()
             resp.body?.string() ?: return emptyList()
@@ -107,8 +107,16 @@ class HfHubClient(
 
     /** Direct download URL for a repo file (redirects to the CDN). */
     fun downloadUrl(repoId: String, fileName: String): String =
-        "$base/${urlEncode(repoId)}/resolve/main/${urlEncode(fileName)}"
+        "$base/${encodePath(repoId)}/resolve/main/${urlEncode(fileName)}"
+
+    /**
+     * Encodes a repo path ("owner/name") segment-by-segment so the "/"
+     * separators survive — URLEncoder would turn them into %2F and break
+     * both the tree endpoint and the resolve/download URL.
+     */
+    private fun encodePath(path: String): String =
+        path.split('/').joinToString("/") { urlEncode(it) }
 
     private fun urlEncode(value: String): String =
-        java.net.URLEncoder.encode(value, "UTF-8")
+        java.net.URLEncoder.encode(value, "UTF-8").replace("+", "%20")
 }

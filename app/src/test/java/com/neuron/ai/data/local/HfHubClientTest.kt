@@ -73,6 +73,11 @@ class HfHubClientTest {
 
         val files = client.files("TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF")
 
+        // The repo's "/" must survive URL building (a %2F path 404s on the Hub).
+        assertTrue(
+            server.takeRequest().path!!
+                .startsWith("/api/models/TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF/tree/main")
+        )
         assertEquals(2, files.size)
         assertEquals("tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf", files[0].fileName)
         assertEquals(592500096L, files[0].sizeBytes)

@@ -96,7 +96,7 @@ class AppContainer(context: Context) {
     /** Background GGUF downloads with pause/resume/checksum/restart survival. */
     val downloadManager: com.neuron.ai.data.local.ModelDownloadManager by lazy {
         com.neuron.ai.data.local.ModelDownloadManager(
-            context, localModelRepository, dispatchers, logger
+            context, localModelRepository, dispatchers, logger, hfHubClient
         ).also { it.restore() }
     }
 
