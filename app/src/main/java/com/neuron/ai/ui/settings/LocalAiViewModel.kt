@@ -259,6 +259,10 @@ class LocalAiViewModel(
         _state.value.recommended.firstOrNull { it.id == model.id }?.variants
             ?: emptyList()
 
+    /** Milestone 9: does this model have a usable vision projector beside it? */
+    fun visionReady(model: LocalModelRecord): Boolean =
+        repository.hasVisionProjector(model)
+
     fun fitFor(model: RecommendedModel): RecommendedModels.Fit {
         val s = _state.value
         return RecommendedModels.fitForDevice(model, s.totalRamBytes, s.freeRamBytes)

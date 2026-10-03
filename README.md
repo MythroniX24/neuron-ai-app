@@ -38,10 +38,15 @@ terminal agents, tool calling, workspace management, and background tasks.
   integration with a live loading state.
   Capability-aware routing: each GGUF's own chat template/architecture/context
   decide what a turn may use (tools, vision, capped window), and the live agent
-  timeline shows that resolution plus any degradation. Thermal/battery aware:
-  the app reads thermal status, headroom, battery and power-save mode and
-  throttles the next on-device answer (fewer threads, GPU off, shorter answers)
-  instead of melting down mid-sentence.
+  timeline shows that resolution plus any degradation. Vision is only claimed
+  when a real mmproj projector file sits next to the GGUF — the image then goes
+  through llama.cpp's mtmd encoder instead of being described in words.
+  Thermal/battery aware: the app reads thermal status, headroom, battery and
+  power-save mode and throttles the next on-device answer (fewer threads, GPU
+  off, shorter answers) instead of melting down mid-sentence.
+  Fast by construction: the KV cache is reused across turns (only the new part
+  of a conversation is ever re-processed) and inference threads only the phone's
+  fast cores instead of every core including the slow efficiency cluster.
 - ✅ Unit tests for the provider wire protocol, tools, permissions, tasks, storage,
   the agent tool loop, the GGUF parser and the Hub/download stack
 
@@ -89,7 +94,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the full design.
 | **0 — Foundation** ✅ | Architecture, design system, abstractions, polished shell |
 | **1 — Core Neuron-AI** ✅ | Real AI providers, streaming chat, markdown + LaTeX, Room persistence, provider settings, agent tools, permissions |
 | **2 — Advanced Agent Platform** | Coding/browser/terminal agents, workspaces, project management, background execution |
-| **Local AI** 🔶 | ✅ Import/download/run GGUF models, HF search, download manager, benchmark, GPU (Vulkan) offload + per-ISA CPU variants + perf prefs, capability-aware routing in the agent timeline, thermal/battery throttling · next: vision projector (mmproj) support, per-model routing rules |
+| **Local AI** 🔶 | ✅ Import/download/run GGUF models, HF search, download manager, benchmark, GPU (Vulkan) offload + per-ISA CPU variants + perf prefs, capability-aware routing in the agent timeline, thermal/battery throttling, KV prompt-prefix reuse + big-core threading, vision via mmproj projector · next: per-model routing rules, speculative decoding |
 
 ## License
 

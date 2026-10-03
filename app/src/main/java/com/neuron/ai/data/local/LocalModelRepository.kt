@@ -250,6 +250,29 @@ class LocalModelRepository(
     private fun resolvedThreads(): Int =
         if (userThreads in 1..16) userThreads else defaultThreads()
 
+    // ---- Vision projector (milestone 9) ------------------------------------
+
+    /**
+     * The mmproj file belonging to [record], or null when it has none. Pure
+     * matching (VisionProjector) against the models directory — a projector is
+     * only "present" when it really was imported next to the model.
+     */
+    fun visionProjectorFor(record: LocalModelRecord): File? {
+        val names = try {
+            modelsDir.listFiles()?.map { it.name }.orEmpty()
+        } catch (_: Throwable) {
+            emptyList()
+        }
+        val match = VisionProjector.findProjectorFor(record.fileName, names) ?: return null
+        return File(modelsDir, match).takeIf { it.exists() && it.length() > 0L }
+    }
+
+    /** true when [record] can genuinely read an image (tower + projector). */
+    fun hasVisionProjector(record: LocalModelRecord): Boolean {
+        if (!LocalModelRouter.architectureSupportsVision(record.architecture)) return false
+        return visionProjectorFor(record) != null
+    }
+
     // ---- Thermal / battery throttle (milestone 7) --------------------------
 
     /** Live device-health snapshot (nominal-ish defaults when unsupported). */
@@ -326,11 +349,15 @@ class LocalModelRepository(
         val contextTokens = LocalModelRouter.effectiveContextTokens(record.contextLength)
         val throttle = throttleDecision()
         val wantGpu = throttle.allowGpu
+        // Milestone 9: attach the projector when one was imported beside the
+        // model — the only way the model can actually read an image.
+        val mmproj = visionProjectorFor(record)?.absolutePath
         var result = LocalEngineLoader.load(
             path = path,
             contextTokens = contextTokens,
             threads = throttle.threads,
-            useGpu = wantGpu
+            useGpu = wantGpu,
+            mmprojPath = mmproj
         )
         if (result is LocalEngineLoader.LoadResult.Failure && wantGpu) {
             logger?.w("LocalModels", "GPU load failed — retrying on CPU: ${result.reason}")
@@ -339,7 +366,21 @@ class LocalModelRepository(
                 path = path,
                 contextTokens = contextTokens,
                 threads = throttle.threads,
-                useGpu = false
+                useGpu = false,
+                mmprojPath = mmproj
+            )
+        }
+        // A projector that refuses to load must not take the whole model down:
+        // reload text-only so the user keeps a working model.
+        if (result is LocalEngineLoader.LoadResult.Failure && mmproj != null) {
+            logger?.w("LocalModels", "Projector failed — reloading text-only: ${result.reason}")
+            LocalEngineLoader.unload()
+            result = LocalEngineLoader.load(
+                path = path,
+                contextTokens = contextTokens,
+                threads = throttle.threads,
+                useGpu = wantGpu,
+                mmprojPath = null
             )
         }
         return result

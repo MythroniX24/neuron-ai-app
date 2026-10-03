@@ -73,6 +73,7 @@ endif()
 
 set(NEURON_HAVE_LLAMA OFF)
 set(NEURON_HAVE_VULKAN OFF)
+set(NEURON_HAVE_MTMD OFF)
 if(EXISTS "${LLAMA_SRC}/CMakeLists.txt")
     set(NEURON_HAVE_LLAMA ON)
     set(LLAMA_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
@@ -128,12 +129,28 @@ if(EXISTS "${LLAMA_SRC}/CMakeLists.txt")
         endif()
     endif()
 
+    # ---- Vision projector support (milestone 9) ---------------------------
+    # mtmd is llama.cpp's multimodal library (CLIP image encoder). It is what
+    # turns an mmproj GGUF + a JPEG/PNG into embeddings the text model can
+    # read, so "the model can see images" is a real capability here rather
+    # than a claim. Built for arm64 only — the x86_64 emulator build stays
+    # text-only, which saves a lot of compile time in CI for no real loss.
+    if(ANDROID_ABI STREQUAL "arm64-v8a")
+        set(LLAMA_BUILD_MTMD ON CACHE BOOL "" FORCE)
+    endif()
+
     add_subdirectory("${LLAMA_SRC}" llama.cpp-build EXCLUDE_FROM_ALL)
     if(TARGET ggml-vulkan)
         set(NEURON_HAVE_VULKAN ON)
         message(STATUS "Neuron: Vulkan backend ENABLED")
     else()
         message(STATUS "Neuron: Vulkan backend absent — CPU-only build")
+    endif()
+    if(TARGET mtmd)
+        set(NEURON_HAVE_MTMD ON)
+        message(STATUS "Neuron: mtmd (vision projector) ENABLED")
+    else()
+        message(STATUS "Neuron: mtmd absent — text-only vision build")
     endif()
 endif()
 
@@ -144,14 +161,20 @@ endif()
 add_library(neuron_llama SHARED neuron_llama.cpp)
 
 if(NEURON_HAVE_LLAMA)
-    # Link only `llama`: the `common` helper lib is tied to examples and not
-    # needed — the bridge speaks the raw llama.h API. Backends (CPU variants,
-    # Vulkan) are NOT linked — they are dlopen'd by ggml's registry from the
-    # app's native lib dir at runtime (GGML_BACKEND_DL above).
-    target_link_libraries(neuron_llama PRIVATE llama log)
+    # Link only `llama` (+ `mtmd` for the vision projector): the `common`
+    # helper lib is tied to examples and not needed — the bridge speaks the
+    # raw llama.h API. Backends (CPU variants, Vulkan) are NOT linked — they
+    # are dlopen'd by ggml's registry from the app's native lib dir at
+    # runtime (GGML_BACKEND_DL above).
+    if(NEURON_HAVE_MTMD)
+        target_link_libraries(neuron_llama PRIVATE llama mtmd log)
+    else()
+        target_link_libraries(neuron_llama PRIVATE llama log)
+    endif()
     target_compile_definitions(neuron_llama PRIVATE
         NEURON_HAVE_LLAMA=1
         NEURON_HAVE_VULKAN=$<BOOL:${NEURON_HAVE_VULKAN}>
+        NEURON_HAVE_MTMD=$<BOOL:${NEURON_HAVE_MTMD}>
     )
 else()
     # No llama.cpp available: the bridge compiles to a stub that reports
@@ -159,5 +182,6 @@ else()
     target_compile_definitions(neuron_llama PRIVATE
         NEURON_HAVE_LLAMA=0
         NEURON_HAVE_VULKAN=0
+        NEURON_HAVE_MTMD=0
     )
 endif()

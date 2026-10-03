@@ -372,6 +372,9 @@ data/local/
 │                             #   whether this turn can be served by it at all
 ├── LocalThrottlePolicy.kt    # pure thermal/battery policy → threads, GPU, tokens
 ├── DeviceHealthMonitor.kt    # thermal status/headroom + battery + power-save watcher
+├── PromptPrefix.kt           # pure KV prefix-reuse decision (what can be skipped)
+├── CpuTopology.kt            # pure big/little core classification + thread math
+├── VisionProjector.kt        # pure mmproj discovery (which projector belongs to a model)
 └── LocalAiProvider.kt        # the AIProvider implementation (capability-honest)
 ```
 
@@ -383,7 +386,11 @@ Design rules:
 - **Capability-honest (milestone 6)**: capabilities are read from the GGUF's
   OWN metadata — the chat template decides tool support (`tokenizer.chat_template`
   is scanned for a tools block), the architecture decides vision, the declared
-  context length is capped for phones. `LocalModelRouter` turns that into a
+  context length is capped for phones. Milestone 9 tightens vision further: an
+  architecture that declares a vision tower is NOT vision until its mmproj
+  projector file is actually present beside the GGUF (`VisionProjector`), and
+  only then are images routed on-device — through mtmd's real image encoder.
+  `LocalModelRouter` turns that into a
   routing decision per turn: unsupported input (an image on a text-only GGUF)
   is REFUSED with an actionable reason, everything else is degraded visibly.
   The resolution — model, window, degradations, live throttle — is emitted as
@@ -419,6 +426,23 @@ Design rules:
   timeline. Missing platform support degrades to "no throttling", never to a
   broken feature. The throttle applies at the NEXT load on purpose —
   reloading mid-generation would abort an answer the user is reading.
+- **Prompt-prefix reuse (milestone 8)**: the KV cache already holds most of
+  the conversation when a new turn arrives, so the bridge keeps a shadow copy
+  of the tokens in sequence 0, trims to the shared prefix with
+  `llama_memory_seq_rm`, and decodes only the new tail. The reuse length is
+  recomputed natively and can only be LOWERED by the caller — a stale cache
+  costs time, never correctness. Image turns bypass this entirely (the cache
+  holds embeddings, not comparable ids) and clear the shadow copy.
+- **Big-core threading (milestone 8)**: `CpuTopology` reads per-core peak
+  frequencies from sysfs (`cpu_capacity` fallback) and threads only the fast
+  cluster — the efficiency cores are 2-4x slower per clock and starve the big
+  ones. The milestone-7 thermal cap still wins over both auto and explicit
+  thread counts.
+- **Vision (milestone 9)**: llama.cpp's `mtmd` library is built for arm64
+  (`LLAMA_BUILD_MTMD`); the JNI bridge loads an mmproj file next to the model,
+  and image turns go through `mtmd_tokenize` + `mtmd_helper_eval_chunks` so
+  the picture becomes real embeddings. A projector that fails to load degrades
+  to a text-only model instead of breaking it.
 
 ## Key technical decisions
 

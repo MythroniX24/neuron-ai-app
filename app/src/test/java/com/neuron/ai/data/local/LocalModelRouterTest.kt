@@ -61,6 +61,52 @@ class LocalModelRouterTest {
     }
 
     @Test
+    fun `a vision tower without its mmproj file is not vision yet`() {
+        // Milestone 9: the projector is a SEPARATE GGUF. Without it the model
+        // cannot read a picture, so the router must not claim it can.
+        val towerOnly = LocalModelRouter.capabilities(
+            record(architecture = "qwen2vl"),
+            hasProjector = false
+        )
+        assertFalse(towerOnly.supportsVision)
+        assertTrue(towerOnly.notes.any { it.contains("no mmproj projector") })
+
+        val ready = LocalModelRouter.capabilities(
+            record(architecture = "qwen2vl"),
+            hasProjector = true
+        )
+        assertTrue(ready.supportsVision)
+        assertTrue(ready.notes.any { it.contains("Vision ready") })
+    }
+
+    @Test
+    fun `a projector cannot make a text-only architecture see`() {
+        val wrong = LocalModelRouter.capabilities(
+            record(architecture = "llama"),
+            hasProjector = true
+        )
+        assertFalse(wrong.supportsVision)
+    }
+
+    @Test
+    fun `images route only when the projector is really there`() {
+        val withoutProjector = LocalModelRouter.decide(
+            record(architecture = "qwen2vl"),
+            LocalRouteRequest(hasImageAttachments = true),
+            hasProjector = false
+        )
+        assertTrue(withoutProjector is LocalRouteDecision.Refuse)
+
+        val withProjector = LocalModelRouter.decide(
+            record(architecture = "qwen2vl"),
+            LocalRouteRequest(hasImageAttachments = true),
+            hasProjector = true
+        )
+        assertTrue(withProjector is LocalRouteDecision.Route)
+        assertTrue((withProjector as LocalRouteDecision.Route).capabilities.supportsVision)
+    }
+
+    @Test
     fun `tool support comes from the gguf chat template, never the name`() {
         val honest = LocalModelRouter.capabilities(record(supportsTools = false))
         assertFalse(honest.supportsTools)
