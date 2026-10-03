@@ -305,24 +305,6 @@ class ModelDownloadManager(
 
     private var networkCallbackRegistered = false
 
-    /**
-     * Maps a Hub HTTP status onto the ACTION the user can take. Pure and
-     * static so it is unit-tested: 401/403 is a gated repo (needs a HF login
-     * + accepted licence), 404 a renamed file, 429 a rate limit.
-     */
-    fun describeHttpFailure(code: Int, entry: Download? = null): String = when (code) {
-        401, 403 -> if (entry != null && entry.repoId.startsWith("google/")) {
-            "Google's repos require a Hugging Face account: open ${entry.repoId} in a browser, " +
-                "accept the Gemma licence, then download again."
-        } else {
-            "This model is gated on Hugging Face — sign in on the web, accept its licence, then retry."
-        }
-        404 -> "That file no longer exists in the repo (renamed upstream). Pick another quantization."
-        429 -> "Hugging Face is rate-limiting this app. Wait a minute and retry."
-        in 500..599 -> "Hugging Face server error (HTTP $code). Try again shortly."
-        else -> "Download failed (HTTP $code from the model hub)."
-    }
-
     /** sha256 verification against the Hub LFS hash, then registration. */
     private suspend fun verifyAndRegister(entry: Download, partFile: File) {
         val digest = MessageDigest.getInstance("SHA-256")
@@ -415,6 +397,24 @@ class ModelDownloadManager(
             "dl-" + (repoId + "/" + fileName).fold(0) { acc, c ->
                 (acc * 31 + c.code) and 0x7FFFFFFF
             }.toString(16)
+
+        /**
+         * Maps a Hub HTTP status onto the ACTION the user can take. Pure and
+         * static so it is unit-tested: 401/403 is a gated repo (needs a HF
+         * login + accepted licence), 404 a renamed file, 429 a rate limit.
+         */
+        fun describeHttpFailure(code: Int, entry: Download? = null): String = when (code) {
+            401, 403 -> if (entry != null && entry.repoId.startsWith("google/")) {
+                "Google's repos require a Hugging Face account: open ${entry.repoId} in a browser, " +
+                    "accept the Gemma licence, then download again."
+            } else {
+                "This model is gated on Hugging Face — sign in on the web, accept its licence, then retry."
+            }
+            404 -> "That file no longer exists in the repo (renamed upstream). Pick another quantization."
+            429 -> "Hugging Face is rate-limiting this app. Wait a minute and retry."
+            in 500..599 -> "Hugging Face server error (HTTP $code). Try again shortly."
+            else -> "Download failed (HTTP $code from the model hub)."
+        }
 
         /** Hex sha256 of [bytes] — matches the Hub's LFS oid format. */
         fun sha256Hex(bytes: ByteArray): String =

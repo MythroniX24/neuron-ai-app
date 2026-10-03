@@ -53,7 +53,8 @@ object LocalEngineLoader {
         path: String,
         contextTokens: Int,
         threads: Int,
-        useGpu: Boolean,
+        useGpu: Bool,
+        mmprojPath: String?,
         errOut: Array<String?>
     ): Int
     private external fun nativeUnload(): Boolean
@@ -66,6 +67,25 @@ object LocalEngineLoader {
         reusePrefix: Int,
         callback: TokenCallback
     ): Int
+    private external fun nativeVisionAvailable(): Boolean
+    private external fun nativeGenerateMultimodal(
+        prompt: String,
+        image: ByteArray,
+        maxTokens: Int,
+        callback: TokenCallback
+    ): Int
+
+    /**
+     * Milestone 9: TRUE when the ACTIVE model has a vision projector attached,
+     * i.e. it can genuinely read an image — the honest signal the router uses
+     * instead of guessing from the architecture name.
+     */
+    val visionActive: Boolean
+        get() = nativeLibraryAvailable && try {
+            nativeVisionAvailable()
+        } catch (_: Throwable) {
+            false
+        }
 
     /** Last turn's prompt-prefix reuse, for the performance card. */
     @Volatile
@@ -97,7 +117,14 @@ object LocalEngineLoader {
      * Returns [LoadResult.Failure] with the native error text on failure; the
      * engine is left UNLOADED in that case (never half-loaded).
      */
-    fun load(path: String, contextTokens: Int, threads: Int, useGpu: Boolean): LoadResult {
+    fun load(
+        path: String,
+        contextTokens: Int,
+        threads: Int,
+        useGpu: Boolean,
+        /** Vision projector (mmproj) to attach; null = text-only model. */
+        mmprojPath: String? = null
+    ): LoadResult {
         if (!nativeLibraryAvailable) {
             return LoadResult.Failure(
                 "On-device inference engine is not available in this build."
@@ -113,12 +140,16 @@ object LocalEngineLoader {
         // after the first call.
         backendDir?.let { dir -> runCatching { nativeInitBackends(dir) } }
         val err = arrayOfNulls<String>(1)
-        val code = nativeLoad(path, contextTokens, threads, useGpu, err)
+        val code = nativeLoad(path, contextTokens, threads, useGpu, mmprojPath, err)
         return when {
             code == 0 -> LoadResult.Success
             // New: GPU offload was requested but no Vulkan driver is present.
             code == -6 -> LoadResult.Failure(
                 err[0] ?: "No Vulkan GPU driver is available on this device"
+            )
+            // Milestone 9: the projector the user imported doesn't match.
+            code == -9 -> LoadResult.Failure(
+                err[0] ?: "Vision projector (mmproj) could not be loaded"
             )
             else -> LoadResult.Failure(err[0] ?: "Engine load failed (code $code)")
         }
@@ -183,6 +214,59 @@ object LocalEngineLoader {
             )
         }
     }
+
+    /**
+     * Milestone 9: streams an answer about an IMAGE. [prompt] must contain the
+     * model's media marker (see [MEDIA_MARKER]); the projector turns [image]
+     * into embeddings the text model reads. No prefix reuse here — the cache
+     * now holds embeddings, not comparable token ids.
+     */
+    fun generateMultimodalStreaming(
+        prompt: String,
+        image: ByteArray,
+        maxTokens: Int,
+        onToken: (String) -> Unit
+    ): GenerationResult {
+        if (!nativeLibraryAvailable) {
+            return GenerationResult.Error("Inference engine is not available in this build.")
+        }
+        if (!visionActive) {
+            return GenerationResult.Error(
+                "This model has no vision projector loaded — import its mmproj file first."
+            )
+        }
+        var failure: String? = null
+        val callback = TokenCallback { piece ->
+            try {
+                onToken(piece)
+            } catch (t: Throwable) {
+                failure = t.message ?: "callback failed"
+            }
+        }
+        val code = try {
+            nativeGenerateMultimodal(prompt, image, maxTokens, callback)
+        } catch (t: Throwable) {
+            return GenerationResult.Error(t.message ?: "Vision decode failed")
+        }
+        // An image turn leaves embeddings in the cache: no token-prefix reuse.
+        lastPromptTokens = 0
+        lastReusedTokens = 0
+        return when {
+            code == 0 -> GenerationResult.Done(0)
+            code > 0 -> GenerationResult.Done(code)
+            code == -6 -> GenerationResult.Error(
+                "This model has no vision projector loaded."
+            )
+            code == -9 -> GenerationResult.Error(
+                "The image could not be decoded by this model's projector."
+            )
+            code == -3 -> GenerationResult.Error("No model is loaded")
+            else -> GenerationResult.Error(failure ?: "Vision decode failed (code $code)")
+        }
+    }
+
+    /** llama.cpp's default media marker; must appear once per image. */
+    const val MEDIA_MARKER = "<|image|>"
 
     /**
      * Runs a short benchmark: tokens generated per second on this device.

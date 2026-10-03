@@ -106,7 +106,11 @@ class AppContainer(context: Context) {
 
     /** The local model as JUST ANOTHER AiProvider for the whole stack. */
     val localAiProvider: com.neuron.ai.data.local.LocalAiProvider by lazy {
-        com.neuron.ai.data.local.LocalAiProvider(localModelRepository)
+        com.neuron.ai.data.local.LocalAiProvider(
+            localModelRepository,
+            // Milestone 9: the vision projector needs the raw image bytes.
+            readImageBytes = { attachmentId -> attachmentStore.readBytesById(attachmentId) }
+        )
     }
 
     /** Hugging Face Hub search (free API, no key). */

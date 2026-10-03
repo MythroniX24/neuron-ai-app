@@ -32,6 +32,10 @@
 
 #if NEURON_HAVE_LLAMA
 #include "llama.h"
+#if NEURON_HAVE_MTMD
+#include "mtmd.h"
+#include "mtmd-helper.h"
+#endif
 
 namespace {
 
@@ -54,6 +58,12 @@ uint32_t g_ctxSize = 0;
 // only ever LOWER the reuse length, never invent it.
 std::vector<llama_token> g_cachedTokens;
 int g_cachedPos = 0;
+#if NEURON_HAVE_MTMD
+// Milestone 9: vision projector (mmproj). Only created when the user imported
+// an mmproj file NEXT TO the model — a text-only GGUF never gets one, so the
+// router can refuse images honestly instead of failing deep inside a decode.
+mtmd_context *g_mctx = nullptr;
+#endif
 
 #if defined(__ANDROID__) && NEURON_HAVE_VULKAN
 // Vulkan driver/loader presence — probed once, result cached. We dlopen
@@ -99,6 +109,14 @@ llama_token sampleGreedy(llama_context *ctx, const llama_vocab *vocab) {
 }
 
 void unloadLocked() {
+#if NEURON_HAVE_MTMD
+    // The projector borrows the text model's vocab/weights — it MUST go
+    // before the model itself is freed.
+    if (g_mctx != nullptr) {
+        mtmd_free(g_mctx);
+        g_mctx = nullptr;
+    }
+#endif
     if (g_ctx != nullptr) {
         llama_free(g_ctx);
         g_ctx = nullptr;
@@ -156,6 +174,50 @@ int decodeToken(llama_context *ctx, llama_token token, int pos) {
     const int rc = llama_decode(ctx, batch);
     llama_batch_free(batch);
     return rc;
+}
+
+// Greedy generation from the logits already present in [ctx] at position
+// [startPos]. Shared by the text path and the vision path so both stream
+// identically. Emits every piece through [onText]; returns tokens generated.
+int generateLoop(JNIEnv *env, jobject jCallback, jmethodID onText, llama_context *ctx,
+                 const llama_vocab *vocab, int startPos, int maxTokens) {
+    const int nCtx = static_cast<int>(g_ctxSize);
+    char pieceBuf[256];
+    int generated = 0;
+    int pos = startPos;
+    llama_token next = sampleGreedy(ctx, vocab);
+    while (generated < maxTokens) {
+        if (llama_vocab_is_eog(vocab, next)) break;
+
+        const int n = llama_token_to_piece(vocab, next, pieceBuf, sizeof(pieceBuf), 0, true);
+        if (n < 0) break;
+        if (n > 0) {
+            jstring piece = env->NewStringUTF(std::string(pieceBuf, static_cast<size_t>(n)).c_str());
+            if (piece != nullptr) {
+                env->CallVoidMethod(jCallback, onText, piece);
+                env->DeleteLocalRef(piece);
+            }
+        }
+        ++generated;
+
+        if (nCtx > 0 && pos >= nCtx) break; // context full — stop cleanly
+        if (decodeToken(ctx, next, pos) != 0) break;
+        // The generated token joins the shadow copy so the NEXT turn can
+        // reuse it instead of recomputing the answer.
+        g_cachedTokens.push_back(next);
+        ++pos;
+        next = sampleGreedy(ctx, vocab);
+    }
+    g_cachedPos = pos;
+    return generated;
+}
+
+// Resolves the streaming callback's method id; nullptr when unavailable.
+jmethodID resolveTextCallback(JNIEnv *env, jobject jCallback) {
+    if (jCallback == nullptr) return nullptr;
+    jclass cbClass = env->GetObjectClass(jCallback);
+    if (cbClass == nullptr) return nullptr;
+    return env->GetMethodID(cbClass, "text", "(Ljava/lang/String;)V");
 }
 
 } // namespace
@@ -222,7 +284,7 @@ Java_com_neuron_ai_data_local_LocalEngineLoader_nativeInitBackends(
 JNIEXPORT jint JNICALL
 Java_com_neuron_ai_data_local_LocalEngineLoader_nativeLoad(
         JNIEnv *env, jobject, jstring jPath, jint contextTokens,
-        jint threads, jboolean useGpu, jobjectArray jErrOut) {
+        jint threads, jboolean useGpu, jstring jMmprojPath, jobjectArray jErrOut) {
 #if NEURON_HAVE_LLAMA
     if (!g_backendsInitialized) {
         if (jErrOut != nullptr && env->GetArrayLength(jErrOut) > 0) {
@@ -234,6 +296,12 @@ Java_com_neuron_ai_data_local_LocalEngineLoader_nativeLoad(
     const char *path = env->GetStringUTFChars(jPath, nullptr);
     std::string modelPath = path != nullptr ? path : "";
     env->ReleaseStringUTFChars(jPath, path);
+    std::string mmprojPath;
+    if (jMmprojPath != nullptr) {
+        const char *mm = env->GetStringUTFChars(jMmprojPath, nullptr);
+        mmprojPath = mm != nullptr ? mm : "";
+        env->ReleaseStringUTFChars(jMmprojPath, mm);
+    }
 
     auto fail = [&](jint code, const char *message) {
         if (jErrOut != nullptr && env->GetArrayLength(jErrOut) > 0) {
@@ -298,6 +366,30 @@ Java_com_neuron_ai_data_local_LocalEngineLoader_nativeLoad(
     g_ctxSize = cparams.n_ctx;
     g_cachedTokens.clear();
     g_cachedPos = 0;
+
+#if NEURON_HAVE_MTMD
+    // Milestone 9: attach the vision projector when the caller found one
+    // beside the model. A failure here is reported instead of silently
+    // degrading to a text-only context.
+    if (!mmprojPath.empty()) {
+        mtmd_context_params mparams_mtmd = mtmd_context_params_default();
+        mparams_mtmd.use_gpu = gpu;
+        mparams_mtmd.n_threads = cparams.n_threads;
+        mparams_mtmd.print_timings = false;
+        mparams_mtmd.warmup = false;
+        mparams_mtmd.flash_attn_type = cparams.flash_attn_type;
+        g_mctx = mtmd_init_from_file(mmprojPath.c_str(), model, mparams_mtmd);
+        if (g_mctx == nullptr) {
+            return fail(-9, "Vision projector (mmproj) could not be loaded for this model");
+        }
+        if (!mtmd_support_vision(g_mctx)) {
+            mtmd_free(g_mctx);
+            g_mctx = nullptr;
+            return fail(-9, "That projector file does not support image input");
+        }
+        LOGI("vision projector attached: %s", mmprojPath.c_str());
+    }
+#endif
     const char *tmpl = llama_model_chat_template(model, nullptr);
     g_loadedChatTemplate = tmpl != nullptr ? std::string(tmpl) : std::string();
     g_loadedFtype = llama_model_ftype(model);
@@ -305,7 +397,7 @@ Java_com_neuron_ai_data_local_LocalEngineLoader_nativeLoad(
          modelPath.c_str(), gpu ? 1 : 0, (int) cparams.n_ctx, (int) cparams.n_threads);
     return 0;
 #else
-    (void)jPath; (void)contextTokens; (void)threads; (void)useGpu;
+    (void)jPath; (void)contextTokens; (void)threads; (void)useGpu; (void)jMmprojPath;
     if (jErrOut != nullptr && env->GetArrayLength(jErrOut) > 0) {
         env->SetObjectArrayElement(jErrOut, 0,
             env->NewStringUTF("Native inference engine was not built into this APK"));
@@ -434,9 +526,7 @@ Java_com_neuron_ai_data_local_LocalEngineLoader_nativeGenerateTokens(
         }
     }
 
-    jclass cbClass = env->GetObjectClass(jCallback);
-    if (cbClass == nullptr) return -1;
-    jmethodID onText = env->GetMethodID(cbClass, "text", "(Ljava/lang/String;)V");
+    jmethodID onText = resolveTextCallback(env, jCallback);
     if (onText == nullptr) return -2;
 
     std::lock_guard<std::mutex> lock(g_mutex);
@@ -466,34 +556,113 @@ Java_com_neuron_ai_data_local_LocalEngineLoader_nativeGenerateTokens(
     g_cachedPos = n_tokens;
 
     const llama_vocab *vocab = llama_model_get_vocab(g_model);
-    char pieceBuf[256];
-    int generated = 0;
-    llama_token next = sampleGreedy(g_ctx, vocab);
-    while (generated < maxTokens) {
-        if (llama_vocab_is_eog(vocab, next)) break;
-
-        const int n = llama_token_to_piece(vocab, next, pieceBuf, sizeof(pieceBuf), 0, true);
-        if (n < 0) break;
-        if (n > 0) {
-            jstring piece = env->NewStringUTF(std::string(pieceBuf, static_cast<size_t>(n)).c_str());
-            if (piece != nullptr) {
-                env->CallVoidMethod(jCallback, onText, piece);
-                env->DeleteLocalRef(piece);
-            }
-        }
-        ++generated;
-
-        if (nCtx > 0 && g_cachedPos >= nCtx) break; // context full — stop cleanly
-        if (decodeToken(g_ctx, next, g_cachedPos) != 0) break;
-        // The generated token joins the cache so the NEXT turn can reuse it.
-        g_cachedTokens.push_back(next);
-        ++g_cachedPos;
-        next = sampleGreedy(g_ctx, vocab);
-    }
+    const int generated = generateLoop(env, jCallback, onText, g_ctx, vocab, n_tokens, maxTokens);
     return generated;
 #else
     (void)jTokens; (void)maxTokens; (void)reusePrefix; (void)jCallback;
     return -100;
+#endif
+}
+
+// TRUE when a vision projector is attached to the ACTIVE model — the only
+// honest signal the router has for "this model can actually read a picture".
+JNIEXPORT jboolean JNICALL
+Java_com_neuron_ai_data_local_LocalEngineLoader_nativeVisionAvailable(
+        JNIEnv *, jobject) {
+#if NEURON_HAVE_LLAMA && NEURON_HAVE_MTMD
+    std::lock_guard<std::mutex> lock(g_mutex);
+    return (g_mctx != nullptr) ? JNI_TRUE : JNI_FALSE;
+#else
+    return JNI_FALSE;
+#endif
+}
+
+// Milestone 9: image + prompt → answer. [jPrompt] must contain the model's
+// media marker ("<|image|>" for most chat templates — the caller gets it from
+// the chat template), [jImage] the raw encoded file bytes; mtmd decodes and
+// embeds the picture itself.
+//
+// Prefix reuse is deliberately NOT attempted here: the cache now holds image
+// EMBEDDINGS interleaved with text, which no token comparison can match. The
+// shadow cache is cleared so the next text turn recomputes cleanly instead of
+// trusting a stale prefix.
+//
+// Returns tokens generated, or a negative error code:
+//  -3 no model  -6 no projector loaded  -9 projector/image/prompt failure
+JNIEXPORT jint JNICALL
+Java_com_neuron_ai_data_local_LocalEngineLoader_nativeGenerateMultimodal(
+        JNIEnv *env, jobject, jstring jPrompt, jbyteArray jImage,
+        jint maxTokens, jobject jCallback) {
+#if NEURON_HAVE_LLAMA && NEURON_HAVE_MTMD
+    if (jPrompt == nullptr || jImage == nullptr || jCallback == nullptr) return -1;
+
+    jmethodID onText = resolveTextCallback(env, jCallback);
+    if (onText == nullptr) return -2;
+
+    const char *promptChars = env->GetStringUTFChars(jPrompt, nullptr);
+    std::string prompt = promptChars != nullptr ? promptChars : "";
+    env->ReleaseStringUTFChars(jPrompt, promptChars);
+
+    const jsize imageLen = env->GetArrayLength(jImage);
+    if (imageLen <= 0) return -9;
+    std::vector<unsigned char> image(static_cast<size_t>(imageLen));
+    env->GetByteArrayRegion(jImage, 0, imageLen, reinterpret_cast<jbyte *>(image.data()));
+
+    std::lock_guard<std::mutex> lock(g_mutex);
+    if (g_model == nullptr || g_ctx == nullptr) return -3;
+    if (g_mctx == nullptr) return -6;
+
+    mtmd_helper_bitmap_wrapper wrapper = mtmd_helper_bitmap_init_from_buf(
+        g_mctx, image.data(), image.size(), /*placeholder*/ false,
+        mtmd_helper_init_opt_default());
+    if (wrapper.bitmap == nullptr) {
+        return -9; // unsupported/corrupt image bytes
+    }
+
+    int generated = 0;
+    {
+        mtmd_input_chunks *chunks = mtmd_input_chunks_init();
+        if (chunks == nullptr) {
+            mtmd_bitmap_free(wrapper.bitmap);
+            return -9;
+        }
+        mtmd_input_text text;
+        text.text = prompt.c_str();
+        text.text_len = prompt.size();
+        text.add_special = true;
+        text.parse_special = true;
+        const mtmd_bitmap *bitmaps[1] = { wrapper.bitmap };
+        // Returns 1 when the number of bitmaps doesn't match the number of
+        // media markers in the prompt — a template mismatch the user must fix.
+        const int32_t rc = mtmd_tokenize(g_mctx, chunks, &text, bitmaps, 1);
+        if (rc != 0) {
+            mtmd_input_chunks_free(chunks);
+            mtmd_bitmap_free(wrapper.bitmap);
+            return -9;
+        }
+        llama_pos n_past = 0;
+        // Handles non-causal masking and M-RoPE internally; needs the raw
+        // llama_context, so it must run under the lock.
+        const int32_t evalRc = mtmd_helper_eval_chunks(
+            g_mctx, g_ctx, chunks, /*n_past*/ 0, /*seq_id*/ 0,
+            /*n_batch*/ 512, /*logits_last*/ true, &n_past);
+        mtmd_input_chunks_free(chunks);
+        mtmd_bitmap_free(wrapper.bitmap);
+        if (evalRc != 0) return -9;
+
+        // The cache now holds embeddings: forget the token shadow so the next
+        // turn starts from a clean slate instead of a bogus prefix match.
+        g_cachedTokens.clear();
+        generated = generateLoop(env, jCallback, onText, g_ctx,
+                                 llama_model_get_vocab(g_model),
+                                 static_cast<int>(n_past), maxTokens);
+        g_cachedTokens.clear();
+        g_cachedPos = static_cast<int>(n_past);
+    }
+    return generated;
+#else
+    (void)jPrompt; (void)jImage; (void)maxTokens; (void)jCallback;
+    return -6; // this build has no mtmd / no projector
 #endif
 }
 

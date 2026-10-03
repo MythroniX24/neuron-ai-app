@@ -27,7 +27,13 @@ import kotlinx.coroutines.Dispatchers
  * tool plumbing here.
  */
 class LocalAiProvider(
-    private val repository: LocalModelRepository
+    private val repository: LocalModelRepository,
+    /**
+     * Milestone 9: reads an attachment's raw bytes for the vision projector.
+     * Injected (rather than reaching for a store) so the provider stays
+     * testable; null = image input unavailable.
+     */
+    private val readImageBytes: (suspend (String) -> ByteArray?)? = null
 ) : AIProvider {
 
     override val id = "local"
@@ -37,7 +43,11 @@ class LocalAiProvider(
         repository.models.value.filter { it.enabledForChat }.map { record ->
             // Milestone 6: capabilities come from the GGUF itself (chat
             // template + architecture + declared context), not from a guess.
-            val capabilities = LocalModelRouter.capabilities(record)
+            // Milestone 9: vision additionally requires a real mmproj file.
+            val capabilities = LocalModelRouter.capabilities(
+                record,
+                hasProjector = repository.hasVisionProjector(record)
+            )
             Model(
                 id = capabilities.modelId,
                 displayName = capabilities.displayName,
@@ -87,8 +97,17 @@ class LocalAiProvider(
         }
 
         // Render the conversation through the model's own chat template so
-        // instruct-tuned models see the shape they were trained on.
-        val prompt = renderPrompt(request.messages)
+        // instruct-tuned models see the shape they were trained on. With an
+        // image and a live projector, the media marker goes where the picture
+        // belongs so mtmd can splice in the embeddings.
+        val image = latestImageAttachment(request.messages)
+        val imageBytes = image?.let { attachment ->
+            readImageBytes?.invoke(attachment.id)
+        }
+        val prompt = renderPrompt(
+            request.messages,
+            imageMessageHasMarker = imageBytes != null
+        )
         // Milestone 7: a hot/low-battery device generates fewer tokens per
         // turn, so an answer never runs the phone into a thermal wall.
         val maxTokens = (request.maxOutputTokens ?: 1024)
@@ -100,8 +119,14 @@ class LocalAiProvider(
         // the channel. The channel closes when this scope (incl. the child)
         // completes.
         launch {
-            val result = LocalEngineLoader.generateStreaming(prompt, maxTokens) { piece ->
-                trySend(StreamEvent.Delta(piece))
+            val result = if (imageBytes != null) {
+                LocalEngineLoader.generateMultimodalStreaming(
+                    prompt, imageBytes, maxTokens
+                ) { piece -> trySend(StreamEvent.Delta(piece)) }
+            } else {
+                LocalEngineLoader.generateStreaming(prompt, maxTokens) { piece ->
+                    trySend(StreamEvent.Delta(piece))
+                }
             }
             when (result) {
                 is LocalEngineLoader.GenerationResult.Error ->
@@ -112,18 +137,45 @@ class LocalAiProvider(
     }.flowOn(Dispatchers.Default)
 
     /**
+     * The most recent image attachment in the conversation — the one the
+     * projector will actually be fed. Only the LAST one is passed: mtmd needs
+     * exactly one marker per bitmap, and one picture is the common case.
+     */
+    private fun latestImageAttachment(messages: List<ChatMessage>) =
+        messages.lastOrNull { message -> message.attachments.any { it.isImage } }
+            ?.attachments?.firstOrNull { it.isImage }
+
+    /**
      * Minimal ChatML-style renderer. When the loaded model exposes its own
      * chat template, a future iteration can switch on it; ChatML is the
      * broadest instruct format and degrades gracefully.
+     *
+     * [imageMessageHasMarker] appends llama.cpp's media marker after the last
+     * image-bearing user turn — exactly one marker, matching exactly one
+     * bitmap handed to mtmd.
      */
-    private fun renderPrompt(messages: List<ChatMessage>): String {
+    private fun renderPrompt(
+        messages: List<ChatMessage>,
+        imageMessageHasMarker: Boolean = false
+    ): String {
+        val imageMessageIndex = if (imageMessageHasMarker) {
+            messages.indexOfLast { message -> message.attachments.any { it.isImage } }
+        } else {
+            -1
+        }
         val builder = StringBuilder()
-        for (message in messages) {
+        messages.forEachIndexed { index, message ->
             when (message.role) {
                 ChatMessage.Role.SYSTEM -> builder.append("<|im_start|>system\n")
                     .append(message.content).append("<|im_end|>\n")
-                ChatMessage.Role.USER -> builder.append("<|im_start|>user\n")
-                    .append(message.content).append("<|im_end|>\n")
+                ChatMessage.Role.USER -> {
+                    builder.append("<|im_start|>user\n")
+                    .append(message.content)
+                    if (index == imageMessageIndex) {
+                        builder.append("\n").append(LocalEngineLoader.MEDIA_MARKER).append("\n")
+                    }
+                    builder.append("<|im_end|>\n")
+                }
                 ChatMessage.Role.ASSISTANT -> builder.append("<|im_start|>assistant\n")
                     .append(message.content)
                     .append("<|im_end|>\n")
@@ -137,7 +189,7 @@ class LocalAiProvider(
 
     /** Synchronous generation helper used by [complete]. */
     private fun streamInternal(request: CompletionRequest, onPiece: (String) -> Unit) {
-        val prompt = renderPrompt(request.messages)
+        val prompt = renderPrompt(request.messages, imageMessageHasMarker = false)
         val maxTokens = (request.maxOutputTokens ?: 1024)
             .coerceAtMost(2048)
             .coerceAtMost(repository.maxOutputTokens())

@@ -189,6 +189,7 @@ fun LocalAiScreen(
                 items(state.models, key = { it.id }) { model ->
                     ModelCard(
                         model = model,
+                        visionReady = viewModel.visionReady(model),
                         loadState = state.loadState,
                         benchmarking = state.benchmarkingId == model.id,
                         enabled = model.enabledForChat,
@@ -678,6 +679,7 @@ private fun NoticeCard(text: String, isError: Boolean, onDismiss: () -> Unit) {
 @Composable
 private fun ModelCard(
     model: LocalModelRecord,
+    visionReady: Boolean,
     loadState: LocalLoadState,
     benchmarking: Boolean,
     enabled: Boolean,
@@ -733,6 +735,27 @@ private fun ModelCard(
                     )
                     Checkbox(checked = enabled, onCheckedChange = onToggleEnabled)
                 }
+            }
+
+            // Milestone 9: vision is real only with a projector file imported
+            // beside the GGUF — say which state this model is actually in.
+            if (com.neuron.ai.data.local.LocalModelRouter.architectureSupportsVision(
+                    model.architecture
+                )
+            ) {
+                Text(
+                    if (visionReady) {
+                        "Vision ready — projector detected"
+                    } else {
+                        "Vision model, but no mmproj projector imported yet (images will be refused)"
+                    },
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (visionReady) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    }
+                )
             }
 
             failed?.takeIf { it.modelId == model.id }?.let {

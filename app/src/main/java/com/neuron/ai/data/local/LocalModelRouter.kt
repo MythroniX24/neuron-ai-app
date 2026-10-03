@@ -76,8 +76,8 @@ object LocalModelRouter {
 
     /**
      * Architectures whose GGUF carries a vision tower. llama.cpp loads the
-     * mmproj from a SEPARATE file, so even for these we only report vision as
-     * "declared" — the loader decides whether the projector is present.
+     * mmproj from a SEPARATE file, so an architecture alone is NOT vision —
+     * the projector file has to be present too (see [capabilities]).
      */
     private val VISION_ARCHITECTURES = listOf(
         "llava", "qwen2vl", "minicpmv", "gemma3v", "moondream",
@@ -95,17 +95,27 @@ object LocalModelRouter {
         return VISION_ARCHITECTURES.any { arch.contains(it, ignoreCase = true) }
     }
 
-    /** Honest capability set for one registered model. */
-    fun capabilities(record: LocalModelRecord): LocalModelCapabilities {
+    /**
+     * Honest capability set for one registered model.
+     *
+     * [hasProjector] is the milestone-9 signal: vision is reported only when
+     * the architecture declares a tower AND an mmproj file actually sits next
+     * to the model. Architecture alone is a promise the model cannot keep.
+     */
+    fun capabilities(
+        record: LocalModelRecord,
+        hasProjector: Boolean = false
+    ): LocalModelCapabilities {
         val notes = mutableListOf<String>()
         val declared = record.contextLength?.toInt()
         val context = effectiveContextTokens(record.contextLength)
 
-        val vision = architectureSupportsVision(record.architecture)
-        notes += if (vision) {
-            "Vision tower declared by ${record.architecture}"
-        } else {
-            "Text only — images are not supported"
+        val declaredVision = architectureSupportsVision(record.architecture)
+        val vision = declaredVision && hasProjector
+        notes += when {
+            vision -> "Vision ready — ${record.architecture} with its mmproj projector"
+            declaredVision -> "Vision tower declared, but no mmproj projector file imported yet"
+            else -> "Text only — images are not supported"
         }
         notes += if (record.supportsTools) {
             "Tool-calling chat template found in the GGUF metadata"
@@ -132,9 +142,10 @@ object LocalModelRouter {
      */
     fun decide(
         record: LocalModelRecord,
-        request: LocalRouteRequest
+        request: LocalRouteRequest,
+        hasProjector: Boolean = false
     ): LocalRouteDecision {
-        val capabilities = capabilities(record)
+        val capabilities = capabilities(record, hasProjector)
         if (request.hasImageAttachments && !capabilities.supportsVision) {
             return LocalRouteDecision.Refuse(
                 "\"${record.displayName}\" is a text-only on-device model, so the image " +

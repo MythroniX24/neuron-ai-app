@@ -746,7 +746,10 @@ class ChatViewModel(
                     LocalRouteRequest(
                         hasImageAttachments = lastUserAttachments.any { it.isImage },
                         wantsTools = turnWantsTools()
-                    )
+                    ),
+                    // Milestone 9: images only route on-device when a real
+                    // mmproj projector sits beside the GGUF.
+                    hasProjector = localModels?.hasVisionProjector(model) == true
                 )
             }
             if (route is LocalRouteDecision.Refuse) {
