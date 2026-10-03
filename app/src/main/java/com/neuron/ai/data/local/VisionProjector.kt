@@ -63,9 +63,13 @@ object VisionProjector {
      * → "qwen2.5-vl-3b-instruct". The suffix has to come off, otherwise the
      * "<model>-mmproj" match below can never fire and we would fall through to
      * whichever unrelated "mmproj-*" file happens to be in the folder.
+     *
+     * The quant token itself contains underscores (Q4_K_M, IQ4_XS), so the
+     * class is `[a-z0-9_]+` — plain `[a-z0-9]+` stops at the first underscore
+     * and silently fails to strip anything.
      */
     private val QUANT_TAIL =
-        Regex("""-(?:i?q\d+_[a-z0-9]+|f16|f32|bf16)$""")
+        Regex("""-(?:i?q\d+_[a-z0-9_]+|f\d+|bf16)$""")
 
     private fun baseName(fileName: String): String =
         QUANT_TAIL.replace(fileName.substringBeforeLast('.').lowercase(), "")
