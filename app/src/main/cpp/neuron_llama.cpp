@@ -147,9 +147,10 @@ int decodeRange(llama_context *ctx, const std::vector<llama_token> &tokens, int 
     for (int i = 0; i < count; ++i) {
         batch.token[i] = tokens[from + i];
         batch.pos[i] = from + i;
-        batch.n_seq_id = 1;
-        batch.seq_id[0] = 0;
-        batch.seq_pos[0] = from + i;
+        // n_seq_id/seq_id are PER-TOKEN arrays; the position itself lives in
+        // batch.pos, so there is no separate per-sequence position to set.
+        batch.n_seq_id[i] = 1;
+        batch.seq_id[i][0] = 0;
         // Only the final position needs logits (greedy decode samples from it);
         // every entry is written because llama_batch_init leaves them unset.
         batch.logits[i] = (i == count - 1);
@@ -167,9 +168,8 @@ int decodeToken(llama_context *ctx, llama_token token, int pos) {
     }
     batch.token[0] = token;
     batch.pos[0] = pos;
-    batch.n_seq_id = 1;
-    batch.seq_id[0] = 0;
-    batch.seq_pos[0] = pos;
+    batch.n_seq_id[0] = 1;
+    batch.seq_id[0][0] = 0;
     batch.logits[0] = true;
     const int rc = llama_decode(ctx, batch);
     llama_batch_free(batch);
@@ -378,6 +378,11 @@ Java_com_neuron_ai_data_local_LocalEngineLoader_nativeLoad(
         mparams_mtmd.print_timings = false;
         mparams_mtmd.warmup = false;
         mparams_mtmd.flash_attn_type = cparams.flash_attn_type;
+        // Must match LocalEngineLoader.MEDIA_MARKER on the Kotlin side. mtmd
+        // defaults to "<__media__>"; if the prompt we build does not contain
+        // the exact marker mtmd expects, mtmd_tokenize() counts zero media
+        // markers against one bitmap and rejects every image as a mismatch.
+        mparams_mtmd.media_marker = "<|image|>";
         g_mctx = mtmd_init_from_file(mmprojPath.c_str(), model, mparams_mtmd);
         if (g_mctx == nullptr) {
             return fail(-9, "Vision projector (mmproj) could not be loaded for this model");
