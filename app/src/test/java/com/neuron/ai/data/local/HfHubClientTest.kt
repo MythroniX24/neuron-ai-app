@@ -179,8 +179,9 @@ class HfHubClientTest {
             HfHubClient.selectVariant(variants)?.fileName
         )
         // No preferred quant present → smallest quantized file, never the f16.
+        // Q5_K_M is the only quantized file in this pool, so it wins.
         assertEquals(
-            "m-Q2_K.gguf",
+            "m-Q5_K_M.gguf",
             HfHubClient.selectVariant(
                 listOf(
                     HfHubClient.SearchResult.Variant("m-f16.gguf", 1200, null),

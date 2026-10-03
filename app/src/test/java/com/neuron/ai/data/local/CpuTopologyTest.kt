@@ -5,9 +5,10 @@ import org.junit.Test
 
 class CpuTopologyTest {
 
-    // 2.8 GHz prime + prime, 2.4 GHz big, 1.8 GHz little x4 — a typical
-    // Snapdragon/Dimensity layout (kHz).
-    private val sd845Like = listOf(1785000, 1785000, 2457000, 2457000, 1764000, 1764000, 1764000, 1764000)
+    // 2.8 GHz prime x2, 2.457 GHz big x2, 1.764 GHz little x4 — a typical
+    // Snapdragon/Dimensity layout (kHz). 2457/2800 = 0.877 >= 0.85, so the big
+    // cluster stays in the pool; 1764/2800 = 0.63 drops out.
+    private val sd845Like = listOf(2800000, 2800000, 2457000, 2457000, 1764000, 1764000, 1764000, 1764000)
 
     @Test
     fun `only the prime and big cores count as big`() {

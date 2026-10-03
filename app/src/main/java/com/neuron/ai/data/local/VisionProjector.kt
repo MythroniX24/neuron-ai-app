@@ -58,6 +58,15 @@ object VisionProjector {
     private fun isShard(fileName: String): Boolean =
         Regex("""-\d{5}-of-\d{5}\.gguf$""", RegexOption.IGNORE_CASE).containsMatchIn(fileName)
 
+    /**
+     * The model stem without its quant suffix: "Qwen2.5-VL-3B-Instruct-Q4_K_M"
+     * → "qwen2.5-vl-3b-instruct". The suffix has to come off, otherwise the
+     * "<model>-mmproj" match below can never fire and we would fall through to
+     * whichever unrelated "mmproj-*" file happens to be in the folder.
+     */
+    private val QUANT_TAIL =
+        Regex("""-(?:i?q\d+_[a-z0-9]+|f16|f32|bf16)$""")
+
     private fun baseName(fileName: String): String =
-        fileName.substringBeforeLast('.').lowercase()
+        QUANT_TAIL.replace(fileName.substringBeforeLast('.').lowercase(), "")
 }
