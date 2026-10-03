@@ -12,6 +12,7 @@
 //   NEURON_HAVE_VULKAN    (1|0) — Vulkan GPU backend compiled in (milestone 5)
 
 #include <jni.h>
+#include <algorithm>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -43,6 +44,16 @@ llama_model *g_model = nullptr;
 llama_context *g_ctx = nullptr;
 std::string g_loadedChatTemplate;
 int g_loadedFtype = -1;
+// Configured context window of the ACTIVE context (n_ctx).
+uint32_t g_ctxSize = 0;
+// Milestone 8: shadow copy of the tokens currently held in sequence 0 of the
+// KV cache (prompt tokens + everything generated since). This is what makes
+// prompt-prefix reuse possible: the next turn re-renders the same
+// conversation, so most of it is already computed and only the new tail needs
+// decoding. Verified against the real token list before reuse — Kotlin may
+// only ever LOWER the reuse length, never invent it.
+std::vector<llama_token> g_cachedTokens;
+int g_cachedPos = 0;
 
 #if defined(__ANDROID__) && NEURON_HAVE_VULKAN
 // Vulkan driver/loader presence — probed once, result cached. We dlopen
@@ -98,6 +109,53 @@ void unloadLocked() {
     }
     g_loadedChatTemplate.clear();
     g_loadedFtype = -1;
+    g_ctxSize = 0;
+    g_cachedTokens.clear();
+    g_cachedPos = 0;
+}
+
+// Decodes [tokens[from..n)) at absolute positions [from..n) in sequence 0.
+// Returns llama_decode's code, or 1 when the batch can't be built.
+int decodeRange(llama_context *ctx, const std::vector<llama_token> &tokens, int from) {
+    const int n = static_cast<int>(tokens.size());
+    const int count = n - from;
+    if (count <= 0) {
+        return 0;
+    }
+    llama_batch batch = llama_batch_init(count, 0, 1);
+    if (batch.token == nullptr) {
+        return 1;
+    }
+    for (int i = 0; i < count; ++i) {
+        batch.token[i] = tokens[from + i];
+        batch.pos[i] = from + i;
+        batch.n_seq_id = 1;
+        batch.seq_id[0] = 0;
+        batch.seq_pos[0] = from + i;
+        // Only the final position needs logits (greedy decode samples from it);
+        // every entry is written because llama_batch_init leaves them unset.
+        batch.logits[i] = (i == count - 1);
+    }
+    const int rc = llama_decode(ctx, batch);
+    llama_batch_free(batch);
+    return rc;
+}
+
+// Decodes a single token at an absolute position (the generation step).
+int decodeToken(llama_context *ctx, llama_token token, int pos) {
+    llama_batch batch = llama_batch_init(1, 0, 1);
+    if (batch.token == nullptr) {
+        return 1;
+    }
+    batch.token[0] = token;
+    batch.pos[0] = pos;
+    batch.n_seq_id = 1;
+    batch.seq_id[0] = 0;
+    batch.seq_pos[0] = pos;
+    batch.logits[0] = true;
+    const int rc = llama_decode(ctx, batch);
+    llama_batch_free(batch);
+    return rc;
 }
 
 } // namespace
@@ -216,14 +274,15 @@ Java_com_neuron_ai_data_local_LocalEngineLoader_nativeLoad(
     cparams.n_ctx = static_cast<uint32_t>(contextTokens > 0 ? contextTokens : 2048);
     cparams.n_threads = threads > 0 ? threads : 4;
     cparams.n_threads_batch = cparams.n_threads;
+    // Milestone 8: quantized KV cache (Q8_0) on EVERY path, not just GPU.
+    // Halves KV memory traffic for ~0.1 bit of quality difference, which
+    // means more layers stay resident on the GPU and a longer chat fits.
+    cparams.type_k = GGML_TYPE_Q8_0;
+    cparams.type_v = GGML_TYPE_Q8_0;
     if (gpu) {
         // Attention runs on the GPU: flash attention halves KV memory traffic
-        // and is markedly faster there; quantized KV (Q8_0) shrinks the cache
-        // ~2x with negligible quality loss — more layers fit in the limited
-        // phone GPU memory.
+        // and is markedly faster there.
         cparams.flash_attn_type = LLAMA_FLASH_ATTN_TYPE_ENABLED;
-        cparams.type_k = GGML_TYPE_Q8_0;
-        cparams.type_v = GGML_TYPE_Q8_0;
     }
 
     llama_context *ctx = llama_init_from_model(model, cparams);
@@ -236,6 +295,9 @@ Java_com_neuron_ai_data_local_LocalEngineLoader_nativeLoad(
 
     g_model = model;
     g_ctx = ctx;
+    g_ctxSize = cparams.n_ctx;
+    g_cachedTokens.clear();
+    g_cachedPos = 0;
     const char *tmpl = llama_model_chat_template(model, nullptr);
     g_loadedChatTemplate = tmpl != nullptr ? std::string(tmpl) : std::string();
     g_loadedFtype = llama_model_ftype(model);
@@ -277,19 +339,100 @@ Java_com_neuron_ai_data_local_LocalEngineLoader_nativeChatTemplate(JNIEnv *env, 
 #endif
 }
 
-// Streams generation: each decoded piece is delivered via Callback.text.
-// Prompt must already be rendered through the model's chat template by the
-// Kotlin caller. Returns tokens generated, or a negative error code:
-//   -3 model not loaded  -4 tokenization failed  -5 prompt exceeded context
-JNIEXPORT jint JNICALL
-Java_com_neuron_ai_data_local_LocalEngineLoader_nativeGenerate(
-        JNIEnv *env, jobject, jstring jPrompt, jint maxTokens, jobject jCallback) {
+// Tokenizes a chat-template-rendered prompt into ids. The Kotlin side owns
+// the prefix bookkeeping (pure, unit-tested), so tokenization happens ONCE
+// here and the ids go straight back for the prefix comparison.
+JNIEXPORT jintArray JNICALL
+Java_com_neuron_ai_data_local_LocalEngineLoader_nativeTokenize(
+        JNIEnv *env, jobject, jstring jPrompt) {
 #if NEURON_HAVE_LLAMA
-    if (jPrompt == nullptr || jCallback == nullptr) return -1;
-
+    if (jPrompt == nullptr) return env->NewIntArray(0);
     const char *promptChars = env->GetStringUTFChars(jPrompt, nullptr);
     std::string prompt = promptChars != nullptr ? promptChars : "";
     env->ReleaseStringUTFChars(jPrompt, promptChars);
+
+    std::lock_guard<std::mutex> lock(g_mutex);
+    if (g_model == nullptr) return env->NewIntArray(0);
+    const llama_vocab *vocab = llama_model_get_vocab(g_model);
+
+    // First call with a null buffer returns the required size (negative).
+    const int needed = llama_tokenize(vocab, prompt.c_str(),
+                                      static_cast<int32_t>(prompt.size()),
+                                      nullptr, 0, /* add_special */ true,
+                                      /* parse_special */ true);
+    if (needed >= 0) return env->NewIntArray(0);
+
+    std::vector<llama_token> tokens(static_cast<size_t>(-needed));
+    const int n_tokens = llama_tokenize(vocab, prompt.c_str(),
+                                        static_cast<int32_t>(prompt.size()),
+                                        tokens.data(), static_cast<int32_t>(tokens.size()),
+                                        true, true);
+    if (n_tokens <= 0) return env->NewIntArray(0);
+
+    jintArray out = env->NewIntArray(n_tokens);
+    if (out == nullptr) return nullptr;
+    std::vector<jint> asInt(static_cast<size_t>(n_tokens));
+    for (int i = 0; i < n_tokens; ++i) {
+        asInt[static_cast<size_t>(i)] = static_cast<jint>(tokens[static_cast<size_t>(i)]);
+    }
+    env->SetIntArrayRegion(out, 0, n_tokens, asInt.data());
+    return out;
+#else
+    (void)jPrompt;
+    return env->NewIntArray(0);
+#endif
+}
+
+// Tokens currently held in the KV cache (sequence 0): the prompt of the last
+// turn plus everything generated since. Kotlin compares its freshly
+// tokenized prompt against this to decide how much can be skipped.
+JNIEXPORT jintArray JNICALL
+Java_com_neuron_ai_data_local_LocalEngineLoader_nativeCachedTokens(
+        JNIEnv *env, jobject) {
+#if NEURON_HAVE_LLAMA
+    std::lock_guard<std::mutex> lock(g_mutex);
+    const int n = static_cast<int>(g_cachedTokens.size());
+    jintArray out = env->NewIntArray(n);
+    if (out == nullptr || n == 0) return out;
+    std::vector<jint> asInt(static_cast<size_t>(n));
+    for (int i = 0; i < n; ++i) {
+        asInt[static_cast<size_t>(i)] = static_cast<jint>(g_cachedTokens[static_cast<size_t>(i)]);
+    }
+    env->SetIntArrayRegion(out, 0, n, asInt.data());
+    return out;
+#else
+    return env->NewIntArray(0);
+#endif
+}
+
+// Streams generation from ALREADY TOKENIZED ids; each decoded piece is
+// delivered via Callback.text. [reusePrefix] is how many leading tokens the
+// caller believes are already in the KV cache (0 = decode everything).
+//
+// Milestone 8: the reuse length is VERIFIED against the shadow copy here —
+// the caller can only ever lower it, never make the cache claim tokens it
+// doesn't hold. Re-processing the whole conversation every turn was by far
+// the biggest source of perceived slowness on a phone CPU.
+//
+// Returns tokens generated, or a negative error code:
+//   -3 model not loaded  -4 tokenization failed  -5 prompt exceeded context
+JNIEXPORT jint JNICALL
+Java_com_neuron_ai_data_local_LocalEngineLoader_nativeGenerateTokens(
+        JNIEnv *env, jobject, jintArray jTokens, jint maxTokens, jint reusePrefix,
+        jobject jCallback) {
+#if NEURON_HAVE_LLAMA
+    if (jTokens == nullptr || jCallback == nullptr) return -1;
+
+    const int n_tokens = env->GetArrayLength(jTokens);
+    if (n_tokens <= 0) return -4;
+    std::vector<llama_token> tokens(static_cast<size_t>(n_tokens));
+    {
+        std::vector<jint> asInt(static_cast<size_t>(n_tokens));
+        env->GetIntArrayRegion(jTokens, 0, n_tokens, asInt.data());
+        for (int i = 0; i < n_tokens; ++i) {
+            tokens[static_cast<size_t>(i)] = static_cast<llama_token>(asInt[static_cast<size_t>(i)]);
+        }
+    }
 
     jclass cbClass = env->GetObjectClass(jCallback);
     if (cbClass == nullptr) return -1;
@@ -299,33 +442,37 @@ Java_com_neuron_ai_data_local_LocalEngineLoader_nativeGenerate(
     std::lock_guard<std::mutex> lock(g_mutex);
     if (g_model == nullptr || g_ctx == nullptr) return -3;
 
-    const llama_vocab *vocab = llama_model_get_vocab(g_model);
+    const int nCtx = static_cast<int>(g_ctxSize);
+    if (nCtx > 0 && n_tokens > nCtx) return -5;
 
-    // Tokenize: first call with a null buffer returns the required size.
-    int n_tokens = llama_tokenize(vocab, prompt.c_str(),
-                                  static_cast<int32_t>(prompt.size()),
-                                  nullptr, 0, /* add_special */ true,
-                                  /* parse_special */ true);
-    if (n_tokens >= 0) return -4; // null-buffer probe must return negative
-
-    std::vector<llama_token> tokens(static_cast<size_t>(-n_tokens));
-    n_tokens = llama_tokenize(vocab, prompt.c_str(),
-                              static_cast<int32_t>(prompt.size()),
-                              tokens.data(), static_cast<int32_t>(tokens.size()),
-                              true, true);
-    if (n_tokens <= 0) return -4;
-
-    if (llama_decode(g_ctx, llama_batch_get_one(tokens.data(), n_tokens)) != 0) {
-        return -5; // prompt did not fit the configured context
+    // Verified common prefix: the longest run of identical ids at the start of
+    // both the shadow cache and this prompt, capped by what the caller asked.
+    int keep = 0;
+    if (reusePrefix > 0) {
+        size_t common = 0;
+        while (common < g_cachedTokens.size() && common < tokens.size() &&
+               g_cachedTokens[common] == tokens[common]) {
+            ++common;
+        }
+        keep = static_cast<int>(std::min<size_t>(common, static_cast<size_t>(reusePrefix)));
+        if (keep > 0 && !llama_memory_seq_rm(llama_get_memory(g_ctx), 0, keep, -1)) {
+            // Partial sequence removal refused: fall back to a full decode.
+            keep = 0;
+        }
     }
 
+    if (decodeRange(g_ctx, tokens, keep) != 0) return -5;
+    g_cachedTokens = tokens;
+    g_cachedPos = n_tokens;
+
+    const llama_vocab *vocab = llama_model_get_vocab(g_model);
     char pieceBuf[256];
     int generated = 0;
     llama_token next = sampleGreedy(g_ctx, vocab);
     while (generated < maxTokens) {
         if (llama_vocab_is_eog(vocab, next)) break;
 
-        int n = llama_token_to_piece(vocab, next, pieceBuf, sizeof(pieceBuf), 0, true);
+        const int n = llama_token_to_piece(vocab, next, pieceBuf, sizeof(pieceBuf), 0, true);
         if (n < 0) break;
         if (n > 0) {
             jstring piece = env->NewStringUTF(std::string(pieceBuf, static_cast<size_t>(n)).c_str());
@@ -336,12 +483,16 @@ Java_com_neuron_ai_data_local_LocalEngineLoader_nativeGenerate(
         }
         ++generated;
 
-        if (llama_decode(g_ctx, llama_batch_get_one(&next, 1)) != 0) break;
+        if (nCtx > 0 && g_cachedPos >= nCtx) break; // context full — stop cleanly
+        if (decodeToken(g_ctx, next, g_cachedPos) != 0) break;
+        // The generated token joins the cache so the NEXT turn can reuse it.
+        g_cachedTokens.push_back(next);
+        ++g_cachedPos;
         next = sampleGreedy(g_ctx, vocab);
     }
     return generated;
 #else
-    (void)jPrompt; (void)maxTokens; (void)jCallback;
+    (void)jTokens; (void)maxTokens; (void)reusePrefix; (void)jCallback;
     return -100;
 #endif
 }

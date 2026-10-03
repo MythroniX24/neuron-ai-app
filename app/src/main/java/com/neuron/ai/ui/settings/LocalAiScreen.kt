@@ -451,6 +451,16 @@ fun LocalAiScreen(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
+                        // Milestone 8: how much of the last prompt came out of
+                        // the KV cache instead of being recomputed.
+                        if (state.promptCacheReusePercent > 0) {
+                            Text(
+                                "Last prompt: ${state.promptCacheReusePercent}% reused from " +
+                                    "cache (no recompute)",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
                 }
             }

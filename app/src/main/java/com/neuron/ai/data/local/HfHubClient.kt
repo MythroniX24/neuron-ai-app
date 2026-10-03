@@ -43,7 +43,7 @@ class HfHubClient(
 
         /** Human quant label parsed from the file name (Q4_K_M etc.). */
         val quantLevels: List<String>
-            get() = variants.mapNotNull { v -> quantOf(v.fileName) }.distinct()
+            get() = variants.mapNotNull { v -> HfHubClient.quantOf(v.fileName) }.distinct()
     }
 
     /**
@@ -163,36 +163,6 @@ class HfHubClient(
         return RepoListing(variants = single, httpCode = code)
     }
 
-    /** "-00001-of-00003.gguf" style shard part of a split GGUF. */
-    fun isShardFile(fileName: String): Boolean =
-        SHARD_PATTERN.containsMatchIn(fileName)
-
-    /** Quant labels of a single file name ("Q4_K_M", "IQ4_XS", "F16"...). */
-    fun quantOf(fileName: String): String? =
-        Regex("""[._-](I?Q\d[_A-Za-z0-9]*|F16|F32|BF16)[._-]?""")
-            .find(fileName)?.groupValues?.get(1)
-
-    /**
-     * Picks the variant matching the preferred quant list in order, falling
-     * back to the SMALLEST file that is still a sane quality pick. Pure — the
-     * recommendation flow resolves files live (names drift upstream), so the
-     * catalog only states a PREFERENCE, never a hardcoded file name.
-     */
-    fun selectVariant(
-        variants: List<SearchResult.Variant>,
-        preferredQuants: List<String> = DEFAULT_QUANT_PREFERENCE
-    ): SearchResult.Variant? {
-        if (variants.isEmpty()) return null
-        preferredQuants.forEach { want ->
-            variants.firstOrNull { quantOf(it.fileName)?.equals(want, ignoreCase = true) == true }
-                ?.let { return it }
-        }
-        // No exact match: prefer a mid-size quant, else the smallest file.
-        val quantized = variants.filter { quantOf(it.fileName)?.startsWith("Q") == true }
-        val pool = quantized.ifEmpty { variants }
-        return pool.minByOrNull { it.sizeBytes }
-    }
-
     /** Direct download URL for a repo file (redirects to the CDN). */
     fun downloadUrl(repoId: String, fileName: String): String =
         "$base/${encodePath(repoId)}/resolve/main/${urlEncode(fileName)}"
@@ -216,5 +186,37 @@ class HfHubClient(
          * quality/size), the rest degrade gracefully either way.
          */
         val DEFAULT_QUANT_PREFERENCE = listOf("Q4_K_M", "Q5_K_M", "Q4_K_S", "IQ4_XS", "Q4_0", "Q3_K_M")
+
+        /** "-00001-of-00003.gguf" style shard part of a split GGUF. */
+        fun isShardFile(fileName: String): Boolean =
+            SHARD_PATTERN.containsMatchIn(fileName)
+
+        /** Quant label of a single file name ("Q4_K_M", "IQ4_XS", "F16"...). */
+        fun quantOf(fileName: String): String? =
+            Regex("""[._-](I?Q\d[_A-Za-z0-9]*|F16|F32|BF16)[._-]?""")
+                .find(fileName)?.groupValues?.get(1)
+
+        /**
+         * Picks the variant matching the preferred quant list in order,
+         * falling back to the SMALLEST file that is still a sane quality pick.
+         * Pure — the recommendation flow resolves files live (names drift
+         * upstream), so the catalog only states a PREFERENCE, never a
+         * hardcoded file name.
+         */
+        fun selectVariant(
+            variants: List<SearchResult.Variant>,
+            preferredQuants: List<String> = DEFAULT_QUANT_PREFERENCE
+        ): SearchResult.Variant? {
+            if (variants.isEmpty()) return null
+            preferredQuants.forEach { want ->
+                variants.firstOrNull {
+                    quantOf(it.fileName)?.equals(want, ignoreCase = true) == true
+                }?.let { return it }
+            }
+            // No exact match: prefer a quantized file, else the smallest one.
+            val quantized = variants.filter { quantOf(it.fileName)?.startsWith("Q") == true }
+            val pool = quantized.ifEmpty { variants }
+            return pool.minByOrNull { it.sizeBytes }
+        }
     }
 }
