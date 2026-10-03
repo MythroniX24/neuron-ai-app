@@ -52,7 +52,7 @@ object VisionProjector {
      */
     fun isProjectorFile(fileName: String): Boolean {
         val lower = fileName.lowercase()
-        return lower.endsWith(".gguf") && lower.contains(MARKER) && !isShard(file)
+        return lower.endsWith(".gguf") && lower.contains(MARKER) && !isShard(fileName)
     }
 
     private fun isShard(fileName: String): Boolean =
