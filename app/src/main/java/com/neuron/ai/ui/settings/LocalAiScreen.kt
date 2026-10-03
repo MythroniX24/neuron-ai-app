@@ -59,6 +59,8 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.neuron.ai.data.local.HfHubClient
 import com.neuron.ai.data.local.LocalLoadState
 import com.neuron.ai.data.local.LocalModelRecord
+import com.neuron.ai.data.local.LocalTurnKind
+import com.neuron.ai.data.local.ModelRoutingRule
 import com.neuron.ai.data.local.RecommendedModel
 import com.neuron.ai.data.local.RecommendedModels
 import com.neuron.ai.di.AppContainer
@@ -190,6 +192,10 @@ fun LocalAiScreen(
                     ModelCard(
                         model = model,
                         visionReady = viewModel.visionReady(model),
+                        routing = viewModel.routingRuleFor(model.id),
+                        onRouting = { kind, enabled ->
+                            viewModel.setRoutingRule(model.id, kind, enabled)
+                        },
                         loadState = state.loadState,
                         benchmarking = state.benchmarkingId == model.id,
                         enabled = model.enabledForChat,
@@ -680,6 +686,8 @@ private fun NoticeCard(text: String, isError: Boolean, onDismiss: () -> Unit) {
 private fun ModelCard(
     model: LocalModelRecord,
     visionReady: Boolean,
+    routing: ModelRoutingRule,
+    onRouting: (LocalTurnKind, Boolean) -> Unit,
     loadState: LocalLoadState,
     benchmarking: Boolean,
     enabled: Boolean,
@@ -770,6 +778,23 @@ private fun ModelCard(
                 LinearProgressIndicator(Modifier.fillMaxWidth())
             }
 
+            // Milestone 9: per-model routing rules — which kind of turn this
+            // model should serve. The first enabled rule wins, and a vision
+            // rule is only offered once a projector is really there.
+            Row(horizontalArrangement = Arrangement.spacedBy(Spacing.xs)) {
+                RoutingToggle("Text", routing.text) {
+                    onRouting(LocalTurnKind.TEXT, !routing.text)
+                }
+                RoutingToggle("Tools", routing.tools) {
+                    onRouting(LocalTurnKind.TOOLS, !routing.tools)
+                }
+                RoutingToggle(
+                    label = "Vision",
+                    active = routing.vision,
+                    enabled = visionReady
+                ) { onRouting(LocalTurnKind.VISION, !routing.vision) }
+            }
+
             Row(horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
                 TextButton(onClick = onLoad, enabled = !isActive && !isLoading) {
                     Text(if (isActive) "Loaded" else "Load")
@@ -784,6 +809,27 @@ private fun ModelCard(
                 }
             }
         }
+    }
+}
+
+/** One "use for <kind>" toggle on a model card. */
+@Composable
+private fun RoutingToggle(
+    label: String,
+    active: Boolean,
+    enabled: Boolean = true,
+    onClick: () -> Unit
+) {
+    TextButton(onClick = onClick, enabled = enabled) {
+        Text(
+            if (active) "✓ $label" else label,
+            style = MaterialTheme.typography.labelSmall,
+            color = when {
+                active -> MaterialTheme.colorScheme.primary
+                !enabled -> MaterialTheme.colorScheme.onSurfaceVariant
+                else -> MaterialTheme.colorScheme.onSurfaceVariant
+            }
+        )
     }
 }
 

@@ -31,9 +31,9 @@ object VisionProjector {
      */
     fun findProjectorFor(modelFileName: String, availableFiles: List<String>): String? {
         val base = baseName(modelFileName)
-        val candidates = availableFiles.filter { it != modelFileName }.filter { file ->
-            val lower = file.lowercase()
-            lower.endsWith(".gguf") && lower.contains(MARKER) && !isShard(file)
+        val candidates = availableFiles.filter { it != modelFileName }.filter { candidate ->
+            val lower = candidate.lowercase()
+            lower.endsWith(".gguf") && lower.contains(MARKER) && !isShard(candidate)
         }
         if (candidates.isEmpty()) return null
         return candidates.firstOrNull { it.lowercase().startsWith("$base-$MARKER") }

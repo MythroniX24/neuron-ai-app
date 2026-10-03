@@ -47,8 +47,47 @@ class LocalModelRepository(
     /** Serializes load/unload/benchmark — never two engines racing. */
     private val engineMutex = Mutex()
 
+    // ---- Per-model routing rules (milestone 9) -----------------------------
+    // Declared BEFORE the init block on purpose: Kotlin runs initializers in
+    // declaration order, so loading the rules inside init{} would touch
+    // uninitialized fields.
+
+    private val routingRulesFile = File(context.filesDir, "local-routing-rules.json")
+
+    private val _routingRules = MutableStateFlow<List<ModelRoutingRule>>(emptyList())
+
+    /**
+     * User-defined "use this model for these kinds of turn" rules, in priority
+     * order. Empty by default — with no rules the milestone-6 capability
+     * fallback applies unchanged.
+     */
+    var routingRules: List<ModelRoutingRule>
+        get() = _routingRules.value
+        private set(value) {
+            _routingRules.value = value
+            try {
+                routingRulesFile.writeText(json.encodeToString(value))
+            } catch (t: Throwable) {
+                logger?.w("LocalModels", "Routing rules persist failed", t)
+            }
+        }
+
+    private fun loadRoutingRules() {
+        _routingRules.value = try {
+            if (routingRulesFile.exists()) {
+                json.decodeFromString<List<ModelRoutingRule>>(routingRulesFile.readText())
+            } else {
+                emptyList()
+            }
+        } catch (t: Throwable) {
+            logger?.w("LocalModels", "Routing rules unreadable — ignoring", t)
+            emptyList()
+        }
+    }
+
     init {
         loadManifest()
+        loadRoutingRules()
     }
 
     // ---- Manifest ----------------------------------------------------------
@@ -272,6 +311,32 @@ class LocalModelRepository(
         if (!LocalModelRouter.architectureSupportsVision(record.architecture)) return false
         return visionProjectorFor(record) != null
     }
+
+    // ---- Per-model routing rules (milestone 9) -----------------------------
+
+    /** Turns one routing axis on/off for [modelId]; order is kept stable. */
+    fun setRoutingRule(modelId: String, kind: LocalTurnKind, enabled: Boolean) {
+        val current = LocalRoutingRules.ruleFor(routingRules, modelId).with(kind, enabled)
+        val others = routingRules.filterNot { it.modelId == modelId }
+        val updated = if (current.text || current.tools || current.vision) {
+            others + current
+        } else {
+            // Fully off: drop the rule instead of storing a dead one.
+            others
+        }
+        routingRules = updated
+    }
+
+    /** The rule for [modelId] as the UI should show it (defaults to inert). */
+    fun routingRuleFor(modelId: String): ModelRoutingRule =
+        LocalRoutingRules.ruleFor(routingRules, modelId)
+
+    /**
+     * Routes one turn to a local model by the user's rules, falling back to a
+     * capability-based pick. null = nothing on-device can serve this turn.
+     */
+    fun pickRoutedModel(kind: LocalTurnKind): LocalModelRecord? =
+        LocalRoutingRules.pick(kind, routingRules, _models.value) { hasVisionProjector(it) }
 
     // ---- Thermal / battery throttle (milestone 7) --------------------------
 
