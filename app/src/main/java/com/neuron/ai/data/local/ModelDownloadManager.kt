@@ -52,7 +52,7 @@ class ModelDownloadManager(
         val state: State,
         val error: String? = null
     ) {
-        enum class State { DOWNLOADING, PAUSED, COMPLETED, FAILED }
+        enum class State { DOWNLOADING, PAUSED, WAITING_FOR_WIFI, COMPLETED, FAILED }
     }
 
     private val _downloads = MutableStateFlow<List<Download>>(emptyList())
@@ -73,6 +73,9 @@ class ModelDownloadManager(
     private val jobs = linkedMapOf<String, Job>()
     /** Set when the user PAUSED — distinguishes pause from process death. */
     private val pausedIds = mutableSetOf<String>()
+    /** Set while a download is BLOCKED on Wi-Fi-only (auto-resumes later). */
+    private val wifiBlockedIds: MutableSet<String> =
+        java.util.Collections.synchronizedSet(mutableSetOf<String>())
 
     private fun stateFile(id: String) = File(repository.modelsDir, "$id.download.json")
     private fun partialFile(id: String) = File(repository.modelsDir, "$id.download.part")
@@ -97,6 +100,7 @@ class ModelDownloadManager(
         )
         _downloads.value = _downloads.value.filterNot { it.downloadId == id } + entry
         pausedIds.remove(id)
+        wifiBlockedIds.remove(id)
         persistState(entry)
         jobs[id] = scope.launch { runDownload(entry) }
     }
@@ -104,6 +108,7 @@ class ModelDownloadManager(
     /** Pauses: stops the transfer but keeps the partial bytes for resume. */
     fun pause(downloadId: String) {
         pausedIds.add(downloadId)
+        wifiBlockedIds.remove(downloadId)
         jobs.remove(downloadId)?.cancel()
         update(downloadId) { it.copy(state = Download.State.PAUSED) }
     }
@@ -111,8 +116,11 @@ class ModelDownloadManager(
     /** Resumes a paused download from where it stopped. */
     fun resume(downloadId: String) {
         val entry = _downloads.value.firstOrNull { it.downloadId == downloadId } ?: return
-        if (entry.state != Download.State.PAUSED) return
+        if (entry.state != Download.State.PAUSED &&
+            entry.state != Download.State.WAITING_FOR_WIFI
+        ) return
         pausedIds.remove(downloadId)
+        wifiBlockedIds.remove(downloadId)
         val revived = entry.copy(state = Download.State.DOWNLOADING, error = null)
         update(downloadId) { revived }
         jobs[downloadId] = scope.launch { runDownload(revived) }
@@ -121,6 +129,7 @@ class ModelDownloadManager(
     /** Cancels and DELETES partial bytes. */
     fun cancel(downloadId: String) {
         pausedIds.remove(downloadId)
+        wifiBlockedIds.remove(downloadId)
         jobs.remove(downloadId)?.cancel()
         partialFile(downloadId).delete()
         stateFile(downloadId).delete()
@@ -129,8 +138,10 @@ class ModelDownloadManager(
 
     /**
      * Restart survival: re-arms persisted downloads. Ones that were actively
-     * transferring resume AUTOMATICALLY; paused ones stay paused (user taps
-     * resume). The .part file length is the authoritative byte count.
+     * transferring resume AUTOMATICALLY (the doc always claimed this — the
+     * code used to leave everything PAUSED, so a download interrupted by a
+     * process death never picked up on its own); explicitly paused ones stay
+     * paused. The .part file length is the authoritative byte count.
      * Called once at app start.
      */
     fun restore() {
@@ -159,6 +170,7 @@ class ModelDownloadManager(
                 stateJson.delete()
             }
         }
+        watchNetwork()
     }
 
     // ---- Core transfer ------------------------------------------------------
@@ -166,19 +178,31 @@ class ModelDownloadManager(
     private suspend fun runDownload(entry: Download) = withContext(dispatchers.io) {
         val partFile = partialFile(entry.downloadId)
         try {
-            if (wifiOnly && !isUnmetered()) {
-                throw IOException("Waiting for Wi-Fi — Wi-Fi-only downloads is ON")
+            // Split GGUF files (-00001-of-00003) cannot run: every shard would
+            // have to land first. Reject up front instead of downloading a
+            // model that can never load.
+            if (HfHubClient.isShardFile(entry.fileName)) {
+                throw IOException("Split (multi-shard) GGUF files are not supported yet — pick a single-file quantization")
             }
+            if (wifiOnly && !isUnmetered()) {
+                // Not an error: the download WAITS and resumes by itself the
+                // moment an unmetered network appears. Treating it as FAILED
+                // (the old behaviour) is why downloads "never worked" on
+                // mobile data with Wi-Fi-only on.
+                waitForWifi(entry)
+                return@withContext
+            }
+            watchNetwork()
 
             val url = hub.downloadUrl(entry.repoId, entry.fileName)
             val already = partFile.length()
             val builder = Request.Builder().url(url)
             if (already > 0) builder.header("Range", "bytes=$already-")
             http.newCall(builder.build()).execute().use { resp ->
-                if (!resp.isSuccessful) throw IOException("HTTP ${resp.code} from the model hub")
+                if (!resp.isSuccessful) throw IOException(describeHttpFailure(resp.code, entry))
                 val resumed = already > 0 && resp.code == 206
                 if (already > 0 && !resumed) {
-                    if (resp.code != 200) throw IOException("HTTP ${resp.code} from the model hub")
+                    if (resp.code != 200) throw IOException(describeHttpFailure(resp.code, entry))
                     // Server ignored Range — restart the file cleanly.
                     partFile.delete()
                 }
@@ -215,15 +239,88 @@ class ModelDownloadManager(
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (t: Throwable) {
+            // Network dropped mid-transfer (e.g. Wi-Fi → mobile data): wait for
+            // an unmetered network instead of surfacing a hard failure, the
+            // partial bytes stay on disk and the transfer continues later.
+            if (t is IOException && wifiOnly && !isUnmetered()) {
+                waitForWifi(entry)
+                return@withContext
+            }
             logger?.w("Download", "Download failed: ${t.message}")
             update(entry.downloadId) {
                 it.copy(
-                    state = if (pausedIds.contains(it.downloadId)) Download.State.PAUSED
-                    else Download.State.FAILED,
+                    state = when {
+                        pausedIds.contains(it.downloadId) -> Download.State.PAUSED
+                        wifiBlockedIds.contains(it.downloadId) -> Download.State.WAITING_FOR_WIFI
+                        else -> Download.State.FAILED
+                    },
                     error = t.message ?: "Download failed"
                 )
             }
         }
+    }
+
+    /**
+     * Puts [entry] into WAITING_FOR_WIFI and arranges for it to resume itself
+     * on the next unmetered network (see [watchNetwork]).
+     */
+    private fun waitForWifi(entry: Download) {
+        wifiBlockedIds.add(entry.downloadId)
+        jobs.remove(entry.downloadId)
+        update(entry.downloadId) {
+            it.copy(
+                state = Download.State.WAITING_FOR_WIFI,
+                error = "Waiting for Wi-Fi (Wi-Fi-only is ON) — will resume automatically"
+            )
+        }
+        watchNetwork()
+    }
+
+    /**
+     * One-shot-registered network watcher: as soon as the device is on an
+     * unmetered network again, every Wi-Fi-blocked download restarts from its
+     * partial bytes. Registered lazily (first download / restore), never
+     * twice for the same manager instance.
+     */
+    private fun watchNetwork() {
+        if (networkCallbackRegistered) return
+        val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+            ?: return
+        networkCallbackRegistered = true
+        runCatching {
+            cm.registerDefaultNetworkCallback(
+                object : ConnectivityManager.NetworkCallback() {
+                    override fun onAvailable(network: android.net.Network) {
+                        if (!isUnmetered()) return
+                        val blocked = wifiBlockedIds.toList()
+                        blocked.forEach { id ->
+                            wifiBlockedIds.remove(id)
+                            resume(id)
+                        }
+                    }
+                }
+            )
+        }
+    }
+
+    private var networkCallbackRegistered = false
+
+    /**
+     * Maps a Hub HTTP status onto the ACTION the user can take. Pure and
+     * static so it is unit-tested: 401/403 is a gated repo (needs a HF login
+     * + accepted licence), 404 a renamed file, 429 a rate limit.
+     */
+    fun describeHttpFailure(code: Int, entry: Download? = null): String = when (code) {
+        401, 403 -> if (entry != null && entry.repoId.startsWith("google/")) {
+            "Google's repos require a Hugging Face account: open ${entry.repoId} in a browser, " +
+                "accept the Gemma licence, then download again."
+        } else {
+            "This model is gated on Hugging Face — sign in on the web, accept its licence, then retry."
+        }
+        404 -> "That file no longer exists in the repo (renamed upstream). Pick another quantization."
+        429 -> "Hugging Face is rate-limiting this app. Wait a minute and retry."
+        in 500..599 -> "Hugging Face server error (HTTP $code). Try again shortly."
+        else -> "Download failed (HTTP $code from the model hub)."
     }
 
     /** sha256 verification against the Hub LFS hash, then registration. */

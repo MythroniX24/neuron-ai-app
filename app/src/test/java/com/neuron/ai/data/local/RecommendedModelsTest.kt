@@ -32,6 +32,28 @@ class RecommendedModelsTest {
     }
 
     @Test
+    fun `catalog points at publicly downloadable repos, not gated ones`() {
+        // google/gemma-* and most Meta mirrors return HTTP 401 without a Hub
+        // login, which is why the recommended list could never be fetched.
+        // The catalog must only name repos that answer anonymously.
+        assertTrue(RecommendedModels.all.none { it.hfRepo.startsWith("google/") })
+        assertTrue(RecommendedModels.all.none { it.hfRepo.contains("Llama-3.1") })
+    }
+
+    @Test
+    fun `catalog states a quant preference instead of a hardcoded file name`() {
+        // Hub file names drift upstream; a stale hardcoded name 404s
+        // silently, so entries only carry a preference.
+        assertTrue(RecommendedModels.all.all { it.preferredQuants.isNotEmpty() })
+        assertEquals(
+            HfHubClient.DEFAULT_QUANT_PREFERENCE,
+            RecommendedModels.all.first().preferredQuants
+        )
+        // Nothing is "downloaded" until the live listing fills the variants.
+        assertTrue(RecommendedModels.all.none { it.downloadable })
+    }
+
+    @Test
     fun `fit classification warns and greys out by available ram`() {
         val tiny = RecommendedModels.all.first { it.id == "tinyllama" }
         val heavy = RecommendedModels.all.first { it.id == "gemma-2-9b" }
