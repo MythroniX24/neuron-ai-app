@@ -31,7 +31,7 @@ class VisionProjectorTest {
     }
 
     @Test
-    fun `the llama.cpp default naming is used when nothing matches the base`() {
+    fun `the default mmproj-first naming is used when nothing matches the base`() {
         val files = listOf("some-model-Q4_K_M.gguf", "mmproj-model-f16.gguf")
         assertEquals(
             "mmproj-model-f16.gguf",
