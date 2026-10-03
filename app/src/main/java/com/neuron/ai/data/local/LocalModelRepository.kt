@@ -413,10 +413,20 @@ class LocalModelRepository(
         return memoryInfo.totalMem to memoryInfo.availMem
     }
 
-    private fun defaultThreads(): Int =
-        // Conservative default for phone SoCs: leave headroom for the system
-        // instead of pinning every core (thermal discipline, milestone 7).
-        Runtime.getRuntime().availableProcessors().coerceIn(2, 6)
+    private fun defaultThreads(): Int {
+        // Milestone 8: thread the BIG cores, not every core. A phone SoC
+        // mixes 2-4 fast cores with a much slower efficiency cluster; running
+        // inference on the little ones costs 2-4x per clock and starves the
+        // big cores. Falls back to the old conservative cap when topology
+        // can't be read.
+        val total = Runtime.getRuntime().availableProcessors()
+        return try {
+            val bigCores = CpuTopology.bigCoreCount(CpuTopology.readPeakFrequencies(total))
+            CpuTopology.resolveThreads(bigCores = bigCores, totalCores = total)
+        } catch (_: Throwable) {
+            total.coerceIn(2, 6)
+        }
+    }
 
     /** Test hook: replace the manifest contents (never used in prod paths). */
     fun replaceAllForTest(records: List<LocalModelRecord>) {

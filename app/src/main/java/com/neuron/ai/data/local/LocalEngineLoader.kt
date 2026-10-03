@@ -58,11 +58,23 @@ object LocalEngineLoader {
     ): Int
     private external fun nativeUnload(): Boolean
     private external fun nativeChatTemplate(): String
-    private external fun nativeGenerate(
-        prompt: String,
+    private external fun nativeTokenize(prompt: String): IntArray
+    private external fun nativeCachedTokens(): IntArray
+    private external fun nativeGenerateTokens(
+        tokens: IntArray,
         maxTokens: Int,
+        reusePrefix: Int,
         callback: TokenCallback
     ): Int
+
+    /** Last turn's prompt-prefix reuse, for the performance card. */
+    @Volatile
+    var lastPromptTokens: Int = 0
+        private set
+
+    @Volatile
+    var lastReusedTokens: Int = 0
+        private set
 
     /** Streaming callback invoked from the native decode loop (one thread). */
     fun interface TokenCallback {
@@ -134,6 +146,20 @@ object LocalEngineLoader {
         if (!nativeLibraryAvailable) {
             return GenerationResult.Error("Inference engine is not available in this build.")
         }
+        // Milestone 8: tokenize once, reuse the cached prefix. A native
+        // failure here falls back to "no reuse", never to an error.
+        val tokens = runCatching { nativeTokenize(prompt) }.getOrElse { IntArray(0) }
+        val reuse = if (tokens.isEmpty()) {
+            0
+        } else {
+            PromptPrefix.commonPrefixLength(
+                runCatching { nativeCachedTokens() }.getOrElse { IntArray(0) },
+                tokens
+            )
+        }
+        lastPromptTokens = tokens.size
+        lastReusedTokens = reuse
+
         var failure: String? = null
         val callback = TokenCallback { piece ->
             try {
@@ -142,7 +168,10 @@ object LocalEngineLoader {
                 failure = t.message ?: "callback failed"
             }
         }
-        return when (val code = nativeGenerate(prompt, maxTokens, callback)) {
+        if (tokens.isEmpty()) {
+            return GenerationResult.Error("Could not tokenize the conversation")
+        }
+        return when (val code = nativeGenerateTokens(tokens, maxTokens, reuse, callback)) {
             0 -> GenerationResult.Done(0) // nothing generated (immediate EOS)
             in 1..Int.MAX_VALUE -> GenerationResult.Done(code)
             -100 -> GenerationResult.Error("Engine unavailable (stub build)")

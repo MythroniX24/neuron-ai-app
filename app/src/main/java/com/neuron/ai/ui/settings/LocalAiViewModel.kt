@@ -83,7 +83,13 @@ data class LocalAiUiState(
     /** Threads the next generation will actually use (after throttling). */
     val effectiveThreads: Int = 0,
     /** True when the thermal policy vetoed GPU offload for the next load. */
-    val gpuThrottled: Boolean = false
+    val gpuThrottled: Boolean = false,
+    /**
+     * Milestone 8: how much of the last prompt was served from the KV cache
+     * instead of being re-processed. High values are the reason follow-up
+     * turns feel instant.
+     */
+    val promptCacheReusePercent: Int = 0
 )
 
 /**
@@ -118,7 +124,11 @@ class LocalAiViewModel(
             powerSaveMode = health.powerSaveMode,
             throttleNotice = throttle.reason,
             effectiveThreads = throttle.threads,
-            gpuThrottled = throttle.throttled && !throttle.allowGpu && repository.useGpu
+            gpuThrottled = throttle.throttled && !throttle.allowGpu && repository.useGpu,
+            promptCacheReusePercent = com.neuron.ai.data.local.PromptPrefix.reusePercent(
+                LocalEngineLoader.lastReusedTokens,
+                LocalEngineLoader.lastPromptTokens
+            )
         )
         downloadManager?.let { dm ->
             viewModelScope.launch {
