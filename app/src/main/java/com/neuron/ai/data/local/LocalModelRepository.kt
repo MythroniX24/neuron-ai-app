@@ -408,6 +408,19 @@ class LocalModelRepository(
      * GPU path was requested and failed. Never leaves a half-loaded engine.
      */
     private fun loadEngine(record: LocalModelRecord): LocalEngineLoader.LoadResult {
+        // Mmapping a multi-GB GGUF takes real time, and the user will very
+        // often switch apps mid-load. Without this the process can be killed
+        // and the whole load restarts from zero when they come back.
+        ModelTransferService.ensureRunning(context)
+        ModelTransferService.setLoading(record.displayName, true)
+        return try {
+            loadEngineInternal(record)
+        } finally {
+            ModelTransferService.setLoading(record.displayName, false)
+        }
+    }
+
+    private fun loadEngineInternal(record: LocalModelRecord): LocalEngineLoader.LoadResult {
         val path = File(modelsDir, record.fileName).absolutePath
         // Milestone 6: the GGUF's declared context, capped to what a phone can
         // hold. Milestone 7: threads + GPU filtered through the throttle policy.

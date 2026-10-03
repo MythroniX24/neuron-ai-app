@@ -4,6 +4,15 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- Camera is used only when the user picks "Camera" in the attach sheet. -->
     <uses-permission android:name="android.permission.CAMERA" />
+    <!--
+      Model downloads and GGUF loading must survive the app being minimised, so
+      the transfer runs as a foreground service. Without these Android is free to
+      kill the process mid-download and nothing restarts the transfer.
+    -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!-- Android 13+ needs this before the progress notification is visible. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
         android:name=".NeuronApplication"
@@ -13,6 +22,15 @@
         android:label="@string/app_name"
         android:supportsRtl="true"
         android:theme="@style/Theme.NeuronAI">
+
+        <!--
+          dataSync is the honest type here: the service exists to move model
+          bytes and keep the mmap alive. It is not location/media/phone-call.
+        -->
+        <service
+            android:name=".data.local.ModelTransferService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
 
         <activity
             android:name=".MainActivity"

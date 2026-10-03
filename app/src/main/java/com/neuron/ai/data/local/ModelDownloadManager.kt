@@ -103,6 +103,8 @@ class ModelDownloadManager(
         wifiBlockedIds.remove(id)
         persistState(entry)
         jobs[id] = scope.launch { runDownload(entry) }
+        // Keep the process alive for the transfer; see ModelTransferService.
+        ModelTransferService.ensureRunning(context)
     }
 
     /** Pauses: stops the transfer but keeps the partial bytes for resume. */
@@ -124,6 +126,7 @@ class ModelDownloadManager(
         val revived = entry.copy(state = Download.State.DOWNLOADING, error = null)
         update(downloadId) { revived }
         jobs[downloadId] = scope.launch { runDownload(revived) }
+        ModelTransferService.ensureRunning(context)
     }
 
     /** Cancels and DELETES partial bytes. */
@@ -150,8 +153,14 @@ class ModelDownloadManager(
         files.forEach { stateJson ->
             val id = stateJson.name.removeSuffix(".download.json")
             runCatching {
-                // repoId|fileName|displayName|totalBytes|sha256-or-dash
+                // repoId|fileName|displayName|totalBytes|sha256-or-dash|state
                 val parts = stateJson.readText().trim().split("|")
+                // A transfer that was mid-flight when the process died should
+                // pick itself back up — that is the whole point of the .part
+                // file. One the user deliberately paused must stay paused, or
+                // they can never stop a download they no longer want.
+                val recordedState = parts.getOrNull(5)
+                val wasInFlight = recordedState != null && recordedState in IN_FLIGHT_STATES
                 val entry = Download(
                     downloadId = id,
                     repoId = parts[0],
@@ -160,16 +169,24 @@ class ModelDownloadManager(
                     totalBytes = parts[3].toLong(),
                     downloadedBytes = partialFile(id).length(),
                     sha256 = parts.getOrNull(4)?.takeIf { it != "-" },
-                    state = Download.State.PAUSED
+                    state = if (wasInFlight) {
+                        Download.State.DOWNLOADING
+                    } else {
+                        Download.State.PAUSED
+                    }
                 )
                 _downloads.value = _downloads.value.filterNot {
                     it.downloadId == entry.downloadId
                 } + entry
+                if (wasInFlight) {
+                    jobs[id] = scope.launch { runDownload(entry) }
+                }
             }.onFailure { t ->
                 logger?.w("Download", "State restore failed for $id", t)
                 stateJson.delete()
             }
         }
+        if (jobs.isNotEmpty()) ModelTransferService.ensureRunning(context)
         watchNetwork()
     }
 
@@ -362,9 +379,16 @@ class ModelDownloadManager(
     // ---- Helpers -----------------------------------------------------------
 
     private fun update(id: String, transform: (Download) -> Download) {
+        var stateChanged: Download? = null
         _downloads.value = _downloads.value.map {
-            if (it.downloadId == id) transform(it) else it
+            if (it.downloadId != id) return@map it
+            val next = transform(it)
+            if (next.state != it.state) stateChanged = next
+            next
         }
+        // This runs on every progress tick, so only the STATE is worth writing
+        // to disk — byte counts are already recoverable from the .part file.
+        stateChanged?.let { persistState(it) }
     }
 
     /** Metadata only — byte counts live in the .part file itself. */
@@ -373,7 +397,11 @@ class ModelDownloadManager(
             stateFile(entry.downloadId).writeText(
                 listOf(
                     entry.repoId, entry.fileName, entry.displayName,
-                    entry.totalBytes.toString(), entry.sha256 ?: "-"
+                    entry.totalBytes.toString(), entry.sha256 ?: "-",
+                    // Last known state, so restore() can tell "the user paused
+                    // this" apart from "the process died mid-transfer" and only
+                    // auto-resume the latter.
+                    entry.state.name
                 ).joinToString("|")
             )
         }
@@ -392,6 +420,16 @@ class ModelDownloadManager(
     }
 
     companion object {
+        /**
+         * States that mean "this transfer was running when we last wrote it
+         * down". Restoring one of these means the process died mid-transfer, so
+         * it is safe (and expected) to pick the transfer back up.
+         */
+        private val IN_FLIGHT_STATES = setOf(
+            Download.State.DOWNLOADING.name,
+            Download.State.WAITING_FOR_WIFI.name
+        )
+
         /** Deterministic per-(repo,file) id — resume works across restarts. */
         fun stableIdOf(repoId: String, fileName: String): String =
             "dl-" + (repoId + "/" + fileName).fold(0) { acc, c ->

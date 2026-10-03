@@ -84,6 +84,25 @@ fun LocalAiScreen(
         ActivityResultContracts.OpenDocument()
     ) { uri -> uri?.let { viewModel.import(it) } }
 
+    // Downloads and model loads run as a foreground service so they survive the
+    // app being minimised. On Android 13+ the progress notification is only
+    // visible if POST_NOTIFICATIONS is granted, so ask once from the same tap
+    // that starts the transfer. Declining does not break the transfer.
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val notificationPermission = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { /* progress still shows in-app; nothing to do on grant/deny */ }
+    val requestNotificationPermission: () -> Unit = {
+        if (android.os.Build.VERSION.SDK_INT >= 33) {
+            val granted = androidx.core.content.ContextCompat.checkSelfPermission(
+                context, android.Manifest.permission.POST_NOTIFICATIONS
+            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+            if (!granted) {
+                notificationPermission.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }
+    }
+
     var deleteTarget by remember { mutableStateOf<LocalModelRecord?>(null) }
     var variantTarget by remember {
         mutableStateOf<VariantTarget?>(null)
@@ -315,7 +334,10 @@ fun LocalAiScreen(
                     RecommendedCard(
                         model = model,
                         fit = viewModel.fitFor(model),
-                        onDownload = { viewModel.quickDownloadRecommended(model) },
+                        onDownload = {
+                            requestNotificationPermission()
+                            viewModel.quickDownloadRecommended(model)
+                        },
                         onShowFiles = {
                             variantTarget = VariantTarget(
                                 model.hfRepo,
@@ -496,6 +518,7 @@ fun LocalAiScreen(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clickable {
+                                    requestNotificationPermission()
                                     viewModel.startDownload(
                                         target.repoId, variant, target.displayName
                                     )
