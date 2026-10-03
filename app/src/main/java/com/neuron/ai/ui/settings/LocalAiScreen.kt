@@ -56,6 +56,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.neuron.ai.data.local.HfHubClient
 import com.neuron.ai.data.local.LocalLoadState
 import com.neuron.ai.data.local.LocalModelRecord
 import com.neuron.ai.data.local.RecommendedModel
@@ -200,8 +201,93 @@ fun LocalAiScreen(
                 }
             }
 
-            // ---- Recommended (curated, shown before any search) --------------
-            if (state.searchQuery.isBlank()) {
+            // ---- Hub search (ALWAYS visible) -------------------------------
+            // The field used to appear only AFTER a query was typed, and the
+            // recommended tap filled it with a display name ("Gemma 2 2B")
+            // that the Hub returns nothing for — leaving the screen empty
+            // with no way back. Search is now a plain, always-on field.
+            item {
+                OutlinedTextField(
+                    value = state.searchQuery,
+                    onValueChange = { viewModel.onSearchQueryChange(it) },
+                    modifier = Modifier.fillMaxWidth(),
+                    placeholder = { Text("Search Hugging Face (GGUF models)…") },
+                    singleLine = true,
+                    leadingIcon = {
+                        Icon(Icons.Outlined.Search, contentDescription = null)
+                    }
+                )
+            }
+            state.searchError?.let { error ->
+                item {
+                    NoticeCard(
+                        text = error,
+                        isError = true,
+                        onDismiss = { viewModel.clearSearchError() }
+                    )
+                }
+            }
+            if (state.searching) {
+                item {
+                    Text(
+                        "Searching the Hub…",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+            if (state.searchQuery.isNotBlank() && !state.searching &&
+                state.searchResults.isEmpty()
+            ) {
+                item {
+                    Text(
+                        "No GGUF models matched \"${state.searchQuery}\". Try a model " +
+                            "name like Qwen, Llama or Gemma.",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+            items(state.searchResults, key = { it.repoId }) { hit ->
+                SearchResultCard(
+                    hit = hit,
+                    onPickVariant = { repoId, variants, displayName ->
+                        variantTarget = VariantTarget(repoId, variants, displayName)
+                    }
+                )
+            }
+            if (state.searchQuery.isNotBlank()) {
+                item {
+                    TextButton(onClick = { viewModel.onSearchQueryChange("") }) {
+                        Text("Clear search")
+                    }
+                }
+            }
+
+            // ---- Downloads in progress (any source) -----------------------
+            if (state.downloads.isNotEmpty()) {
+                item {
+                    Text(
+                        "Downloads",
+                        style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+                items(state.downloads, key = { it.downloadId }) { download ->
+                    DownloadRow(
+                        download = download,
+                        formatBytes = viewModel::formatBytes,
+                        onPause = viewModel::pauseDownload,
+                        onResume = viewModel::resumeDownload,
+                        onCancel = viewModel::cancelDownload
+                    )
+                }
+            }
+
+            // ---- Recommended (curated) -------------------------------------
+            // Shown while the query is blank OR produced nothing, so the
+            // catalog can never be the thing that "disappears".
+            if (state.searchQuery.isBlank() || state.searchResults.isEmpty()) {
                 item {
                     Text(
                         "Recommended",
@@ -209,62 +295,28 @@ fun LocalAiScreen(
                         color = MaterialTheme.colorScheme.primary
                     )
                 }
-                items(viewModel.recommended, key = { it.id }) { model ->
-                    RecommendedCard(
-                        model = model,
-                        fit = viewModel.fitFor(model),
-                        onDownload = { viewModel.onSearchQueryChange(model.displayName) }
-                    )
-                }
-            } else {
-                // ---- Hub search results -------------------------------------
-                item {
-                    OutlinedTextField(
-                        value = state.searchQuery,
-                        onValueChange = { viewModel.onSearchQueryChange(it) },
-                        modifier = Modifier.fillMaxWidth(),
-                        placeholder = { Text("Search Hugging Face (GGUF models)…") },
-                        singleLine = true,
-                        leadingIcon = {
-                            Icon(Icons.Outlined.Search, contentDescription = null)
-                        }
-                    )
-                }
-                state.searchError?.let { error ->
-                    item {
-                        NoticeCard(
-                            text = error,
-                            isError = true,
-                            onDismiss = { viewModel.clearSearchError() }
-                        )
-                    }
-                }
-                if (state.searching) {
+                if (state.recommendLoading) {
                     item {
                         Text(
-                            "Searching the Hub…",
-                            style = MaterialTheme.typography.labelMedium,
+                            "Checking availability on Hugging Face…",
+                            style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 }
-                items(state.searchResults, key = { it.repoId }) { hit ->
-                    SearchResultCard(
-                        hit = hit,
-                        downloads = state.downloads,
-                        onPickVariant = { repoId, variants, displayName ->
-                            variantTarget = VariantTarget(repoId, variants, displayName)
-                        },
-                        onPause = viewModel::pauseDownload,
-                        onResume = viewModel::resumeDownload,
-                        onCancel = viewModel::cancelDownload,
-                        onQueryChange = viewModel::onSearchQueryChange
+                items(state.recommended, key = { it.id }) { model ->
+                    RecommendedCard(
+                        model = model,
+                        fit = viewModel.fitFor(model),
+                        onDownload = { viewModel.quickDownloadRecommended(model) },
+                        onShowFiles = {
+                            variantTarget = VariantTarget(
+                                model.hfRepo,
+                                viewModel.recommendedVariants(model),
+                                model.displayName
+                            )
+                        }
                     )
-                }
-                item {
-                    TextButton(onClick = { viewModel.onSearchQueryChange("") }) {
-                        Text("Clear search")
-                    }
                 }
             }
 
@@ -481,18 +533,9 @@ private data class VariantTarget(
 @Composable
 private fun SearchResultCard(
     hit: com.neuron.ai.ui.settings.SearchHit,
-    downloads: List<com.neuron.ai.data.local.ModelDownloadManager.Download>,
-    onPickVariant: (String, List<com.neuron.ai.data.local.HfHubClient.SearchResult.Variant>, String) -> Unit,
-    onPause: (String) -> Unit,
-    onResume: (String) -> Unit,
-    onCancel: (String) -> Unit,
-    onQueryChange: (String) -> Unit
+    onPickVariant: (String, List<com.neuron.ai.data.local.HfHubClient.SearchResult.Variant>, String) -> Unit
 ) {
     val displayName = hit.repoId.substringAfterLast('/')
-    val activeDownload = downloads.firstOrNull {
-        it.displayName == displayName && it.state !=
-            com.neuron.ai.data.local.ModelDownloadManager.Download.State.COMPLETED
-    }
     Surface(
         shape = RoundedCornerShape(14.dp),
         color = MaterialTheme.colorScheme.surface,
@@ -509,49 +552,90 @@ private fun SearchResultCard(
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            activeDownload?.let { dl ->
-                Column(Modifier.padding(top = Spacing.sm)) {
-                    Text(
-                        when (dl.state) {
-                            com.neuron.ai.data.local.ModelDownloadManager.Download.State.DOWNLOADING ->
-                                "Downloading… ${dl.downloadedBytes * 100 / dl.totalBytes.coerceAtLeast(1)}%"
-                            com.neuron.ai.data.local.ModelDownloadManager.Download.State.PAUSED ->
-                                "Paused"
-                            com.neuron.ai.data.local.ModelDownloadManager.Download.State.FAILED ->
-                                dl.error ?: "Failed"
-                            else -> ""
-                        },
-                        style = MaterialTheme.typography.labelSmall
-                    )
-                    if (dl.state == com.neuron.ai.data.local.ModelDownloadManager.Download.State.DOWNLOADING) {
-                        LinearProgressIndicator(
-                            progress = {
-                                (dl.downloadedBytes.toFloat() / dl.totalBytes.coerceAtLeast(1)).coerceIn(0f, 1f)
-                            },
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                    }
-                    Row {
-                        when (dl.state) {
-                            com.neuron.ai.data.local.ModelDownloadManager.Download.State.DOWNLOADING ->
-                                TextButton(onClick = { onPause(dl.downloadId) }) { Text("Pause") }
-                            com.neuron.ai.data.local.ModelDownloadManager.Download.State.PAUSED ->
-                                TextButton(onClick = { onResume(dl.downloadId) }) { Text("Resume") }
-                            else -> {}
-                        }
-                        TextButton(onClick = { onCancel(dl.downloadId) }) { Text("Cancel") }
-                    }
-                }
+            // Why there is nothing to download (gated repo, renamed, rate
+            // limited) — shown instead of a silently dead card.
+            hit.unavailableReason?.let { reason ->
+                Text(
+                    reason,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.error
+                )
             }
-            if (activeDownload == null && hit.variants.isNotEmpty()) {
+            if (hit.variants.isNotEmpty()) {
                 TextButton(onClick = { onPickVariant(hit.repoId, hit.variants, displayName) }) {
                     Text("Get")
                 }
             }
-            if (!hit.loadingVariants && hit.variants.isEmpty()) {
-                TextButton(onClick = { onQueryChange(displayName) }) {
-                    Text("No GGUF files — search again")
+        }
+    }
+}
+
+/**
+ * One tracked download with progress + pause/resume/cancel. Lives in its own
+ * section (not inside the card that started it) so a download launched from
+ * the recommended list is still visible.
+ */
+@Composable
+private fun DownloadRow(
+    download: com.neuron.ai.data.local.ModelDownloadManager.Download,
+    formatBytes: (Long) -> String,
+    onPause: (String) -> Unit,
+    onResume: (String) -> Unit,
+    onCancel: (String) -> Unit
+) {
+    val state = download.state
+    val fraction = (download.downloadedBytes.toFloat() /
+        download.totalBytes.coerceAtLeast(1L)).coerceIn(0f, 1f)
+    Surface(
+        shape = RoundedCornerShape(14.dp),
+        color = MaterialTheme.colorScheme.surface,
+        tonalElevation = 1.dp
+    ) {
+        Column(Modifier.padding(Spacing.lg)) {
+            Text(download.displayName, style = MaterialTheme.typography.titleSmall)
+            Text(
+                "${formatBytes(download.downloadedBytes)} / ${formatBytes(download.totalBytes)}",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            val status = when (state) {
+                com.neuron.ai.data.local.ModelDownloadManager.Download.State.DOWNLOADING ->
+                    "Downloading… ${(fraction * 100).toInt()}%"
+                com.neuron.ai.data.local.ModelDownloadManager.Download.State.PAUSED -> "Paused"
+                com.neuron.ai.data.local.ModelDownloadManager.Download.State.WAITING_FOR_WIFI ->
+                    download.error ?: "Waiting for Wi-Fi…"
+                com.neuron.ai.data.local.ModelDownloadManager.Download.State.COMPLETED ->
+                    "Installed — pick it under \"Your models\""
+                com.neuron.ai.data.local.ModelDownloadManager.Download.State.FAILED ->
+                    download.error ?: "Failed"
+            }
+            Text(
+                status,
+                style = MaterialTheme.typography.labelSmall,
+                color = when (state) {
+                    com.neuron.ai.data.local.ModelDownloadManager.Download.State.FAILED ->
+                        MaterialTheme.colorScheme.error
+                    com.neuron.ai.data.local.ModelDownloadManager.Download.State.COMPLETED ->
+                        MaterialTheme.colorScheme.primary
+                    else -> MaterialTheme.colorScheme.onSurfaceVariant
                 }
+            )
+            if (state == com.neuron.ai.data.local.ModelDownloadManager.Download.State.DOWNLOADING) {
+                LinearProgressIndicator(
+                    progress = { fraction },
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+            Row {
+                when (state) {
+                    com.neuron.ai.data.local.ModelDownloadManager.Download.State.DOWNLOADING ->
+                        TextButton(onClick = { onPause(download.downloadId) }) { Text("Pause") }
+                    com.neuron.ai.data.local.ModelDownloadManager.Download.State.PAUSED,
+                    com.neuron.ai.data.local.ModelDownloadManager.Download.State.WAITING_FOR_WIFI ->
+                        TextButton(onClick = { onResume(download.downloadId) }) { Text("Resume") }
+                    else -> {}
+                }
+                TextButton(onClick = { onCancel(download.downloadId) }) { Text("Cancel") }
             }
         }
     }
@@ -674,9 +758,11 @@ private fun ModelCard(
 private fun RecommendedCard(
     model: RecommendedModel,
     fit: RecommendedModels.Fit,
-    onDownload: () -> Unit
+    onDownload: () -> Unit,
+    onShowFiles: () -> Unit
 ) {
     val dimmed = fit == RecommendedModels.Fit.UNLIKELY
+    val blocked = model.unavailableReason != null
     Surface(
         shape = RoundedCornerShape(14.dp),
         color = MaterialTheme.colorScheme.surface,
@@ -713,9 +799,34 @@ private fun RecommendedCard(
                         MaterialTheme.colorScheme.onSurfaceVariant
                     }
                 )
+                // Live Hub verdict for this repo (gated / renamed / rate
+                // limited) — replaces a download button that could only fail.
+                model.unavailableReason?.let { reason ->
+                    Text(
+                        reason,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
+                if (model.downloadable) {
+                    Text(
+                        "Recommended file: " +
+                            (HfHubClient.selectVariant(model.variants, model.preferredQuants)
+                                ?.fileName ?: model.variants.first().fileName),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
             }
-            TextButton(onClick = onDownload, enabled = false) {
-                Text("Get")
+            Column(horizontalAlignment = Alignment.End) {
+                TextButton(onClick = onDownload, enabled = !blocked) {
+                    Text(if (blocked) "Unavailable" else "Get")
+                }
+                if (model.downloadable) {
+                    TextButton(onClick = onShowFiles) { Text("All files") }
+                }
             }
         }
     }

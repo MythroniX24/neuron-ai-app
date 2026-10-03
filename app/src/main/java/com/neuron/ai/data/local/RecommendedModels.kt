@@ -1,10 +1,13 @@
 package com.neuron.ai.data.local
 
 /**
- * Curated recommended local models — a HAND-PICKED static list (never fetched
- * live) so the Local AI section isn't empty on first use. Ordered roughly by
- * speed-vs-quality for phone hardware; each entry carries explicit minimum-RAM
- * guidance so the UI can warn or grey out what this device won't run well.
+ * Curated recommended local models — a hand-picked CATALOG (never a live
+ * search) so the Local AI section isn't empty on first use. The catalog only
+ * names a repo and a quant PREFERENCE; the actual file names are resolved
+ * live from the Hub listing, because repos get renamed upstream and a
+ * hardcoded name 404s silently. Ordered roughly by speed-vs-quality for
+ * phone hardware; each entry carries explicit minimum-RAM guidance so the UI
+ * can warn or grey out what this device won't run well.
  */
 data class RecommendedModel(
     val id: String,
@@ -18,21 +21,20 @@ data class RecommendedModel(
     val minFreeRamGb: Double,
     val notes: String,
     /** true when this entry is a "needs more RAM" quality pick. */
-    val needsMoreRam: Boolean = false
+    val needsMoreRam: Boolean = false,
+    /**
+     * Which quantization to PREFER when the repo offers several (Q4_K_M first
+     * — the phone sweet spot). NEVER a hardcoded file name: the exact file is
+     * resolved from the live listing (see HfHubClient.selectVariant).
+     */
+    val preferredQuants: List<String> = HfHubClient.DEFAULT_QUANT_PREFERENCE,
+    /** Repo listing resolved at runtime — filled by the view model. */
+    val variants: List<HfHubClient.SearchResult.Variant> = emptyList(),
+    /** Why this entry cannot be downloaded right now (gated/missing/...). */
+    val unavailableReason: String? = null
 ) {
-    /** The GGUF file to download from [hfRepo] (single recommended variant). */
-    val recommendedFile: String
-        get() = when (id) {
-            "gemma-2-2b" -> "gemma-2-2b-it-Q4_K_M.gguf"
-            "gemma-2-9b" -> "gemma-2-9b-it-Q4_K_M.gguf"
-            "qwen25-1_5b" -> "qwen2.5-1.5b-instruct-q4_k_m.gguf"
-            "qwen25-3b" -> "qwen2.5-3b-instruct-q4_k_m.gguf"
-            "phi-3-mini" -> "Phi-3-mini-4k-instruct-q4.gguf"
-            "llama-3.2-1b" -> "Llama-3.2-1B-Instruct-Q4_K_M.gguf"
-            "llama-3.2-3b" -> "Llama-3.2-3B-Instruct-Q4_K_M.gguf"
-            "tinyllama" -> "tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf"
-            else -> "model.gguf"
-        }
+    /** true once the live listing came back with at least one GGUF file. */
+    val downloadable: Boolean get() = variants.isNotEmpty()
 
     /** Speed-vs-quality ordering used by the Recommended section. */
     val speedTier: Int
@@ -80,7 +82,7 @@ object RecommendedModels {
         RecommendedModel(
             id = "gemma-2-2b",
             displayName = "Gemma 2 2B",
-            hfRepo = "google/gemma-2-2b-it-GGUF",
+            hfRepo = "bartowski/gemma-2-2b-it-GGUF",
             approxSizeGb = 1.6,
             minRamGb = 3.0,
             minFreeRamGb = 2.0,
@@ -116,7 +118,7 @@ object RecommendedModels {
         RecommendedModel(
             id = "gemma-2-9b",
             displayName = "Gemma 2 9B",
-            hfRepo = "google/gemma-2-9b-it-GGUF",
+            hfRepo = "bartowski/gemma-2-9b-it-GGUF",
             approxSizeGb = 5.5,
             minRamGb = 8.0,
             minFreeRamGb = 6.0,

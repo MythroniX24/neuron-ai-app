@@ -21,6 +21,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /** One search hit enriched with the repo's GGUF variants. */
 data class SearchHit(
@@ -29,7 +30,9 @@ data class SearchHit(
     val likes: Long,
     val license: String?,
     val variants: List<HfHubClient.SearchResult.Variant>,
-    val loadingVariants: Boolean = false
+    val loadingVariants: Boolean = false,
+    /** Why this repo has no downloadable files (gated/renamed/rate-limited). */
+    val unavailableReason: String? = null
 )
 
 /** UI state for the Local AI screen. */
@@ -53,6 +56,15 @@ data class LocalAiUiState(
     val searchError: String? = null,
     val downloads: List<ModelDownloadManager.Download> = emptyList(),
     val wifiOnly: Boolean = true,
+    /**
+     * Curated catalog WITH its live Hub listing resolved per entry (which GGUF
+     * files exist right now, or why the repo can't be used). The catalog only
+     * holds a quant PREFERENCE — file names drift upstream, so they are
+     * resolved from the Hub instead of being hardcoded.
+     */
+    val recommended: List<RecommendedModel> = RecommendedModels.all,
+    /** true while the catalog's file listings are being fetched. */
+    val recommendLoading: Boolean = false,
     // ---- Performance (milestone 5) ----
     /** True when the BUILD + DEVICE can do Vulkan GPU offload at all. */
     val gpuAvailable: Boolean = false,
@@ -130,6 +142,10 @@ class LocalAiViewModel(
                 _state.value = _state.value.copy(loadState = load)
             }
         }
+        // Live Hub listing for the curated catalog: which GGUF files exist and
+        // which repos are gated. Fetched here (not lazily on tap) so the Get
+        // button is usable immediately.
+        refreshRecommended()
         // Thermal / battery state → throttle status. Only the DISPLAY changes
         // live; the throttle itself is applied at the next model load, so an
         // answer in flight is never interrupted by a status change.
@@ -153,7 +169,85 @@ class LocalAiViewModel(
     }
 
     /** Curated list; the screen shows it before the user types anything. */
-    val recommended: List<RecommendedModel> = RecommendedModels.all
+    val recommended: List<RecommendedModel> get() = _state.value.recommended
+
+    /**
+     * Resolves each recommended repo's GGUF files live. Runs at open time so
+     * the "Get" button works on the FIRST tap (it used to be permanently
+     * disabled) and gated repos are labelled instead of failing at download.
+     */
+    fun refreshRecommended() {
+        if (_state.value.recommendLoading) return
+        _state.value = _state.value.copy(recommendLoading = true)
+        viewModelScope.launch {
+            val resolved = RecommendedModels.all.map { model ->
+                val listing = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    runCatching { hubClient.listing(model.hfRepo) }.getOrElse { t ->
+                        HfHubClient.RepoListing(error = t.message ?: "Could not reach Hugging Face")
+                    }
+                }
+                model.copy(
+                    variants = listing.variants,
+                    unavailableReason = listing.unavailableReason
+                )
+            }
+            _state.value = _state.value.copy(
+                recommended = resolved,
+                recommendLoading = false
+            )
+        }
+    }
+
+    /**
+     * One-tap download of the recommended quant: resolves the preferred
+     * quantization from the live listing and starts the transfer. Falls back to
+     * refreshing the listing when the catalog has not resolved yet.
+     */
+    fun quickDownloadRecommended(model: RecommendedModel) {
+        viewModelScope.launch {
+            var entry = _state.value.recommended.firstOrNull { it.id == model.id } ?: model
+            if (entry.variants.isEmpty() && entry.unavailableReason == null) {
+                // Catalog listing hasn't arrived (or was cleared): fetch this
+                // one repo now so a single tap always does something.
+                entry = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    val listing = runCatching { hubClient.listing(model.hfRepo) }.getOrElse { t ->
+                        HfHubClient.RepoListing(error = t.message ?: "Could not reach Hugging Face")
+                    }
+                    _state.value = _state.value.copy(
+                        recommended = _state.value.recommended.map {
+                            if (it.id == model.id) {
+                                it.copy(
+                                    variants = listing.variants,
+                                    unavailableReason = listing.unavailableReason
+                                )
+                            } else it
+                        }
+                    )
+                    model.copy(
+                        variants = listing.variants,
+                        unavailableReason = listing.unavailableReason
+                    )
+                }
+            }
+            entry.unavailableReason?.let {
+                _state.value = _state.value.copy(searchError = "${model.displayName}: $it")
+                return@launch
+            }
+            val variant = HfHubClient.selectVariant(entry.variants, entry.preferredQuants)
+            if (variant == null) {
+                _state.value = _state.value.copy(
+                    searchError = "${model.displayName}: no GGUF file could be resolved."
+                )
+                return@launch
+            }
+            startDownload(model.hfRepo, variant, model.displayName)
+        }
+    }
+
+    /** Opens the quant picker for a recommended entry. */
+    fun recommendedVariants(model: RecommendedModel): List<HfHubClient.SearchResult.Variant> =
+        _state.value.recommended.firstOrNull { it.id == model.id }?.variants
+            ?: emptyList()
 
     fun fitFor(model: RecommendedModel): RecommendedModels.Fit {
         val s = _state.value
@@ -255,17 +349,21 @@ class LocalAiViewModel(
         coroutineScope {
             results.forEach { hit ->
                 launch {
-                    val variants = try {
-                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                            hubClient.files(hit.repoId)
+                    val listing = try {
+                        withContext(kotlinx.coroutines.Dispatchers.IO) {
+                            hubClient.listing(hit.repoId)
                         }
-                    } catch (_: Throwable) {
-                        emptyList()
+                    } catch (t: Throwable) {
+                        HfHubClient.RepoListing(error = t.message ?: "Could not reach Hugging Face")
                     }
                     _state.value = _state.value.copy(
                         searchResults = _state.value.searchResults.map {
                             if (it.repoId == hit.repoId) {
-                                it.copy(variants = variants, loadingVariants = false)
+                                it.copy(
+                                    variants = listing.variants,
+                                    loadingVariants = false,
+                                    unavailableReason = listing.unavailableReason
+                                )
                             } else it
                         }
                     )
@@ -277,7 +375,13 @@ class LocalAiViewModel(
     fun clearSearchError() { _state.value = _state.value.copy(searchError = null) }
 
     fun startDownload(repoId: String, variant: HfHubClient.SearchResult.Variant, displayName: String) {
-        downloadManager?.start(repoId, variant, displayName)
+        if (downloadManager == null) {
+            _state.value = _state.value.copy(
+                searchError = "Downloads are unavailable in this build."
+            )
+            return
+        }
+        downloadManager.start(repoId, variant, displayName)
     }
 
     fun pauseDownload(id: String) { downloadManager?.pause(id) }

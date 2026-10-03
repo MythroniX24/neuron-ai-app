@@ -34,8 +34,43 @@ class ModelDownloadManagerTest {
     }
 
     @Test
-    fun `download states cover pause resume fail complete`() {
+    fun `download states cover pause wifi wait fail and complete`() {
         val states = ModelDownloadManager.Download.State.entries.map { it.name }.toSet()
-        assertEquals(setOf("DOWNLOADING", "PAUSED", "COMPLETED", "FAILED"), states)
+        assertEquals(
+            setOf("DOWNLOADING", "PAUSED", "WAITING_FOR_WIFI", "COMPLETED", "FAILED"),
+            states
+        )
+    }
+
+    @Test
+    fun `http failures are mapped to an actionable message`() {
+        val entry = ModelDownloadManager.Download(
+            downloadId = "dl-1",
+            repoId = "google/gemma-2-9b-it-GGUF",
+            fileName = "m.gguf",
+            displayName = "Gemma 2 9B",
+            totalBytes = 1,
+            downloadedBytes = 0,
+            sha256 = null,
+            state = ModelDownloadManager.Download.State.FAILED
+        )
+        // 401/403 = gated repo: the ONLY fix is signing in on the Hub.
+        assertTrue(ModelDownloadManager.describeHttpFailure(401, entry).contains("licence"))
+        assertTrue(
+            ModelDownloadManager.describeHttpFailure(403)
+                .contains("gated on Hugging Face")
+        )
+        // 404 = the upstream file name drifted.
+        assertTrue(ModelDownloadManager.describeHttpFailure(404).contains("renamed"))
+        // 429 / 5xx = transient Hub problems, retry later.
+        assertTrue(ModelDownloadManager.describeHttpFailure(429).contains("rate-limiting"))
+        assertTrue(ModelDownloadManager.describeHttpFailure(503).contains("server error"))
+    }
+
+    @Test
+    fun `split gguf shards are refused up front`() {
+        assertTrue(
+            HfHubClient.isShardFile("model-Q4_K_M-00001-of-00003.gguf")
+        )
     }
 }

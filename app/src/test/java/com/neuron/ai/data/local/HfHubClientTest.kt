@@ -105,4 +105,90 @@ class HfHubClientTest {
         val url = client.downloadUrl("some/repo", "model.gguf")
         assertTrue(url.endsWith("/some/repo/resolve/main/model.gguf"))
     }
+
+    @Test
+    fun `a gated repo is reported as gated instead of an empty list`() {
+        // google/gemma-* hides its file list behind a 401 until the user
+        // accepts the licence on the Hub — the reason downloads used to fail
+        // with no explanation.
+        server.enqueue(MockResponse().setResponseCode(401).setBody("{\"error\":\"gated\"}"))
+
+        val listing = client.listing("google/gemma-2-9b-it-GGUF")
+
+        assertTrue(listing.gated)
+        assertTrue(listing.variants.isEmpty())
+        assertNull(listing.error)
+        assertTrue(listing.unavailableReason!!.contains("gated"))
+    }
+
+    @Test
+    fun `missing and rate limited repos are distinguished`() {
+        server.enqueue(MockResponse().setResponseCode(404))
+        val missing = client.listing("some/deleted-repo")
+        assertTrue(missing.notFound)
+        assertTrue(missing.unavailableReason!!.contains("no longer available"))
+
+        server.enqueue(MockResponse().setResponseCode(429))
+        val limited = client.listing("some/busy-repo")
+        assertTrue(limited.throttled)
+        assertTrue(limited.unavailableReason!!.contains("rate-limiting"))
+    }
+
+    @Test
+    fun `listing drops split shard files and says so when only shards exist`() {
+        server.enqueue(
+            MockResponse().setBody(
+                """[{"type":"file","size":100,"path":"m-00001-of-00002.gguf"},
+                  {"type":"file","size":100,"path":"m-00002-of-00002.gguf"}]"""
+            )
+        )
+        val onlyShards = client.listing("some/repo")
+        assertTrue(onlyShards.variants.isEmpty())
+        assertTrue(onlyShards.unavailableReason!!.contains("multi-shard"))
+
+        server.enqueue(
+            MockResponse().setBody(
+                """[{"type":"file","size":100,"path":"m-00001-of-00002.gguf"},
+                  {"type":"file","size":700,"lfs":{"oid":"a"},"path":"m-Q4_K_M.gguf"}]"""
+            )
+        )
+        val mixed = client.listing("some/repo")
+        assertEquals(1, mixed.variants.size)
+        assertEquals("m-Q4_K_M.gguf", mixed.variants.first().fileName)
+    }
+
+    @Test
+    fun `shard and quant detection`() {
+        assertTrue(HfHubClient.isShardFile("Qwen3-30B-Q4_K_M-00001-of-00002.gguf"))
+        assertTrue(!HfHubClient.isShardFile("Qwen3-4B-Q4_K_M.gguf"))
+        assertEquals("Q4_K_M", HfHubClient.quantOf("model-Q4_K_M.gguf"))
+        assertEquals("IQ4_XS", HfHubClient.quantOf("model.IQ4_XS.gguf"))
+        assertNull(HfHubClient.quantOf("model.gguf"))
+    }
+
+    @Test
+    fun `variant selection prefers the catalog quant then degrades gracefully`() {
+        val variants = listOf(
+            HfHubClient.SearchResult.Variant("m-Q8_0.gguf", 900, null),
+            HfHubClient.SearchResult.Variant("m-Q4_K_M.gguf", 500, null),
+            HfHubClient.SearchResult.Variant("m-Q2_K.gguf", 300, null)
+        )
+        // Exact preference hit wins even though a bigger file exists.
+        assertEquals(
+            "m-Q4_K_M.gguf",
+            HfHubClient.selectVariant(variants)?.fileName
+        )
+        // No preferred quant present → smallest quantized file, never the f16.
+        assertEquals(
+            "m-Q2_K.gguf",
+            HfHubClient.selectVariant(
+                listOf(
+                    HfHubClient.SearchResult.Variant("m-f16.gguf", 1200, null),
+                    HfHubClient.SearchResult.Variant("m-Q5_K_M.gguf", 800, null)
+                ),
+                preferredQuants = listOf("Q4_K_M")
+            )?.fileName
+        )
+        assertNull(HfHubClient.selectVariant(emptyList()))
+    }
 }
