@@ -375,6 +375,7 @@ data/local/
 ├── PromptPrefix.kt           # pure KV prefix-reuse decision (what can be skipped)
 ├── CpuTopology.kt            # pure big/little core classification + thread math
 ├── VisionProjector.kt        # pure mmproj discovery (which projector belongs to a model)
+├── LocalRoutingRules.kt      # pure per-model routing rules (text/tools/vision)
 └── LocalAiProvider.kt        # the AIProvider implementation (capability-honest)
 ```
 
@@ -438,6 +439,12 @@ Design rules:
   cluster — the efficiency cores are 2-4x slower per clock and starve the big
   ones. The milestone-7 thermal cap still wins over both auto and explicit
   thread counts.
+- **Per-model routing rules (milestone 9)**: the user can mark which of their
+  GGUFs serves which kind of turn ("Text", "Tools", "Vision"). `LocalRoutingRules`
+  picks the first matching rule whose model is enabled AND capable (a Vision
+  rule is ignored unless a projector exists), and falls back to the capability
+  pick when no rule matches — so a photo never lands on a text-only model.
+  Rules persist in `filesDir/local-routing-rules.json`.
 - **Vision (milestone 9)**: llama.cpp's `mtmd` library is built for arm64
   (`LLAMA_BUILD_MTMD`); the JNI bridge loads an mmproj file next to the model,
   and image turns go through `mtmd_tokenize` + `mtmd_helper_eval_chunks` so

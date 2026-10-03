@@ -11,7 +11,9 @@ import com.neuron.ai.data.local.LocalEngineLoader
 import com.neuron.ai.data.local.LocalLoadState
 import com.neuron.ai.data.local.LocalModelRecord
 import com.neuron.ai.data.local.LocalModelRepository
+import com.neuron.ai.data.local.LocalTurnKind
 import com.neuron.ai.data.local.ModelDownloadManager
+import com.neuron.ai.data.local.ModelRoutingRule
 import com.neuron.ai.data.local.RecommendedModels
 import com.neuron.ai.data.local.RecommendedModel
 import kotlinx.coroutines.coroutineScope
@@ -262,6 +264,14 @@ class LocalAiViewModel(
     /** Milestone 9: does this model have a usable vision projector beside it? */
     fun visionReady(model: LocalModelRecord): Boolean =
         repository.hasVisionProjector(model)
+
+    /** Milestone 9: this model's "use for text/tools/vision" routing rule. */
+    fun routingRuleFor(modelId: String): ModelRoutingRule = repository.routingRuleFor(modelId)
+
+    /** Turns one routing axis on/off for [modelId] (first rule wins). */
+    fun setRoutingRule(modelId: String, kind: LocalTurnKind, enabled: Boolean) {
+        viewModelScope.launch { repository.setRoutingRule(modelId, kind, enabled) }
+    }
 
     fun fitFor(model: RecommendedModel): RecommendedModels.Fit {
         val s = _state.value

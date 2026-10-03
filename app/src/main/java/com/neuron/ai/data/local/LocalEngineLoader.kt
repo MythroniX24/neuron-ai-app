@@ -53,7 +53,7 @@ object LocalEngineLoader {
         path: String,
         contextTokens: Int,
         threads: Int,
-        useGpu: Bool,
+        useGpu: Boolean,
         mmprojPath: String?,
         errOut: Array<String?>
     ): Int

@@ -739,7 +739,16 @@ class ChatViewModel(
             // metadata (chat template, architecture, declared context) decides
             // what this turn may use; anything it cannot serve is refused or
             // degraded VISIBLY instead of silently.
-            val record = localModels?.models?.value?.firstOrNull { it.id == selection.second }
+            // Milestone 9: the user's per-model rules get the first say about
+            // WHICH local model runs this kind of turn.
+            val turnKind = when {
+                lastUserAttachments.any { it.isImage } ->
+                    com.neuron.ai.data.local.LocalTurnKind.VISION
+                turnWantsTools() -> com.neuron.ai.data.local.LocalTurnKind.TOOLS
+                else -> com.neuron.ai.data.local.LocalTurnKind.TEXT
+            }
+            val routedId = localModels?.pickRoutedModel(turnKind)?.id ?: selection.second
+            val record = localModels?.models?.value?.firstOrNull { it.id == routedId }
             val route = record?.let { model ->
                 LocalModelRouter.decide(
                     model,
@@ -769,7 +778,7 @@ class ChatViewModel(
             }
             runAgentTurnWith(
                 provider = localProvider,
-                modelId = selection.second,
+                modelId = routedId,
                 configId = LOCAL_PROVIDER_ID,
                 // Capability-honest: whatever the GGUF declares, nothing more.
                 visionEnabled = capabilities?.supportsVision ?: false,
