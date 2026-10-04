@@ -210,7 +210,7 @@ fun SettingsScreen(
                         style = MaterialTheme.typography.titleMedium
                     )
                     Text(
-                        text = "Version 0.3.0 — Milestone 3",
+                        text = "Version 1.0.0",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

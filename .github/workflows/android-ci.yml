@@ -8,7 +8,7 @@
 # Tag v*   -> the signed release APK is additionally attached to a Release.
 #
 # Signing material lives ONLY in GitHub Secrets (never in the repo):
-#   NEURON_KEYSTORE_B64   — base64 of the release .jks keystore
+#   NEURON_KEYSTORE_B64   — base64 of the release keystore (.jks or .p12)
 #   NEURON_KEYSTORE_PASSWORD
 #   NEURON_KEY_ALIAS
 #   NEURON_KEY_PASSWORD
@@ -143,6 +143,21 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: release-apk/*.apk
+          generate_release_notes: true
           body: |
-            Automated build for ${{ github.ref_name }}.
-            Install the release APK; the debug APK remains available as an artifact.
+            ## Neuron-AI ${{ github.ref_name }}
+
+            Download the `.apk` asset below and open it to install (Android asks you
+            to allow "install unknown apps" for whichever app you opened it from).
+
+            - **Requires Android 8.0 (API 26) or newer**, 64-bit device (`arm64-v8a`).
+            - This APK is signed with the project release key, so a later release
+              installs straight over this one — no uninstall, no lost data.
+
+            On-device local inference works after the first launch: open
+            **Settings → Local AI**, pick a model from the recommended list and
+            download it. Downloads and model loading keep running in the background
+            (a notification shows progress), so you can leave the screen.
+
+            The debug APK also stays available as a workflow artifact under
+            Actions → android-ci → build-debug.

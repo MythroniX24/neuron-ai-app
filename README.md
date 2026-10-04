@@ -72,8 +72,21 @@ Or open the project in Android Studio (Ladybug or newer) and press Run.
 
 `.github/workflows/android-ci.yml` builds a debug APK on every push/PR to `main`
 and uploads it as a workflow artifact (**Actions → android-ci → build-debug**).
-Pushing a tag like `v0.1.0` additionally builds a release APK and attaches it to a
-GitHub Release.
+
+### Install the latest release
+
+Signed release APKs are attached to [GitHub Releases](https://github.com/MythroniX24/neuron-ai-app/releases).
+Download the `.apk`, allow "install unknown apps" once, and open it. Release builds
+are signed with the project release key, so each new release upgrades in place
+instead of needing an uninstall.
+
+### CI — release APKs on tags
+
+Pushing a tag like `v1.0.0` additionally builds a release APK and attaches it to a
+GitHub Release. Signing material lives only in GitHub Secrets
+(`NEURON_KEYSTORE_B64`, `NEURON_KEYSTORE_PASSWORD`, `NEURON_KEY_ALIAS`,
+`NEURON_KEY_PASSWORD`); without them the release job still runs and produces an
+unsigned APK.
 
 ## Project layout
 
