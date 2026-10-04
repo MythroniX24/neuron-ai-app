@@ -13,6 +13,8 @@
 
 #include <jni.h>
 #include <algorithm>
+#include <cctype>
+#include <deque>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -44,6 +46,138 @@ namespace {
 // leave two large models resident.
 std::mutex g_mutex;
 bool g_backendsInitialized = false;
+
+// --- llama.cpp log capture ------------------------------------------------
+//
+// llama.cpp explains exactly WHY a load failed ("failed to allocate",
+// "vkCreateBuffer: out of memory", "unknown model architecture") on its
+// logger — and then returns nullptr. Throwing that explanation away is why
+// the app could only ever say "Model file could not be loaded (corrupt or
+// unsupported GGUF)" for every distinct cause. We keep the last lines in a
+// ring buffer so the failure message (and the Settings debug console) can
+// show the real reason.
+#if NEURON_HAVE_LLAMA
+std::mutex g_logMutex;
+std::deque<std::string> g_logLines;
+const size_t LOG_RING_CAPACITY = 400;
+const size_t LOG_LINE_CAP = 400;
+
+void appendLogLine(const std::string &line) {
+    std::lock_guard<std::mutex> lock(g_logMutex);
+    if (g_logLines.size() >= LOG_RING_CAPACITY) {
+        g_logLines.pop_front();
+    }
+    g_logLines.push_back(line.size() > LOG_LINE_CAP ? line.substr(0, LOG_LINE_CAP) : line);
+}
+
+// ggml levels: 0 none, 1 debug, 2 info, 3 warn, 4 error, 5 continuation.
+void logCollector(enum ggml_log_level level, const char *text, void * /*user_data*/) {
+    if (text == nullptr || *text == '\0') {
+        return;
+    }
+    if (level == 0) {
+        return; // GGML_LOG_LEVEL_NONE
+    }
+    std::string prefix;
+    if (level >= 4) {
+        prefix = "E ";
+    } else if (level == 3) {
+        prefix = "W ";
+    }
+    std::string line = prefix + text;
+    // Strip the trailing newline llama.cpp appends.
+    while (!line.empty() && (line.back() == '\n' || line.back() == '\r')) {
+        line.pop_back();
+    }
+    appendLogLine(line);
+    // Keep logcat working exactly as before.
+    if (level >= 4) {
+        LOGE("%s", line.c_str());
+    } else {
+        LOGI("%s", line.c_str());
+    }
+}
+
+// Installed at every entry point: llama_backend_free() resets the global
+// logger, so a call_once guard would silently stop capturing after the first
+// unload. Setting it again is a single store.
+void installLogCollector() {
+    llama_log_set(logCollector, nullptr);
+}
+
+void clearLogLines() {
+    std::lock_guard<std::mutex> lock(g_logMutex);
+    g_logLines.clear();
+}
+
+std::string logTail(size_t maxLines) {
+    std::lock_guard<std::mutex> lock(g_logMutex);
+    std::string out;
+    size_t start = g_logLines.size() > maxLines ? g_logLines.size() - maxLines : 0;
+    for (size_t i = start; i < g_logLines.size(); ++i) {
+        out += g_logLines[i];
+        out += "\n";
+    }
+    return out;
+}
+
+// The most useful lines for a user-facing error: the last few ERROR/WARN
+// entries, which is where llama.cpp names the real cause.
+std::string logErrors(size_t maxLines) {
+    std::vector<std::string> picked;
+    {
+        std::lock_guard<std::mutex> lock(g_logMutex);
+        for (auto it = g_logLines.rbegin(); it != g_logLines.rend() && picked.size() < maxLines; ++it) {
+            if (it->size() >= 2 && it->compare(0, 2, "E ") == 0) {
+                picked.push_back(*it);
+            }
+        }
+    }
+    std::string out;
+    for (auto it = picked.rbegin(); it != picked.rend(); ++it) {
+        out += *it;
+        out += "\n";
+    }
+    return out;
+}
+
+// Bounded size for any message that crosses JNI into the UI.
+const size_t MAX_ERROR_MESSAGE = 600;
+
+std::string firstLine(const std::string &text) {
+    size_t end = text.find('\n');
+    std::string line = end == std::string::npos ? text : text.substr(0, end);
+    while (!line.empty() && (line.back() == '\r' || line.back() == ' ')) {
+        line.pop_back();
+    }
+    if (line.size() > 220) {
+        line.resize(220);
+    }
+    // Drop our own "E " prefix — it is noise in a user-facing sentence.
+    if (line.size() > 2 && line.compare(0, 2, "E ") == 0) {
+        line = line.substr(2);
+    }
+    return line;
+}
+
+bool logLooksLikeMemoryPressure(const std::string &tail) {
+    static const char *markers[] = {
+        "out of memory", "failed to allocate", "cannot allocate", "failed to reserve",
+        "vkCreateBuffer", "vkAllocateMemory", "vkMapMemory", "GGML_ASSERT",
+        "insufficient memory", "bad_alloc", "Cannot find a backend", "no device supports"
+    };
+    std::string lower = tail;
+    std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
+    for (const char *marker : markers) {
+        if (lower.find(marker) != std::string::npos) {
+            return true;
+        }
+    }
+    return false;
+}
+#endif  // NEURON_HAVE_LLAMA
 llama_model *g_model = nullptr;
 llama_context *g_ctx = nullptr;
 std::string g_loadedChatTemplate;
@@ -258,6 +392,31 @@ Java_com_neuron_ai_data_local_LocalEngineLoader_nativeVersion(JNIEnv *env, jobje
 #endif
 }
 
+// Last lines llama.cpp logged (newest last). Backs the Settings debug
+// console: when a load fails, THIS is where the actual reason is — the
+// JNI failure code alone cannot tell "corrupt file" from "out of memory".
+JNIEXPORT jstring JNICALL
+Java_com_neuron_ai_data_local_LocalEngineLoader_nativeLogTail(JNIEnv *env, jobject, jint maxLines) {
+#if NEURON_HAVE_LLAMA
+    size_t lines = maxLines > 0 ? static_cast<size_t>(maxLines) : 200;
+    if (lines > LOG_RING_CAPACITY) {
+        lines = LOG_RING_CAPACITY;
+    }
+    return env->NewStringUTF(logTail(lines).c_str());
+#else
+    (void) maxLines;
+    return env->NewStringUTF("llama.cpp is not compiled into this build.");
+#endif
+}
+
+// Clears the captured log — the console's "Clear" button.
+JNIEXPORT void JNICALL
+Java_com_neuron_ai_data_local_LocalEngineLoader_nativeClearLog(JNIEnv *, jobject) {
+#if NEURON_HAVE_LLAMA
+    clearLogLines();
+#endif
+}
+
 // One-time discovery of runtime backends (ggml's GGML_BACKEND_DL model):
 // dlopen every libggml-{cpu,vulkan}-*.so found in [dir], scoring CPU variants
 // and keeping only the best match. No-op when already initialized.
@@ -265,6 +424,7 @@ JNIEXPORT void JNICALL
 Java_com_neuron_ai_data_local_LocalEngineLoader_nativeInitBackends(
         JNIEnv *env, jobject, jstring jDir) {
 #if NEURON_HAVE_LLAMA
+    installLogCollector();
     const char *dir = env->GetStringUTFChars(jDir, nullptr);
     if (dir != nullptr) {
         std::lock_guard<std::mutex> lock(g_mutex);
@@ -318,6 +478,8 @@ Java_com_neuron_ai_data_local_LocalEngineLoader_nativeLoad(
         return 0; // already loaded; Kotlin calls unload first to switch
     }
 
+    installLogCollector();
+    clearLogLines();
     llama_backend_init();
 
     const bool gpu = useGpu == JNI_TRUE;
@@ -335,7 +497,22 @@ Java_com_neuron_ai_data_local_LocalEngineLoader_nativeLoad(
 
     llama_model *model = llama_model_load_from_file(modelPath.c_str(), mparams);
     if (model == nullptr) {
-        return fail(-1, "Model file could not be loaded (corrupt or unsupported GGUF)");
+        // llama.cpp logged the real cause; quote it instead of guessing.
+        std::string why = logErrors(6);
+        std::string tail = logTail(12);
+        std::string message = "Model file could not be loaded (corrupt or unsupported GGUF)";
+        if (logLooksLikeMemoryPressure(tail)) {
+            message += " — not enough memory for this model"
+                        " (try a smaller quantization, or turn GPU off in Settings)";
+        } else if (!why.empty()) {
+            message += " — " + firstLine(why);
+        }
+        // Keep the whole thing bounded: this string travels through JNI into
+        // a UI state field and gets copy-pasted into bug reports.
+        if (message.size() > MAX_ERROR_MESSAGE) {
+            message.resize(MAX_ERROR_MESSAGE);
+        }
+        return fail(-1, message.c_str());
     }
 
     llama_context_params cparams = llama_context_default_params();

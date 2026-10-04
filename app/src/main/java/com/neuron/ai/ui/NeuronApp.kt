@@ -158,7 +158,15 @@ fun NeuronApp(container: AppContainer) {
                         onOpenProviders = { navController.navigate(Routes.PROVIDERS) },
                         onOpenConversations = { navController.navigate(Routes.CONVERSATIONS) },
                         onOpenTasks = { navController.navigate(Routes.TASKS) },
-                        onOpenLocalAi = { navController.navigate(Routes.LOCAL_AI) }
+                        onOpenLocalAi = { navController.navigate(Routes.LOCAL_AI) },
+                        onOpenDebugConsole = { navController.navigate(Routes.DEBUG_CONSOLE) }
+                    )
+                }
+
+                composable(Routes.DEBUG_CONSOLE) {
+                    com.neuron.ai.ui.settings.DebugConsoleScreen(
+                        container = container,
+                        onBack = { navController.popBackStack() }
                     )
                 }
 

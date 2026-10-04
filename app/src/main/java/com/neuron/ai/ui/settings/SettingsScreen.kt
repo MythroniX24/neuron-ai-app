@@ -41,7 +41,8 @@ fun SettingsScreen(
     onOpenProviders: () -> Unit = {},
     onOpenConversations: () -> Unit = {},
     onOpenTasks: () -> Unit = {},
-    onOpenLocalAi: () -> Unit = {}
+    onOpenLocalAi: () -> Unit = {},
+    onOpenDebugConsole: () -> Unit = {}
 ) {
     val viewModel: SettingsViewModel =
         viewModel(factory = SettingsViewModelFactory(container))
@@ -199,6 +200,13 @@ fun SettingsScreen(
             ) {
                 onOpenLocalAi()
             }
+            SettingsLink(
+                "Debug console",
+                "Engine build, device memory, model files and llama.cpp's own log — " +
+                    "the reason a local model refused to load"
+            ) {
+                onOpenDebugConsole()
+            }
 
             HorizontalDivider(modifier = Modifier.padding(vertical = Spacing.lg))
 
@@ -210,7 +218,7 @@ fun SettingsScreen(
                         style = MaterialTheme.typography.titleMedium
                     )
                     Text(
-                        text = "Version 1.0.1",
+                        text = "Version 1.1.0",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

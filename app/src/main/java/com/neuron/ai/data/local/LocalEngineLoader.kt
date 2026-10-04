@@ -46,6 +46,17 @@ object LocalEngineLoader {
     /** Informational; from llama.cpp when built, "unavailable" otherwise. */
     external fun nativeVersion(): String
 
+    /**
+     * Last lines llama.cpp logged, newest last. llama.cpp explains a failed
+     * load on its logger and then only returns nullptr, so this is the ONLY
+     * place the real cause ("failed to allocate", "unknown architecture",
+     * "file is not a GGUF file") exists. Powers the Settings debug console.
+     */
+    external fun nativeLogTail(maxLines: Int): String
+
+    /** Drops the captured log; the console's Clear button. */
+    external fun nativeClearLog()
+
     private external fun nativeIsAvailable(): Boolean
     private external fun nativeGpuAvailable(): Boolean
     private external fun nativeInitBackends(dir: String)
@@ -139,8 +150,25 @@ object LocalEngineLoader {
         // Runtime backend discovery (per-ISA CPU variants + Vulkan), a no-op
         // after the first call.
         backendDir?.let { dir -> runCatching { nativeInitBackends(dir) } }
-        val err = arrayOfNulls<String>(1)
-        val code = nativeLoad(path, contextTokens, threads, useGpu, mmprojPath, err)
+        var err = arrayOfNulls<String>(1)
+        var code = nativeLoad(path, contextTokens, threads, useGpu, mmprojPath, err)
+        if (code != 0 && useGpu && looksLikeMemoryPressure(err[0])) {
+            // A Vulkan device that advertises memory it cannot actually
+            // allocate makes the whole load fail, while the exact same file
+            // loads fine on the CPU. One automatic CPU retry turns a dead end
+            // into a working (slower) model instead of an error message.
+            val gpuReason = err[0]
+            err = arrayOfNulls<String>(1)
+            code = nativeLoad(path, contextTokens, threads, false, mmprojPath, err)
+            if (code == 0) {
+                return LoadResult.Success
+            }
+            val cpuReason = err[0]
+                ?: "Engine load failed (code $code)"
+            return LoadResult.Failure(
+                "$cpuReason\n\nGPU offload failed first: $gpuReason"
+            )
+        }
         return when {
             code == 0 -> LoadResult.Success
             // New: GPU offload was requested but no Vulkan driver is present.
@@ -153,6 +181,17 @@ object LocalEngineLoader {
             )
             else -> LoadResult.Failure(err[0] ?: "Engine load failed (code $code)")
         }
+    }
+
+    /**
+     * true when [reason] is the native side saying "out of memory" rather
+     * than "this file is broken". Pure and internal so the retry decision is
+     * unit-tested instead of guessed at on a phone.
+     */
+    internal fun looksLikeMemoryPressure(reason: String?): Boolean {
+        if (reason.isNullOrBlank()) return false
+        val text = reason.lowercase()
+        return MEMORY_MARKERS.any { text.contains(it) }
     }
 
     /** Fully unloads the active model (no-op when nothing is loaded). */
@@ -306,4 +345,59 @@ object LocalEngineLoader {
 
     fun engineVersion(): String =
         if (nativeLibraryAvailable) nativeVersion() else "unavailable"
+
+    // ---- Diagnostics (Settings → Debug console) ---------------------------
+
+    /**
+     * Everything needed to explain a local-model problem without logcat:
+     * build flags, device limits, the file the user actually has on disk,
+     * and llama.cpp's own log. Safe to call at any time — it never loads or
+     * unloads anything.
+     */
+    fun diagnostics(modelPath: String? = null): EngineDiagnostics {
+        val nativeOk = nativeLibraryAvailable
+        val logs = if (nativeOk) {
+            runCatching { nativeLogTail(400) }.getOrElse { "Could not read the native log: ${it.message}" }
+        } else {
+            "libneuron_llama.so could not be loaded — the native bridge is missing " +
+                "or was built as a stub (llama.cpp sources not fetched at build time)."
+        }
+        return EngineDiagnostics(
+            nativeLibraryLoaded = nativeOk,
+            engineVersion = if (nativeOk) runCatching { nativeVersion() }.getOrElse { "?" } else "unavailable",
+            gpuAvailable = gpuAvailable,
+            visionAvailable = if (nativeOk) runCatching { nativeVisionAvailable() }.getOrElse { false } else false,
+            modelPath = modelPath,
+            modelFileExists = modelPath?.let { java.io.File(it).exists() } ?: false,
+            modelFileSizeBytes = modelPath?.let { java.io.File(it).length() } ?: 0L,
+            logText = logs
+        )
+    }
+
+    /** Snapshot of engine state for the debug console. */
+    data class EngineDiagnostics(
+        val nativeLibraryLoaded: Boolean,
+        val engineVersion: String,
+        val gpuAvailable: Boolean,
+        val visionAvailable: Boolean,
+        val modelPath: String?,
+        val modelFileExists: Boolean,
+        val modelFileSizeBytes: Long,
+        val logText: String
+    )
+
+    /** Clears the native log ring buffer. */
+    fun clearDiagnosticsLog() {
+        if (nativeLibraryAvailable) runCatching { nativeClearLog() }
+    }
+
+    private val MEMORY_MARKERS = listOf(
+        "not enough memory",
+        "out of memory",
+        "failed to allocate",
+        "cannot allocate",
+        "vkcreatebuffer",
+        "vkallocatememory",
+        "insufficient memory"
+    )
 }
