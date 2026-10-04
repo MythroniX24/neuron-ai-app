@@ -41,6 +41,7 @@ class DebugConsoleViewModel(
     data class DebugSnapshot(
         val nativeLibraryLoaded: Boolean,
         val engineVersion: String,
+        val backends: String,
         val gpuAvailable: Boolean,
         val visionAvailable: Boolean,
         val registeredModels: Int,
@@ -72,6 +73,7 @@ class DebugConsoleViewModel(
         DebugSnapshot(
             nativeLibraryLoaded = engine.nativeLibraryLoaded,
             engineVersion = engine.engineVersion,
+            backends = engine.backends,
             gpuAvailable = engine.gpuAvailable,
             visionAvailable = engine.visionAvailable,
             registeredModels = models.size,
@@ -123,6 +125,7 @@ class DebugConsoleViewModel(
         appendLine("Neuron-AI debug report")
         appendLine("engine: ${data.engineVersion}")
         appendLine("native library: ${if (data.nativeLibraryLoaded) "loaded" else "NOT LOADED"}")
+        appendLine("backends loaded: ${data.backends}")
         appendLine("gpu (vulkan): ${data.gpuAvailable}")
         appendLine("vision loaded: ${data.visionAvailable}")
         appendLine("ram: ${data.totalRamGb} total / ${data.freeRamGb} free")

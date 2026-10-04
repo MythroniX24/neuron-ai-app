@@ -141,6 +141,16 @@ fun DebugConsoleScreen(
             SectionTitle("Engine")
             KeyValue("Native library", if (data.nativeLibraryLoaded) "loaded" else "NOT LOADED")
             KeyValue("Build", data.engineVersion)
+            KeyValue("Backends loaded", data.backends)
+            if (data.backends.startsWith("NONE")) {
+                Text(
+                    text = "ggml found no compute backend — every model will fail with " +
+                        "\"no backends are loaded\". This is an installation problem, not a " +
+                        "bad model file. Reinstalling the APK normally fixes it.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error
+                )
+            }
             KeyValue("GPU (Vulkan)", yesNo(data.gpuAvailable))
             KeyValue("Vision projector loaded", yesNo(data.visionAvailable))
             KeyValue("Registered models", data.registeredModels.toString())

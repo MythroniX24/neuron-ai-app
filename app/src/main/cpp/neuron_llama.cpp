@@ -419,7 +419,14 @@ Java_com_neuron_ai_data_local_LocalEngineLoader_nativeClearLog(JNIEnv *, jobject
 
 // One-time discovery of runtime backends (ggml's GGML_BACKEND_DL model):
 // dlopen every libggml-{cpu,vulkan}-*.so found in [dir], scoring CPU variants
-// and keeping only the best match. No-op when already initialized.
+// and keeping only the best match. No-op once a backend is actually registered.
+//
+// "Actually" matters: ggml_backend_load_all_from_path() returns void and is
+// perfectly happy to find NOTHING (wrong/missing directory, libs still inside
+// the APK because they were never extracted). Marking the attempt as done
+// anyway would leave ggml_backend_reg_count() == 0 for the rest of the
+// process, and every later load would fail with the useless
+// "no backends are loaded" hint. So success is measured by the registry.
 JNIEXPORT void JNICALL
 Java_com_neuron_ai_data_local_LocalEngineLoader_nativeInitBackends(
         JNIEnv *env, jobject, jstring jDir) {
@@ -430,10 +437,60 @@ Java_com_neuron_ai_data_local_LocalEngineLoader_nativeInitBackends(
         std::lock_guard<std::mutex> lock(g_mutex);
         if (!g_backendsInitialized) {
             ggml_backend_load_all_from_path(dir);
-            g_backendsInitialized = true;
+            const size_t regs = ggml_backend_reg_count();
+            LOGI("Backends: %zu registry/registries loaded from %s (%zu devices)",
+                 regs, dir, ggml_backend_dev_count());
+            if (regs > 0) {
+                g_backendsInitialized = true;
+            } else {
+                LOGE("No ggml backend .so found in %s — inference is impossible. "
+                     "The native libraries must be extracted at install time "
+                     "(android:extractNativeLibs=true), not loaded from the APK.", dir);
+            }
         }
         env->ReleaseStringUTFChars(jDir, dir);
     }
+#endif
+}
+
+// Human-readable list of the backends ggml actually registered, for the
+// Settings debug console. This is the single most useful line when a load
+// fails: it separates "no backends on disk" from "backends present but this
+// model does not fit".
+JNIEXPORT jstring JNICALL
+Java_com_neuron_ai_data_local_LocalEngineLoader_nativeBackendSummary(JNIEnv *env, jobject) {
+#if NEURON_HAVE_LLAMA
+    std::lock_guard<std::mutex> lock(g_mutex);
+    std::string out;
+    const size_t regs = ggml_backend_reg_count();
+    for (size_t i = 0; i < regs; ++i) {
+        ggml_backend_reg_t reg = ggml_backend_reg_get(i);
+        if (reg == nullptr) {
+            continue;
+        }
+        if (!out.empty()) {
+            out += "\n";
+        }
+        out += ggml_backend_reg_name(reg) != nullptr ? ggml_backend_reg_name(reg) : "?";
+        out += ": ";
+        const size_t devs = ggml_backend_reg_dev_count(reg);
+        for (size_t d = 0; d < devs; ++d) {
+            ggml_backend_dev_t dev = ggml_backend_reg_dev_get(reg, d);
+            if (dev == nullptr) {
+                continue;
+            }
+            if (d > 0) {
+                out += " | ";
+            }
+            out += ggml_backend_dev_name(dev) != nullptr ? ggml_backend_dev_name(dev) : "?";
+        }
+    }
+    if (out.empty()) {
+        return env->NewStringUTF("NONE — no ggml backend was loaded (this is why loading fails)");
+    }
+    return env->NewStringUTF(out.c_str());
+#else
+    return env->NewStringUTF("unavailable");
 #endif
 }
 
@@ -446,6 +503,21 @@ Java_com_neuron_ai_data_local_LocalEngineLoader_nativeLoad(
         JNIEnv *env, jobject, jstring jPath, jint contextTokens,
         jint threads, jboolean useGpu, jstring jMmprojPath, jobjectArray jErrOut) {
 #if NEURON_HAVE_LLAMA
+    // Fail loudly and specifically when ggml has no backend at all. Left
+    // unhandled, llama_model_load_from_file() reports the same
+    // "no backends are loaded" line for every model, which reads like a
+    // corrupt GGUF and sends people hunting in the wrong place.
+    if (ggml_backend_reg_count() == 0) {
+        if (jErrOut != nullptr && env->GetArrayLength(jErrOut) > 0) {
+            env->SetObjectArrayElement(
+                jErrOut, 0,
+                env->NewStringUTF(
+                    "No compute backend is loaded — this is an installation problem, "
+                    "not a problem with the model file. Reinstall the APK so the "
+                    "native libraries are extracted to disk."));
+        }
+        return -8;
+    }
     if (!g_backendsInitialized) {
         if (jErrOut != nullptr && env->GetArrayLength(jErrOut) > 0) {
             env->SetObjectArrayElement(jErrOut, 0,

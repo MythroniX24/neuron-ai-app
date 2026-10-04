@@ -16,8 +16,8 @@ android {
         applicationId = "com.neuron.ai"
         minSdk = 26
         targetSdk = 34
-        versionCode = 6
-        versionName = "1.1.0"
+        versionCode = 7
+        versionName = "1.1.1"
 
         ndk {
             // Local AI: 64-bit only — 32-bit ABIs would double build time and
@@ -112,10 +112,22 @@ android {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
-        // Keep the native inference library uncompressed in the APK so
-        // Android can load it directly from the installed APK (extractNativeLibs=false).
+        // The .so files MUST land on disk at install time.
+        //
+        // ggml is built with GGML_BACKEND_DL=ON, so libggml-cpu-<isa>.so and
+        // libggml-vulkan.so are NOT linked into libneuron_llama.so — ggml
+        // finds and dlopen()s them by scanning a DIRECTORY at load time
+        // (ggml_backend_load_all_from_path, fed with
+        // ApplicationInfo.nativeLibraryDir). With useLegacyPackaging=false the
+        // libs stay Stored inside the APK, are mmap'd straight out of it by
+        // the linker, and that directory is never created — so the scan finds
+        // nothing, ggml_backend_reg_count() stays 0, and every model load dies
+        // with "no backends are loaded. hint: use ggml_backend_load() ...".
+        // llama.cpp's own Android binding sets android:extractNativeLibs=true
+        // for exactly this reason. (Only the .so entry points are affected;
+        // the far bigger Vulkan lib compresses well, so the APK gets smaller.)
         jniLibs {
-            useLegacyPackaging = false
+            useLegacyPackaging = true
         }
     }
 

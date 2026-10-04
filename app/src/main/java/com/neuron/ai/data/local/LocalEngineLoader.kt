@@ -57,6 +57,15 @@ object LocalEngineLoader {
     /** Drops the captured log; the console's Clear button. */
     external fun nativeClearLog()
 
+    /**
+     * The ggml backends that are actually registered right now, e.g.
+     * "CPU: ARMv8.0-A". ggml ships its backends as separate .so files that
+     * are dlopen'd at runtime, so this can legitimately be empty — and when
+     * it is, EVERY model fails with "no backends are loaded". Showing it is
+     * the difference between diagnosing the install and blaming the model.
+     */
+    external fun nativeBackendSummary(): String
+
     private external fun nativeIsAvailable(): Boolean
     private external fun nativeGpuAvailable(): Boolean
     private external fun nativeInitBackends(dir: String)
@@ -365,6 +374,11 @@ object LocalEngineLoader {
         return EngineDiagnostics(
             nativeLibraryLoaded = nativeOk,
             engineVersion = if (nativeOk) runCatching { nativeVersion() }.getOrElse { "?" } else "unavailable",
+            backends = if (nativeOk) {
+                runCatching { nativeBackendSummary() }.getOrElse { "Could not query: ${it.message}" }
+            } else {
+                "unavailable"
+            },
             gpuAvailable = gpuAvailable,
             visionAvailable = if (nativeOk) runCatching { nativeVisionAvailable() }.getOrElse { false } else false,
             modelPath = modelPath,
@@ -378,6 +392,7 @@ object LocalEngineLoader {
     data class EngineDiagnostics(
         val nativeLibraryLoaded: Boolean,
         val engineVersion: String,
+        val backends: String,
         val gpuAvailable: Boolean,
         val visionAvailable: Boolean,
         val modelPath: String?,
