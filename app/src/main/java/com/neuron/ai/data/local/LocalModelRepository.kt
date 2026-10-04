@@ -113,6 +113,47 @@ class LocalModelRepository(
         }
     }
 
+    /**
+     * Adopts GGUF files that sit in the models directory but are missing from
+     * the manifest, and returns how many were adopted.
+     *
+     * The download flow renames the finished `.part` into the models directory
+     * BEFORE it registers the record, so any failure between those two steps
+     * (a validation bug, a crash, the process being killed) leaves a
+     * gigabyte-scale file on disk that the UI cannot see — and the only way
+     * out was to download it all again. This makes the directory the source
+     * of truth on startup.
+     *
+     * Vision projectors (`*-mmproj*.gguf`) are deliberately skipped: they are
+     * companions of a model, not models.
+     */
+    suspend fun adoptOrphanedFiles(): Int = withContext(dispatchers.io) {
+        val known = _models.value.mapNotNullTo(mutableSetOf()) { it.fileName }
+        val orphans = (modelsDir.listFiles() ?: return@withContext 0)
+            .filter { candidate ->
+                candidate.isFile &&
+                    candidate.name.endsWith(".gguf", ignoreCase = true) &&
+                    candidate.name !in known &&
+                    !VisionProjector.isProjectorFile(candidate.name)
+            }
+        var adopted = 0
+        for (orphan in orphans) {
+            val display = HfHubClient.quantOf(orphan.name)?.let { quant ->
+                "${orphan.nameWithoutExtension} ($quant)"
+            } ?: orphan.nameWithoutExtension
+            registerExistingFile(
+                orphan,
+                displayName = display,
+                source = LocalModelRecord.SOURCE_DOWNLOAD
+            ).onSuccess { adopted++ }
+                .onFailure { t ->
+                    logger?.w("LocalModels", "Orphan ${orphan.name} not adopted: ${t.message}")
+                }
+        }
+        if (adopted > 0) logger?.d("LocalModels", "Adopted $adopted orphaned model file(s)")
+        adopted
+    }
+
     // ---- Import ------------------------------------------------------------
 
     /**
@@ -171,7 +212,11 @@ class LocalModelRepository(
                     displayName = displayName.take(60),
                     fileName = dest.name,
                     sizeBytes = dest.length(),
-                    quantization = info.quantization,
+                    // The GGUF's own quantization string wins; otherwise fall
+                    // back to the file name, which is what every Hub quant
+                    // release actually uses (general.file_type is ambiguous —
+                    // see GgufReader).
+                    quantization = info.quantization ?: HfHubClient.quantOf(sourceFile.name),
                     architecture = info.architecture,
                     contextLength = info.contextLength,
                     blockCount = info.blockCount,
@@ -211,7 +256,7 @@ class LocalModelRepository(
                 displayName = displayName.take(60),
                 fileName = file.name,
                 sizeBytes = file.length(),
-                quantization = info.quantization,
+                quantization = info.quantization ?: HfHubClient.quantOf(file.name),
                 architecture = info.architecture,
                 contextLength = info.contextLength,
                 blockCount = info.blockCount,

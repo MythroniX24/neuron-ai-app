@@ -104,8 +104,14 @@ object GgufReader {
                         architecture = readString(stream)
                     key == "general.quantization" && type == TYPE_STRING ->
                         quantization = readString(stream)
-                    key == "general.file_type" && type == TYPE_UINT32 ->
-                        quantization = fileTypeLabel(readU32Le(stream))
+                    // general.file_type is deliberately NOT turned into a label.
+                    // Its numeric value is ambiguous across the ecosystem: The
+                    // Qwen / TheBloke / bartowski files this app downloads all
+                    // write the LEGACY llama_ftype enum (Q4_K_M=15, Q6_K=18,
+                    // Q8_0=7) while current ggml_type says 15=Q8_K, 18=IQ3_XXS.
+                    // Any table we ship is wrong for half the Hub, and a wrong
+                    // quant label is worse than none — the file NAME is the
+                    // reliable source (see LocalModelRepository).
                     // Architecture-scoped keys: match by SUFFIX so ordering in
                     // the file doesn't matter (architecture may come later).
                     key.endsWith(".context_length") && type == TYPE_UINT32 ->
@@ -148,9 +154,29 @@ object GgufReader {
 
     // ---- Value readers (all little-endian) ---------------------------------
 
+    /**
+     * GGUF value type ids, EXACTLY as the spec numbers them
+     * (gguf.md: `enum gguf_type`). Getting these wrong desyncs the stream:
+     * a STRING (8) read as a fixed-width number consumes only the 8-byte
+     * length prefix and leaves the string body behind, so every later key
+     * length is garbage — which is exactly how a perfectly good download
+     * used to be rejected with "Metadata string too long (13612586462316
+     * bytes)". The first KV of every real GGUF is general.architecture
+     * (STRING), so this broke EVERY file.
+     */
+    private const val TYPE_UINT8 = 0
+    private const val TYPE_INT8 = 1
+    private const val TYPE_UINT16 = 2
+    private const val TYPE_INT16 = 3
     private const val TYPE_UINT32 = 4
-    private const val TYPE_STRING = 11
-    private const val TYPE_ARRAY = 12
+    private const val TYPE_INT32 = 5
+    private const val TYPE_FLOAT32 = 6
+    private const val TYPE_BOOL = 7
+    private const val TYPE_STRING = 8
+    private const val TYPE_ARRAY = 9
+    private const val TYPE_UINT64 = 10
+    private const val TYPE_INT64 = 11
+    private const val TYPE_FLOAT64 = 12
 
     private fun readString(stream: InputStream): String {
         val len = readU64Le(stream)
@@ -166,43 +192,48 @@ object GgufReader {
      */
     private fun skipTypedValue(stream: InputStream, type: Int) {
         when (type) {
-            0, 1 -> skip(stream, 1)           // UINT8 / INT8
-            2, 3 -> skip(stream, 2)           // UINT16 / INT16
-            4, 5, 6, 7 -> skip(stream, 4)     // UINT32 / INT32 / FLOAT32 / BOOL
-            8, 9, 10 -> skip(stream, 8)       // UINT64 / INT64 / FLOAT64
-            TYPE_STRING -> {                   // STRING
-                val len = readU64Le(stream)
-                if (len > MAX_VALUE_BYTES) throw InvalidGgufException("String value too long")
-                skip(stream, len)
-            }
-            TYPE_ARRAY -> {                    // ARRAY
-                val elemType = readU32Le(stream).toInt()
-                val count = readU64Le(stream)
-                skipArray(stream, elemType, count)
-            }
+            TYPE_UINT8, TYPE_INT8, TYPE_BOOL -> skip(stream, 1)
+            TYPE_UINT16, TYPE_INT16 -> skip(stream, 2)
+            TYPE_UINT32, TYPE_INT32, TYPE_FLOAT32 -> skip(stream, 4)
+            TYPE_UINT64, TYPE_INT64, TYPE_FLOAT64 -> skip(stream, 8)
+            TYPE_STRING -> skipStringValue(stream)
+            TYPE_ARRAY -> skipArray(stream, readArrayHeader(stream))
             else -> throw InvalidGgufException("Unknown metadata value type: $type")
         }
     }
 
-    /** Array skipping: element sizes per GGUF type; nested arrays recurse. */
-    private fun skipArray(stream: InputStream, elemType: Int, count: Long) {
+    /** Consumes one STRING value: u64 byte length, then that many bytes. */
+    private fun skipStringValue(stream: InputStream) {
+        val len = readU64Le(stream)
+        if (len > MAX_VALUE_BYTES) throw InvalidGgufException("String value too long")
+        skip(stream, len)
+    }
+
+    /** Reads an ARRAY header and returns element type + count, bounds-checked. */
+    private fun readArrayHeader(stream: InputStream): Pair<Int, Long> {
+        val elemType = readU32Le(stream).toInt()
+        val count = readU64Le(stream)
         if (count < 0 || count > MAX_VALUE_BYTES) {
             throw InvalidGgufException("Array value too large ($count elements)")
         }
+        if (elemType !in TYPE_UINT8..TYPE_FLOAT64) {
+            throw InvalidGgufException("Unknown array element type: $elemType")
+        }
+        return elemType to count
+    }
+
+    /** Array skipping: element sizes per GGUF type; nested arrays recurse. */
+    private fun skipArray(stream: InputStream, header: Pair<Int, Long>) {
+        val elemType = header.first
+        val count = header.second
         when (elemType) {
-            0, 1 -> skip(stream, count)
-            2, 3 -> skip(stream, count * 2)
-            4, 5, 6, 7 -> skip(stream, count * 4)
-            8, 9, 10 -> skip(stream, count * 8)
-            TYPE_STRING -> repeat(count.toInt()) {
-                val len = readU64Le(stream)
-                if (len > MAX_VALUE_BYTES) throw InvalidGgufException("String in array too long")
-                skip(stream, len)
-            }
+            TYPE_UINT8, TYPE_INT8, TYPE_BOOL -> skip(stream, count)
+            TYPE_UINT16, TYPE_INT16 -> skip(stream, count * 2)
+            TYPE_UINT32, TYPE_INT32, TYPE_FLOAT32 -> skip(stream, count * 4)
+            TYPE_UINT64, TYPE_INT64, TYPE_FLOAT64 -> skip(stream, count * 8)
+            TYPE_STRING -> repeat(count.toInt()) { skipStringValue(stream) }
             TYPE_ARRAY -> repeat(count.toInt()) {
-                val inner = readU32Le(stream).toInt()
-                val innerCount = readU64Le(stream)
-                skipArray(stream, inner, innerCount)
+                skipArray(stream, readArrayHeader(stream))
             }
             else -> throw InvalidGgufException("Unknown array element type: $elemType")
         }
@@ -246,26 +277,5 @@ object GgufReader {
             off += n
         }
         return true
-    }
-
-    /** Human label for GGUF general.file_type codes (subset that matters). */
-    private fun fileTypeLabel(code: Long): String? = when (code) {
-        0L -> "F32"
-        1L -> "F16"
-        7L -> "Q8_0"
-        8L -> "Q5_1"
-        9L -> "Q5_0"
-        10L -> "Q4_1"
-        12L -> "Q4_0"
-        15L -> "Q6_K"
-        16L -> "Q5_K_M"
-        17L -> "Q5_K_S"
-        18L -> "Q4_K_M"
-        19L -> "Q4_K_S"
-        20L -> "Q3_K_L"
-        21L -> "Q3_K_M"
-        22L -> "Q3_K_S"
-        24L -> "Q2_K"
-        else -> null
     }
 }

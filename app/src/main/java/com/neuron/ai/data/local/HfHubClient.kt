@@ -191,9 +191,17 @@ class HfHubClient(
         fun isShardFile(fileName: String): Boolean =
             SHARD_PATTERN.containsMatchIn(fileName)
 
-        /** Quant label of a single file name ("Q4_K_M", "IQ4_XS", "F16"...). */
+        /**
+         * Quant label of a single file name ("Q4_K_M", "IQ4_XS", "F16"...).
+         *
+         * Case-INSENSITIVE on purpose: the Hub is inconsistent — bartowski
+         * ships `Q4_K_M` but Qwen ships `q4_k_m`. A case-sensitive pattern
+         * found no quant in the Qwen repos, so [selectVariant] fell through to
+         * "smallest quantized file" and recommended Q2_K, the worst quality
+         * tier, for both Qwen entries.
+         */
         fun quantOf(fileName: String): String? =
-            Regex("""[._-](I?Q\d[_A-Za-z0-9]*|F16|F32|BF16)[._-]?""")
+            Regex("""[._-](I?Q\d[_A-Za-z0-9]*|F16|F32|BF16)[._-]?""", RegexOption.IGNORE_CASE)
                 .find(fileName)?.groupValues?.get(1)
 
         /**

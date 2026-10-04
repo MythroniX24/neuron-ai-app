@@ -166,6 +166,36 @@ class HfHubClientTest {
         assertNull(HfHubClient.quantOf("model.gguf"))
     }
 
+    /**
+     * The Hub is inconsistent about case: bartowski ships `Q4_K_M`, Qwen ships
+     * `q4_k_m`. A case-sensitive pattern found no quant in the Qwen repos, so
+     * selectVariant fell through to "smallest quantized file" and recommended
+     * Q2_K — the worst quality tier — for both recommended Qwen models.
+     */
+    @Test
+    fun `quant detection is case insensitive across hub naming styles`() {
+        assertEquals("q4_k_m", HfHubClient.quantOf("qwen2.5-1.5b-instruct-q4_k_m.gguf"))
+        assertEquals("Q8_0", HfHubClient.quantOf("tinyllama-1.1b-chat-v1.0.Q8_0.gguf"))
+        assertEquals("f16", HfHubClient.quantOf("gemma-2-2b-it-f16.gguf"))
+        assertEquals("bf16", HfHubClient.quantOf("gemma-2-2b-it-bf16.gguf"))
+        assertEquals("q2_k", HfHubClient.quantOf("qwen2.5-3b-instruct-q2_k.gguf"))
+    }
+
+    /** The real Qwen listing must recommend Q4_K_M, not the smallest Q2_K. */
+    @Test
+    fun `lowercase qwen file names still match the preferred quant`() {
+        val qwenFiles = listOf(
+            HfHubClient.SearchResult.Variant("qwen2.5-1.5b-instruct-fp16.gguf", 3_560_416_288, null),
+            HfHubClient.SearchResult.Variant("qwen2.5-1.5b-instruct-q2_k.gguf", 752_880_160, null),
+            HfHubClient.SearchResult.Variant("qwen2.5-1.5b-instruct-q4_k_m.gguf", 1_117_320_736, null),
+            HfHubClient.SearchResult.Variant("qwen2.5-1.5b-instruct-q8_0.gguf", 1_894_532_128, null)
+        )
+        assertEquals(
+            "qwen2.5-1.5b-instruct-q4_k_m.gguf",
+            HfHubClient.selectVariant(qwenFiles)?.fileName
+        )
+    }
+
     @Test
     fun `variant selection prefers the catalog quant then degrades gracefully`() {
         val variants = listOf(

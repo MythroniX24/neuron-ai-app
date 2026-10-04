@@ -139,6 +139,12 @@ class LocalAiViewModel(
                 }
             }
         }
+        // Files that finished downloading but never made it into the manifest
+        // (a failed validation, a crash, a killed process) are adopted here so
+        // the user does not have to download gigabytes a second time.
+        viewModelScope.launch {
+            repository.adoptOrphanedFiles()
+        }
         viewModelScope.launch {
             repository.models.collect { records ->
                 _state.value = _state.value.copy(
