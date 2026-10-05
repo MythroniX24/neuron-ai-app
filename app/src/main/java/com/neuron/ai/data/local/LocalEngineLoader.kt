@@ -43,6 +43,17 @@ object LocalEngineLoader {
         backendDir = dir
     }
 
+    /**
+     * Runs ggml's runtime backend discovery once per process. Safe to call
+     * from anywhere, including the debug console: after the first success
+     * it is a single boolean check on the native side.
+     */
+    fun ensureBackendsInitialized() {
+        if (!nativeLibraryAvailable) return
+        val dir = backendDir ?: return
+        runCatching { nativeInitBackends(dir) }
+    }
+
     /** Informational; from llama.cpp when built, "unavailable" otherwise. */
     external fun nativeVersion(): String
 
@@ -170,7 +181,7 @@ object LocalEngineLoader {
         }
         // Runtime backend discovery (per-ISA CPU variants + Vulkan), a no-op
         // after the first call.
-        backendDir?.let { dir -> runCatching { nativeInitBackends(dir) } }
+        ensureBackendsInitialized()
         var err = arrayOfNulls<String>(1)
         var code = nativeLoad(path, contextTokens, threads, useGpu, mmprojPath, err)
         if (code != 0 && useGpu && looksLikeMemoryPressure(err[0])) {
@@ -415,6 +426,12 @@ object LocalEngineLoader {
      */
     fun diagnostics(modelPath: String? = null): EngineDiagnostics {
         val nativeOk = nativeLibraryAvailable
+        // The backend scan only ever ran if a load was attempted. Reporting
+        // the backend list before that showed "NONE - this is why loading
+        // fails" on a perfectly healthy install that simply had not been
+        // asked to load anything yet. Kick the scan off first: it is cheap
+        // after the first success and a no-op once a backend is registered.
+        if (nativeOk) ensureBackendsInitialized()
         val logs = if (nativeOk) {
             runCatching { nativeLogTail(400) }.getOrElse { "Could not read the native log: ${it.message}" }
         } else {

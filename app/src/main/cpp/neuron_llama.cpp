@@ -14,9 +14,13 @@
 #include <jni.h>
 #include <algorithm>
 #include <cctype>
+#include <cerrno>
 #include <cstring>
 #include <deque>
+#include <dirent.h>
+#include <dlfcn.h>
 #include <exception>
+#include <map>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -30,9 +34,7 @@
 #define LOGI(...) ((void)0)
 #endif
 
-#if defined(__ANDROID__)
-#include <dlfcn.h>
-#endif
+
 
 #if NEURON_HAVE_LLAMA
 #include "llama.h"
@@ -429,6 +431,8 @@ Java_com_neuron_ai_data_local_LocalEngineLoader_nativeClearLog(JNIEnv *, jobject
 // anyway would leave ggml_backend_reg_count() == 0 for the rest of the
 // process, and every later load would fail with the useless
 // "no backends are loaded" hint. So success is measured by the registry.
+size_t loadBackendsWithDiagnostics(const std::string &dir);
+
 JNIEXPORT void JNICALL
 Java_com_neuron_ai_data_local_LocalEngineLoader_nativeInitBackends(
         JNIEnv *env, jobject, jstring jDir) {
@@ -436,18 +440,28 @@ Java_com_neuron_ai_data_local_LocalEngineLoader_nativeInitBackends(
     installLogCollector();
     const char *dir = env->GetStringUTFChars(jDir, nullptr);
     if (dir != nullptr) {
+        const std::string path = dir;
         std::lock_guard<std::mutex> lock(g_mutex);
         if (!g_backendsInitialized) {
+            // First ask ggml to do it the way llama.cpp intends...
             ggml_backend_load_all_from_path(dir);
-            const size_t regs = ggml_backend_reg_count();
+            size_t regs = ggml_backend_reg_count();
+            // ...then, if that found nothing, do it ourselves with the whole
+            // story written to the console's log. ggml's loader is silent in
+            // release builds (NDEBUG), so without this the only symptom a
+            // user ever saw was the bare word "NONE".
+            if (regs == 0) {
+                regs = loadBackendsWithDiagnostics(path);
+            }
             LOGI("Backends: %zu registry/registries loaded from %s (%zu devices)",
-                 regs, dir, ggml_backend_dev_count());
+                 regs, path.c_str(), ggml_backend_dev_count());
             if (regs > 0) {
                 g_backendsInitialized = true;
             } else {
-                LOGE("No ggml backend .so found in %s — inference is impossible. "
-                     "The native libraries must be extracted at install time "
-                     "(android:extractNativeLibs=true), not loaded from the APK.", dir);
+                appendLogLine("no compute backend could be loaded from " + path +
+                              " - inference is impossible on this install. The "
+                              "native libraries must be extracted to disk at "
+                              "install time (android:extractNativeLibs=true).");
             }
         }
         env->ReleaseStringUTFChars(jDir, dir);
@@ -500,6 +514,87 @@ Java_com_neuron_ai_data_local_LocalEngineLoader_nativeBackendSummary(JNIEnv *env
 // single-active constraint lives HERE too, not only in Kotlin.
 // Returns 0 on success, negative on failure with errOut[0] set to a
 // human-readable reason.
+// Loads ggml backend libraries from [dir] ourselves, accounting for every step.
+//
+// ggml's own loader (ggml_backend_load_best) is fine in a debug build and
+// useless in a release one: NDEBUG makes it silent, and its "search path does
+// not exist" / "failed to load" lines are DEBUG or gated on !silent. This
+// reproduces its algorithm - one winner per backend family, the highest
+// ggml_backend_score - and writes what happened into the log ring the debug
+// console reads. Returns the number of backends registered.
+size_t loadBackendsWithDiagnostics(const std::string &dir) {
+    std::vector<std::string> candidates;
+    DIR *handle = opendir(dir.c_str());
+    if (handle == nullptr) {
+        appendLogLine("backend scan: cannot open " + dir + ": " + std::strerror(errno));
+        return 0;
+    }
+    while (struct dirent *entry = readdir(handle)) {
+        const std::string name(entry->d_name);
+        const std::string prefix = "libggml-";
+        if (name.size() > prefix.size() + 3 &&
+            name.compare(0, prefix.size(), prefix) == 0 &&
+            name.compare(name.size() - 3, 3, ".so") == 0) {
+            candidates.push_back(name);
+        }
+    }
+    closedir(handle);
+    std::sort(candidates.begin(), candidates.end());
+    appendLogLine("backend scan: " + std::to_string(candidates.size()) +
+                  " ggml backend .so file(s) in " + dir);
+
+    // One winner per family: "libggml-cpu-android_armv8.6_1.so" is family
+    // "cpu", "libggml-vulkan.so" is family "vulkan". Without this the CPU
+    // variants would compete with Vulkan and only one of them would load.
+    std::map<std::string, std::pair<int, std::string>> best;
+    for (const std::string &name : candidates) {
+        const std::string full = dir + "/" + name;
+        void *lib = dlopen(full.c_str(), RTLD_NOW | RTLD_LOCAL);
+        if (lib == nullptr) {
+            const char *why = dlerror();
+            appendLogLine("  " + name + " -> dlopen FAILED: " +
+                          std::string(why != nullptr ? why : "unknown error"));
+            continue;
+        }
+        using score_fn_t = int (*)();
+        auto scoreFn = (score_fn_t) dlsym(lib, "ggml_backend_score");
+        if (scoreFn != nullptr && scoreFn() == 0) {
+            appendLogLine("  " + name + " -> reports score 0, not usable here");
+            continue;
+        }
+        const std::string family = name.substr(7, name.find('-', 7) - 7);
+        const int score = scoreFn != nullptr ? scoreFn() : 1;
+        auto it = best.find(family);
+        if (it == best.end() || score > it->second.first) {
+            best[family] = {score, full};
+        }
+        appendLogLine("  " + name + " -> loaded, family=" + family +
+                      ", score=" + std::to_string(score));
+    }
+
+    size_t registered = 0;
+    for (const auto &entry : best) {
+        void *lib = dlopen(entry.second.second.c_str(), RTLD_NOW | RTLD_LOCAL);
+        if (lib == nullptr) continue;
+        using init_fn_t = void *(*)();
+        auto initFn = (init_fn_t) dlsym(lib, "ggml_backend_init");
+        if (initFn == nullptr) {
+            appendLogLine("  " + entry.second.second +
+                          " -> FAILED: no ggml_backend_init symbol");
+            continue;
+        }
+        initFn();
+        registered++;
+        appendLogLine("  registered backend '" + entry.first + "' from " +
+                      entry.second.second);
+    }
+    if (registered == 0 && !candidates.empty()) {
+        appendLogLine("backend scan: found the .so files but registered none - "
+                      "the libraries are present but unloadable");
+    }
+    return registered;
+}
+
 JNIEXPORT jint JNICALL
 Java_com_neuron_ai_data_local_LocalEngineLoader_nativeLoad(
         JNIEnv *env, jobject, jstring jPath, jint contextTokens,
@@ -510,13 +605,15 @@ Java_com_neuron_ai_data_local_LocalEngineLoader_nativeLoad(
     // "no backends are loaded" line for every model, which reads like a
     // corrupt GGUF and sends people hunting in the wrong place.
     if (ggml_backend_reg_count() == 0) {
+        // Quote the backend scan. "NONE" on its own sent people looking at
+        // the model file, which is never the cause when no backend exists.
+        const std::string why = logTail(4);
+        std::string message =
+            "No compute backend is loaded - an installation problem, not a "
+            "model problem.";
+        if (!why.empty()) message += "\n" + why;
         if (jErrOut != nullptr && env->GetArrayLength(jErrOut) > 0) {
-            env->SetObjectArrayElement(
-                jErrOut, 0,
-                env->NewStringUTF(
-                    "No compute backend is loaded — this is an installation problem, "
-                    "not a problem with the model file. Reinstall the APK so the "
-                    "native libraries are extracted to disk."));
+            env->SetObjectArrayElement(jErrOut, 0, env->NewStringUTF(message.c_str()));
         }
         return -8;
     }
@@ -536,6 +633,7 @@ Java_com_neuron_ai_data_local_LocalEngineLoader_nativeLoad(
         mmprojPath = mm != nullptr ? mm : "";
         env->ReleaseStringUTFChars(jMmprojPath, mm);
     }
+
 
     auto fail = [&](jint code, const char *message) {
         if (jErrOut != nullptr && env->GetArrayLength(jErrOut) > 0) {
