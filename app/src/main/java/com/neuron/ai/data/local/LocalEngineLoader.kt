@@ -184,11 +184,15 @@ object LocalEngineLoader {
         ensureBackendsInitialized()
         var err = arrayOfNulls<String>(1)
         var code = nativeLoad(path, contextTokens, threads, useGpu, mmprojPath, err)
-        if (code != 0 && useGpu && looksLikeMemoryPressure(err[0])) {
-            // A Vulkan device that advertises memory it cannot actually
-            // allocate makes the whole load fail, while the exact same file
-            // loads fine on the CPU. One automatic CPU retry turns a dead end
-            // into a working (slower) model instead of an error message.
+        if (code != 0 && useGpu && shouldRetryWithoutGpu(err[0])) {
+            // Two very different GPU failures land here, and the exact same
+            // file loads fine on the CPU in both cases:
+            //  - a device that advertises memory it cannot allocate, and
+            //  - a driver that llama.cpp cannot build a device object for at
+            //    all (e.g. PowerVR, which has no VK_KHR_16bit_storage, so
+            //    ggml-vulkan throws "Unsupported device" mid-load).
+            // One automatic CPU retry turns a dead end into a working
+            // (slower) model instead of an error message.
             val gpuReason = err[0]
             err = arrayOfNulls<String>(1)
             code = nativeLoad(path, contextTokens, threads, false, mmprojPath, err)
@@ -224,6 +228,29 @@ object LocalEngineLoader {
         if (reason.isNullOrBlank()) return false
         val text = reason.lowercase()
         return MEMORY_MARKERS.any { text.contains(it) }
+    }
+
+    /**
+     * true when a GPU load failed for a reason the CPU does not share, so the
+     * same file is worth one automatic CPU retry. Pure and internal so the
+     * retry decision is unit-tested instead of guessed at on a phone.
+     */
+    internal fun shouldRetryWithoutGpu(reason: String?): Boolean =
+        looksLikeMemoryPressure(reason) || looksLikeGpuDeviceFailure(reason)
+
+    /**
+     * true when [reason] is the GPU driver refusing to cooperate rather than
+     * the machine running out of memory or the file being broken.
+     *
+     * "Unsupported device" is ggml-vulkan's own words for a device missing
+     * VK_KHR_16bit_storage, thrown out of ggml_vk_get_device() and reported by
+     * llama.cpp as "error loading model: Unsupported device" - which reads
+     * exactly like a corrupt GGUF and sends people looking at the wrong file.
+     */
+    internal fun looksLikeGpuDeviceFailure(reason: String?): Boolean {
+        if (reason.isNullOrBlank()) return false
+        val text = reason.lowercase()
+        return GPU_DEVICE_MARKERS.any { text.contains(it) }
     }
 
     /**
@@ -481,5 +508,13 @@ object LocalEngineLoader {
         "vkcreatebuffer",
         "vkallocatememory",
         "insufficient memory"
+    )
+
+    private val GPU_DEVICE_MARKERS = listOf(
+        "unsupported device",
+        "does not support 16-bit storage",
+        "ggml_vulkan",
+        "vkcreateinstance",
+        "vkcreatedevice"
     )
 }

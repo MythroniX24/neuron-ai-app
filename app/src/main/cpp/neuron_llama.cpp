@@ -432,6 +432,8 @@ Java_com_neuron_ai_data_local_LocalEngineLoader_nativeClearLog(JNIEnv *, jobject
 // process, and every later load would fail with the useless
 // "no backends are loaded" hint. So success is measured by the registry.
 size_t loadBackendsWithDiagnostics(const std::string &dir);
+void probeGpuDevices();
+void logGpuDeviceVerdicts();
 
 JNIEXPORT void JNICALL
 Java_com_neuron_ai_data_local_LocalEngineLoader_nativeInitBackends(
@@ -457,6 +459,10 @@ Java_com_neuron_ai_data_local_LocalEngineLoader_nativeInitBackends(
                  regs, path.c_str(), ggml_backend_dev_count());
             if (regs > 0) {
                 g_backendsInitialized = true;
+                // Doing the GPU verdict here rather than at first load means
+                // the debug console shows WHY a GPU is being skipped before
+                // anyone burns a model load finding out.
+                probeGpuDevices();
             } else {
                 appendLogLine("no compute backend could be loaded from " + path +
                               " - inference is impossible on this install. The "
@@ -595,6 +601,132 @@ size_t loadBackendsWithDiagnostics(const std::string &dir) {
     return registered;
 }
 
+// --- GPU device probing ----------------------------------------------------
+//
+// A device that ggml enumerates is NOT a device llama.cpp can use. The Vulkan
+// backend answers ggml_backend_vk_reg_get_device() straight from
+// vkGetPhysicalDeviceProperties - name, description, free memory - without ever
+// building a vk_device (vk.cpp: ggml_backend_vk_reg_get_device). The first call
+// that actually needs one is two steps later, inside tensor loading:
+// llama_model_base::load_tensors() -> make_cpu_buft_list() ->
+// ggml_backend_dev_buffer_type() -> ggml_backend_vk_buffer_type() ->
+// ggml_vk_get_device() (src/llama-model.cpp:1543, vk.cpp:13051).
+//
+// Drivers without VK_KHR_16bit_storage throw std::runtime_error("Unsupported
+// device") from inside ggml_vk_get_device() (vk.cpp:4641) - PowerVR BXM is one
+// of them - and llama_model_load() catches it and reports
+// "error loading model: Unsupported device", which reads exactly like a
+// corrupt GGUF. Worse, ggml_vk_get_device() stores the vk_device it is building
+// in vk_instance.devices[idx] BEFORE the feature checks, so a device that threw
+// is left behind half-built and the next caller would get it back without an
+// exception at all.
+//
+// So: build every GPU device once, here, inside a try/catch, and remember the
+// verdict. Never probe a rejected device again - see the cache comment below.
+// gpuDeviceKey() -> (usable, why), where why is the driver's own words.
+std::map<std::string, std::pair<bool, std::string>> g_gpuDeviceVerdict;
+bool g_gpuDevicesProbed = false;
+
+// Stable identity for a device across calls. ggml hands out the same
+// ggml_backend_dev_t for a device for the lifetime of the process, but the
+// name alone would collide across backends, so pair it with the description.
+std::string gpuDeviceKey(ggml_backend_dev_t dev) {
+    const char *name = ggml_backend_dev_name(dev);
+    const char *desc = ggml_backend_dev_description(dev);
+    return std::string(name != nullptr ? name : "?") + " (" +
+           (desc != nullptr ? desc : "?") + ")";
+}
+
+bool isGpuDevice(ggml_backend_dev_t dev) {
+    const enum ggml_backend_dev_type type = ggml_backend_dev_type(dev);
+    return type == GGML_BACKEND_DEVICE_TYPE_GPU || type == GGML_BACKEND_DEVICE_TYPE_IGPU;
+}
+
+// Caller must hold g_mutex. Deliberately one-shot: the second probe of a
+// device that already threw would return ggml-vulkan's half-built vk_device
+// instead of throwing, which is how a clean error becomes a segfault.
+void probeGpuDevices() {
+    if (g_gpuDevicesProbed) {
+        return;
+    }
+    g_gpuDevicesProbed = true;
+    const size_t count = ggml_backend_dev_count();
+    for (size_t i = 0; i < count; ++i) {
+        ggml_backend_dev_t dev = ggml_backend_dev_get(i);
+        if (dev == nullptr || !isGpuDevice(dev)) {
+            continue;
+        }
+        const std::string key = gpuDeviceKey(dev);
+        bool usable = false;
+        std::string why;
+        try {
+            ggml_backend_t probe = ggml_backend_dev_init(dev, nullptr);
+            usable = probe != nullptr;
+            if (probe != nullptr) {
+                // llama.cpp will build its own backend later; holding ours
+                // would double the device-side memory for nothing.
+                ggml_backend_free(probe);
+                why = "ready";
+            } else {
+                why = "the backend reported no device";
+            }
+        } catch (const std::exception &e) {
+            why = e.what();
+        } catch (...) {
+            why = "unknown driver error";
+        }
+        g_gpuDeviceVerdict[key] = {usable, why};
+    }
+    logGpuDeviceVerdicts();
+}
+
+// The verdict is re-printed every call on purpose: nativeLoad clears the log
+// ring before it starts, and "this GPU is being skipped" is exactly what
+// someone reading the debug console after a failed load needs to see.
+void logGpuDeviceVerdicts() {
+    for (const auto &entry : g_gpuDeviceVerdict) {
+        appendLogLine("gpu device " + entry.first + ": " +
+                      (entry.second.first
+                          ? "ready"
+                          : "UNUSABLE (" + entry.second.second +
+                            ") - excluded, llama.cpp cannot load any model with it"));
+    }
+}
+
+// The device list handed to llama_model_load_from_file. CPU devices are
+// deliberately absent: llama.cpp always resolves the CPU backend itself
+// (ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_CPU)).
+bool usableGpuDevices(std::vector<ggml_backend_dev_t> & out) {
+    out.clear();
+    const size_t count = ggml_backend_dev_count();
+    for (size_t i = 0; i < count; ++i) {
+        ggml_backend_dev_t dev = ggml_backend_dev_get(i);
+        if (dev == nullptr || !isGpuDevice(dev)) {
+            continue;
+        }
+        auto it = g_gpuDeviceVerdict.find(gpuDeviceKey(dev));
+        if (it != g_gpuDeviceVerdict.end() && it->second.first) {
+            out.push_back(dev);
+        }
+    }
+    return !out.empty();
+}
+
+// llama.cpp reads mparams.devices during the load, so the array has to
+// outlive llama_model_load_from_file(). Same lifetime discipline as the
+// single-active model it is built for.
+std::vector<ggml_backend_dev_t> g_selectedDevices;
+
+// true when llama.cpp's own ERROR lines blame the GPU device rather than the
+// model file. Deliberately fed logErrors(), not logTail(): our probe verdict
+// lines mention the driver too, and matching those would mislabel an
+// unrelated failure on a device we already decided to run on the CPU.
+bool logLooksLikeGpuDeviceFailure(const std::string &errors) {
+    return errors.find("Unsupported device") != std::string::npos ||
+           errors.find("unsupported device") != std::string::npos ||
+           errors.find("does not support 16-bit storage") != std::string::npos;
+}
+
 JNIEXPORT jint JNICALL
 Java_com_neuron_ai_data_local_LocalEngineLoader_nativeLoad(
         JNIEnv *env, jobject, jstring jPath, jint contextTokens,
@@ -654,12 +786,34 @@ Java_com_neuron_ai_data_local_LocalEngineLoader_nativeLoad(
     clearLogLines();
     llama_backend_init();
 
-    const bool gpu = useGpu == JNI_TRUE;
+    probeGpuDevices();
+    logGpuDeviceVerdicts();
+
+    bool gpu = useGpu == JNI_TRUE;
     if (gpu && !vulkanDriverPresent()) {
         return fail(-6, "No Vulkan GPU driver is available on this device");
     }
+    std::vector<ggml_backend_dev_t> gpuDevices;
+    if (gpu && !usableGpuDevices(gpuDevices)) {
+        // Better a working CPU model than an error the user cannot act on.
+        appendLogLine("GPU offload was requested but every GPU device was "
+                      "rejected during probing - loading this model on the CPU");
+        gpu = false;
+    }
+    // Always explicit, never null. With mparams.devices == null llama.cpp
+    // scans the entire backend registry (llama_prepare_model_devices) and
+    // builds a buffer type for EVERY device it finds - including with
+    // n_gpu_layers == 0, because load_tensors() runs make_cpu_buft_list() over
+    // the device list before it ever looks at n_gpu_layers. So an unusable
+    // GPU device stays in the load even on the CPU-only path, and takes the
+    // whole model down with it. An empty (NULL-terminated) list is how
+    // "CPU only" is expressed; llama.cpp always resolves the CPU backend
+    // itself.
+    g_selectedDevices = gpuDevices;
+    g_selectedDevices.push_back(nullptr);
 
     llama_model_params mparams = llama_model_default_params();
+    mparams.devices = g_selectedDevices.data();
     // 999 = offload every layer that fits; llama.cpp falls back to CPU for
     // whatever the GPU cannot hold, so partial offload just works.
     mparams.n_gpu_layers = gpu ? 999 : 0;
@@ -675,7 +829,16 @@ Java_com_neuron_ai_data_local_LocalEngineLoader_nativeLoad(
         std::string why = logErrors(6);
         std::string tail = logTail(12);
         std::string message = "Model file could not be loaded (corrupt or unsupported GGUF)";
-        if (logLooksLikeMemoryPressure(tail)) {
+        if (logLooksLikeGpuDeviceFailure(why)) {
+            // The Vulkan device answered llama.cpp with an exception during
+            // tensor loading. Say so instead of blaming the file, quote the
+            // driver line that caused it, and say the fix: this exact model
+            // runs on the CPU.
+            message = "The GPU driver refused this load - the model file is fine."
+                      " Turn GPU off in Settings to run it on the CPU.";
+            const std::string reason = firstLine(why);
+            if (!reason.empty()) message += "\n" + reason;
+        } else if (logLooksLikeMemoryPressure(tail)) {
             message += " — not enough memory for this model"
                         " (try a smaller quantization, or turn GPU off in Settings)";
         } else if (!why.empty()) {
