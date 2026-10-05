@@ -104,24 +104,37 @@ class LocalAiProvider(
         val imageBytes = image?.let { attachment ->
             readImageBytes?.invoke(attachment.id)
         }
-        val prompt = renderPrompt(
-            request.messages,
-            imageMessageHasMarker = imageBytes != null
-        )
         // Milestone 7: a hot/low-battery device generates fewer tokens per
         // turn, so an answer never runs the phone into a thermal wall.
         val maxTokens = (request.maxOutputTokens ?: 1024)
             .coerceAtMost(2048)
             .coerceAtMost(repository.maxOutputTokens())
 
+        // A 4k-token window and an unbounded transcript do not mix: without
+        // this the chat breaks permanently once it outgrows the context.
+        val fitted = ContextTrimmer.fit(
+            turns = buildTurns(request.messages, imageMessageHasMarker = imageBytes != null),
+            contextTokens = request.model.contextWindowTokens
+                ?: LocalModelRouter.effectiveContextTokens(record.contextLength),
+            maxOutputTokens = maxTokens,
+            render = { turns, addAssistant ->
+                LocalEngineLoader.renderWithChatTemplate(turns, addAssistant)
+            },
+            countTokens = { prompt -> LocalEngineLoader.countTokens(prompt) }
+        )
+        val prompt = fitted.prompt
+        // If the picture's own turn was trimmed away, fall back to text: mtmd
+        // is handed one bitmap against a prompt with no marker and rejects it.
+        val useVision = imageBytes != null && fitted.hasMediaMarker
+
         // The JNI generate call BLOCKS its thread and delivers tokens through
         // a callback — run it in a child coroutine and bridge the tokens into
         // the channel. The channel closes when this scope (incl. the child)
         // completes.
         launch {
-            val result = if (imageBytes != null) {
+            val result = if (useVision) {
                 LocalEngineLoader.generateMultimodalStreaming(
-                    prompt, imageBytes, maxTokens
+                    prompt, imageBytes!!, maxTokens
                 ) { piece -> trySend(StreamEvent.Delta(piece)) }
             } else {
                 LocalEngineLoader.generateStreaming(prompt, maxTokens) { piece ->
@@ -146,53 +159,72 @@ class LocalAiProvider(
             ?.attachments?.firstOrNull { it.isImage }
 
     /**
-     * Minimal ChatML-style renderer. When the loaded model exposes its own
-     * chat template, a future iteration can switch on it; ChatML is the
-     * broadest instruct format and degrades gracefully.
+     * Renders the conversation with the MODEL'S OWN chat template, falling back
+     * to ChatML (see [ChatTemplateRenderer]). Hand-writing a ChatML-shaped
+     * prompt here, as this used to, fed Llama-3 / Mistral / Gemma checkpoints a
+     * prompt shape they were never trained on: no control tokens at all, so the
+     * model answered the system prompt or kept talking past its turn.
      *
-     * [imageMessageHasMarker] appends llama.cpp's media marker after the last
-     * image-bearing user turn — exactly one marker, matching exactly one
-     * bitmap handed to mtmd.
+     * [imageMessageHasMarker] puts the media marker INSIDE the last
+     * image-bearing turn - exactly one marker, matching exactly one bitmap
+     * handed to mtmd, in the position where the picture belongs.
      */
-    private fun renderPrompt(
+    private fun buildTurns(
         messages: List<ChatMessage>,
         imageMessageHasMarker: Boolean = false
-    ): String {
+    ): List<ChatTemplateRenderer.Turn> {
         val imageMessageIndex = if (imageMessageHasMarker) {
             messages.indexOfLast { message -> message.attachments.any { it.isImage } }
         } else {
             -1
         }
-        val builder = StringBuilder()
-        messages.forEachIndexed { index, message ->
-            when (message.role) {
-                ChatMessage.Role.SYSTEM -> builder.append("<|im_start|>system\n")
-                    .append(message.content).append("<|im_end|>\n")
-                ChatMessage.Role.USER -> {
-                    builder.append("<|im_start|>user\n")
-                    .append(message.content)
-                    if (index == imageMessageIndex) {
-                        builder.append("\n").append(LocalEngineLoader.MEDIA_MARKER).append("\n")
-                    }
-                    builder.append("<|im_end|>\n")
-                }
-                ChatMessage.Role.ASSISTANT -> builder.append("<|im_start|>assistant\n")
-                    .append(message.content)
-                    .append("<|im_end|>\n")
-                ChatMessage.Role.TOOL -> builder.append("<|im_start|>user\n")
-                    .append("[tool result] ").append(message.content).append("<|im_end|>\n")
+        val turns = messages.mapIndexed { index, message ->
+            val role = when (message.role) {
+                ChatMessage.Role.SYSTEM -> ChatTemplateRenderer.Turn.SYSTEM
+                ChatMessage.Role.ASSISTANT -> ChatTemplateRenderer.Turn.ASSISTANT
+                // Tool results ride as a user turn: no built-in chat template
+                // accepts a "tool" role, and asking for one makes every
+                // renderer reject the WHOLE conversation.
+                ChatMessage.Role.USER, ChatMessage.Role.TOOL ->
+                    ChatTemplateRenderer.Turn.USER
             }
+            val content = if (index == imageMessageIndex) {
+                ChatTemplateRenderer.withMediaMarker(message.content)
+            } else {
+                message.content
+            }
+            ChatTemplateRenderer.Turn(role, content)
         }
-        builder.append("<|im_start|>assistant\n")
-        return builder.toString()
+        return turns
     }
 
-    /** Synchronous generation helper used by [complete]. */
-    private fun streamInternal(request: CompletionRequest, onPiece: (String) -> Unit) {
-        val prompt = renderPrompt(request.messages, imageMessageHasMarker = false)
+    /** Blocking generation helper used by [complete]. */
+    private suspend fun streamInternal(
+        request: CompletionRequest,
+        onPiece: (String) -> Unit
+    ) {
+        // complete() bypassed the stream() path, which meant it could run with
+        // nothing loaded and report "No model is loaded" instead of loading.
+        val record = repository.models.value.firstOrNull { it.id == request.model.id }
+            ?: throw IllegalStateException(
+                "Local model \"${request.model.id}\" is not registered."
+            )
+        repository.ensureLoaded(record.id).getOrThrow()
         val maxTokens = (request.maxOutputTokens ?: 1024)
             .coerceAtMost(2048)
             .coerceAtMost(repository.maxOutputTokens())
+        val contextTokens = request.model.contextWindowTokens
+            ?: LocalModelRouter.effectiveContextTokens(record.contextLength)
+            ?: 0
+        val prompt = ContextTrimmer.fit(
+            turns = buildTurns(request.messages, imageMessageHasMarker = false),
+            contextTokens = contextTokens,
+            maxOutputTokens = maxTokens,
+            render = { turns, addAssistant ->
+                LocalEngineLoader.renderWithChatTemplate(turns, addAssistant)
+            },
+            countTokens = { text -> LocalEngineLoader.countTokens(text) }
+        ).prompt
         when (val result = LocalEngineLoader.generateStreaming(prompt, maxTokens, onPiece)) {
             is LocalEngineLoader.GenerationResult.Error ->
                 throw IllegalStateException(result.message)

@@ -79,6 +79,18 @@ object LocalEngineLoader {
     ): Int
     private external fun nativeUnload(): Boolean
     private external fun nativeChatTemplate(): String
+
+    /**
+     * Renders a conversation through the ACTIVE MODEL's own Jinja chat
+     * template (llama.cpp `llama_chat_apply_template`). Returns null when no
+     * model is loaded, the GGUF has no template, or llama.cpp does not
+     * recognize it — the caller then uses the pure ChatML fallback.
+     */
+    private external fun nativeApplyChatTemplate(
+        roles: Array<String>,
+        contents: Array<String>,
+        addAssistant: Boolean
+    ): String?
     private external fun nativeTokenize(prompt: String): IntArray
     private external fun nativeCachedTokens(): IntArray
     private external fun nativeGenerateTokens(
@@ -203,6 +215,19 @@ object LocalEngineLoader {
         return MEMORY_MARKERS.any { text.contains(it) }
     }
 
+    /**
+     * Exact token count of a prompt, from the loaded model's own tokenizer.
+     * Falls back to the usual 4-chars-per-token estimate when no model is
+     * loaded, which is only ever a planning guess.
+     */
+    fun countTokens(prompt: String): Int {
+        if (!nativeLibraryAvailable || prompt.isEmpty()) {
+            return ContextTrimmer.estimateTokens(prompt)
+        }
+        val exact = runCatching { nativeTokenize(prompt).size }.getOrNull()
+        return if (exact != null && exact > 0) exact else ContextTrimmer.estimateTokens(prompt)
+    }
+
     /** Fully unloads the active model (no-op when nothing is loaded). */
     fun unload() {
         if (nativeLibraryAvailable) nativeUnload()
@@ -210,6 +235,31 @@ object LocalEngineLoader {
 
     fun loadedChatTemplate(): String =
         if (nativeLibraryAvailable) nativeChatTemplate() else ""
+
+    /**
+     * Renders [turns] with the loaded model's own chat template, falling back
+     * to ChatML. Never throws and never returns an empty prompt: a missing
+     * native library, a missing template and an unrecognized template all land
+     * on the same ChatML rendering llama.cpp itself falls back to.
+     */
+    fun renderWithChatTemplate(
+        turns: List<ChatTemplateRenderer.Turn>,
+        addAssistant: Boolean = true
+    ): String {
+        val nativeRendered = if (nativeLibraryAvailable && turns.isNotEmpty()) {
+            runCatching {
+                nativeApplyChatTemplate(
+                    turns.map { it.role }.toTypedArray(),
+                    turns.map { it.content }.toTypedArray(),
+                    addAssistant
+                )
+            }.getOrNull()
+        } else {
+            null
+        }
+        return nativeRendered?.takeIf { it.isNotEmpty() }
+            ?: ChatTemplateRenderer.renderChatMl(turns, addAssistant)
+    }
 
     /**
      * Streams generation. [prompt] must be chat-template-rendered by the

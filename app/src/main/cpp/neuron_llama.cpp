@@ -14,7 +14,9 @@
 #include <jni.h>
 #include <algorithm>
 #include <cctype>
+#include <cstring>
 #include <deque>
+#include <exception>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -563,9 +565,11 @@ Java_com_neuron_ai_data_local_LocalEngineLoader_nativeLoad(
     // 999 = offload every layer that fits; llama.cpp falls back to CPU for
     // whatever the GPU cannot hold, so partial offload just works.
     mparams.n_gpu_layers = gpu ? 999 : 0;
-    // Memory-map by default (large models never fully resident up front);
-    // mlock off so the OS can reclaim under memory pressure.
-    mparams.load_mode = LLAMA_LOAD_MODE_MMAP;
+    // AUTO (the llama.cpp default) is deliberate: it probes whether the
+    // device really supports mmap and falls back to a plain read on devices
+    // that do not. Forcing MMAP makes those devices fail the load outright.
+    // mlock stays off so the OS can reclaim under memory pressure.
+    mparams.load_mode = LLAMA_LOAD_MODE_AUTO;
 
     llama_model *model = llama_model_load_from_file(modelPath.c_str(), mparams);
     if (model == nullptr) {
@@ -596,18 +600,29 @@ Java_com_neuron_ai_data_local_LocalEngineLoader_nativeLoad(
     // means more layers stay resident on the GPU and a longer chat fits.
     cparams.type_k = GGML_TYPE_Q8_0;
     cparams.type_v = GGML_TYPE_Q8_0;
-    if (gpu) {
-        // Attention runs on the GPU: flash attention halves KV memory traffic
-        // and is markedly faster there.
-        cparams.flash_attn_type = LLAMA_FLASH_ATTN_TYPE_ENABLED;
-    }
+    // A QUANTIZED V cache REQUIRES flash attention: llama-context.cpp aborts
+    // the context creation outright when type_v is quantized while FA is off,
+    // so leaving this DISABLED on the CPU path made every CPU-only load of a
+    // Q8_0-KV model fail with a bare nullptr and no useful message. FA also
+    // halves KV memory traffic, so it is the right choice on both devices.
+    cparams.flash_attn_type = LLAMA_FLASH_ATTN_TYPE_ENABLED;
+    // 512 matches llama.cpp's own Android binding (examples/llama.android).
+    // The library default of 2048 sizes the compute buffers for a 2048-token
+    // prompt, which is several MB of VRAM/RAM a phone cannot spare.
+    const uint32_t batch = std::min<uint32_t>(512, cparams.n_ctx);
+    cparams.n_batch = batch;
+    cparams.n_ubatch = batch;
 
     llama_context *ctx = llama_init_from_model(model, cparams);
     if (ctx == nullptr) {
-        llama_model_free(model);
-        return fail(-2, gpu
+        // llama.cpp logged the real reason; quote it instead of guessing.
+        const std::string why = firstLine(logErrors(6));
+        std::string message = gpu
             ? "Not enough memory to run this model (GPU offload was requested)"
-            : "Not enough memory to run this model on this device");
+            : "Not enough memory to run this model on this device";
+        if (!why.empty()) message += " — " + why;
+        llama_model_free(model);
+        return fail(-2, message.c_str());
     }
 
     g_model = model;
@@ -682,6 +697,91 @@ Java_com_neuron_ai_data_local_LocalEngineLoader_nativeChatTemplate(JNIEnv *env, 
     return env->NewStringUTF(g_loadedChatTemplate.c_str());
 #else
     return env->NewStringUTF("");
+#endif
+}
+
+// Renders [roles]/[contents] through the MODEL'S OWN Jinja chat template
+// (llama.cpp's llama_chat_apply_template) instead of a hard-coded one.
+//
+// This is the difference between a working assistant and a babbling one:
+// a Llama-3 / Mistral / Qwen GGUF was fine-tuned on its own control tokens
+// and produces garbage when fed ChatML it was never trained on.
+//
+// Returns null — never an error string — when there is no model, the GGUF
+// carries no template, or the template is one llama.cpp's built-in renderer
+// does not recognize (it returns -1). The Kotlin side then falls back to its
+// own ChatML renderer, which is what llama.cpp's common_chat_templates does
+// too. Roles must already be one of "system"/"user"/"assistant".
+JNIEXPORT jstring JNICALL
+Java_com_neuron_ai_data_local_LocalEngineLoader_nativeApplyChatTemplate(
+        JNIEnv *env, jobject, jobjectArray jRoles, jobjectArray jContents,
+        jboolean jAddAssistant) {
+#if NEURON_HAVE_LLAMA
+    if (jRoles == nullptr || jContents == nullptr) return nullptr;
+    const jsize n = env->GetArrayLength(jRoles);
+    if (n <= 0 || env->GetArrayLength(jContents) != n) return nullptr;
+
+    std::lock_guard<std::mutex> lock(g_mutex);
+    if (g_model == nullptr || g_loadedChatTemplate.empty()) return nullptr;
+
+    std::vector<std::string> roles;
+    std::vector<std::string> contents;
+    roles.reserve(static_cast<size_t>(n));
+    contents.reserve(static_cast<size_t>(n));
+    size_t totalChars = 0;
+    for (jsize i = 0; i < n; ++i) {
+        jstring jr = (jstring) env->GetObjectArrayElement(jRoles, i);
+        jstring jc = (jstring) env->GetObjectArrayElement(jContents, i);
+        if (jr == nullptr || jc == nullptr) {
+            env->DeleteLocalRef(jr);
+            env->DeleteLocalRef(jc);
+            return nullptr;
+        }
+        const char *rChars = env->GetStringUTFChars(jr, nullptr);
+        const char *cChars = env->GetStringUTFChars(jc, nullptr);
+        roles.emplace_back(rChars != nullptr ? rChars : "");
+        contents.emplace_back(cChars != nullptr ? cChars : "");
+        totalChars += roles.back().size() + contents.back().size();
+        env->ReleaseStringUTFChars(jr, rChars);
+        env->ReleaseStringUTFChars(jc, cChars);
+        env->DeleteLocalRef(jr);
+        env->DeleteLocalRef(jc);
+    }
+
+    std::vector<llama_chat_message> chat;
+    chat.reserve(static_cast<size_t>(n));
+    for (size_t i = 0; i < roles.size(); ++i) {
+        chat.push_back(llama_chat_message{roles[i].c_str(), contents[i].c_str()});
+    }
+
+    // The renderer may need more room than the recommended 2x estimate (Jinja
+    // defaults, date injection, repeated system prompts), so grow and retry.
+    size_t capacity = 2 * totalChars + 1024;
+    std::string out;
+    for (int attempt = 0; attempt < 4; ++attempt) {
+        std::vector<char> buf(capacity + 1, '\0');
+        int32_t written = -1;
+        try {
+            written = llama_chat_apply_template(
+                g_loadedChatTemplate.c_str(), chat.data(), chat.size(),
+                jAddAssistant == JNI_TRUE, buf.data(),
+                static_cast<int32_t>(buf.size()));
+        } catch (const std::exception &e) {
+            LOGE("chat template failed: %s", e.what());
+            return nullptr;
+        }
+        if (written < 0) {
+            LOGE("chat template unrecognized (code %d); falling back", (int) written);
+            return nullptr;
+        }
+        out.assign(buf.data(), strnlen(buf.data(), buf.size()));
+        if (static_cast<size_t>(written) < capacity) return env->NewStringUTF(out.c_str());
+        capacity *= 2;
+    }
+    return env->NewStringUTF(out.c_str());
+#else
+    (void)jRoles; (void)jContents; (void)jAddAssistant;
+    return nullptr;
 #endif
 }
 
