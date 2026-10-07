@@ -48,7 +48,14 @@ data class ModelOption(
 sealed class GenerationState {
     data object Idle : GenerationState()
     data class Streaming(val buffer: String) : GenerationState()
-    data class Failed(val error: NeuronError) : GenerationState()
+    data class Failed(
+        val error: NeuronError,
+        /** When the failure is a local-model load/runtime failure after backends are ready,
+         *  set this so the UI can offer a one-tap jump to Settings → Debug console with the
+         *  llama.cpp log already in view. Null for cloud/provider failures.
+         */
+        val openDiagnostics: Boolean = false
+    ) : GenerationState()
 }
 
 /** One user-visible agent step rendered above the streaming text. */
@@ -97,7 +104,7 @@ class ChatViewModel(
      */
     private val localModels: com.neuron.ai.data.local.LocalModelRepository? = null,
     /** On-device provider; null when local inference is unavailable. */
-    private val localAiProvider: com.neuron.ai.data.local.LocalAiProvider? = null
+    internal val localAiProvider: com.neuron.ai.data.local.LocalAiProvider? = null
 ) : ViewModel() {
 
     val messages: StateFlow<List<Message>> =
@@ -787,7 +794,11 @@ class ChatViewModel(
                 taskId = taskId,
                 attachments = attachments,
                 routeStep = routeStep,
-                contextWindowTokens = capabilities?.contextWindowTokens
+                contextWindowTokens = capabilities?.contextWindowTokens,
+                // When the local engine could not load/run on this device AFTER
+                // backends were ready, the error banner offers a one-tap jump to
+                // Settings → Debug console where the llama.cpp log is visible.
+                openDiagnosticsOnFailure = true
             )
             return
         }
@@ -823,6 +834,11 @@ class ChatViewModel(
      * Shared turn body for cloud AND local providers — one agent loop, one
      * tool execution path, one context pipeline. The provider instance is
      * the ONLY difference; there is no parallel local inference path.
+     *
+     * When [openDiagnosticsOnFailure] is true and the turn fails because the
+     * local engine could not load or run on this device AFTER backends were
+     * ready, the resulting error banner offers a one-tap jump to Settings →
+     * Debug console where the llama.cpp log is visible.
      */
     private suspend fun runAgentTurnWith(
         provider: AIProvider,
@@ -835,7 +851,9 @@ class ChatViewModel(
         attachments: List<Attachment>,
         routeStep: AgentStepRecord? = null,
         /** True context window when the provider DECLARES one (on-device GGUF). */
-        contextWindowTokens: Int? = null
+        contextWindowTokens: Int? = null,
+        /** Local-only: when true, surface the Debug console from the error banner. */
+        openDiagnosticsOnFailure: Boolean = false
     ) {
         // Capability-honest Model for this turn: declared flags + a declared
         // window when the provider has one (cloud estimates from the id,
@@ -1077,7 +1095,10 @@ class ChatViewModel(
         val elapsed = System.currentTimeMillis() - started
 
         if (streamError != null) {
-            _generation.value = GenerationState.Failed(streamError!!)
+            _generation.value = GenerationState.Failed(
+                streamError!!,
+                openDiagnostics = openDiagnosticsOnFailure
+            )
         } else if (assistantBuffer.isNotBlank()) {
             conversations.appendMessage(
                 conversationId,
@@ -1092,7 +1113,8 @@ class ChatViewModel(
             )
         } else {
             _generation.value = GenerationState.Failed(
-                NeuronError.Provider("The model returned an empty response.")
+                NeuronError.Provider("The model returned an empty response."),
+                openDiagnostics = openDiagnosticsOnFailure
             )
         }
 

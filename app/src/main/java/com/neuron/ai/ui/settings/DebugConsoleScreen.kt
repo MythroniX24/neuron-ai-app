@@ -62,7 +62,13 @@ import kotlinx.coroutines.withContext
 @Composable
 fun DebugConsoleScreen(
     container: AppContainer,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    /** When the user arrives here right after a local-model load/runtime failure,
+     *  the failed model id and a short human reason can be passed so the screen
+     *  highlights the relevant section and pre-fills the copy-report affordance.
+     *  Both nullable — pass null for a clean console open. */
+    failedModelId: String? = null,
+    reason: String? = null
 ) {
     val viewModel: DebugConsoleViewModel =
         viewModel(factory = DebugConsoleViewModelFactory(container))
@@ -70,6 +76,20 @@ fun DebugConsoleScreen(
     val clipboard = LocalClipboardManager.current
     val scope = rememberCoroutineScope()
     var busy by remember { mutableStateOf(false) }
+
+    // When the user lands here right after a crash, wire the failed-load hint
+    // into the ViewModel so the banner + copy-report affordance appear.
+    LaunchedEffect(failedModelId, reason) {
+        if (failedModelId != null && reason != null) {
+            // Try to resolve a display name from the repository; if the model
+            // was already unregistered we fall back to the raw id.
+            val displayName = container.localModelRepository.models.value
+                .firstOrNull { it.id == failedModelId }
+                ?.displayName
+                ?: failedModelId
+            viewModel.setFailedLoadHint(failedModelId, displayName, reason)
+        }
+    }
 
     // Reading the native log and stat-ing model files touches disk, so it
     // must not run on the main thread.
@@ -107,6 +127,29 @@ fun DebugConsoleScreen(
 
         val data = snapshot ?: return@Column
 
+        data.failedLoad?.let { failed ->
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = Spacing.lg, vertical = Spacing.sm),
+                verticalArrangement = Arrangement.spacedBy(Spacing.xs)
+            ) {
+                Text(
+                    text = "Load failed after backends were ready",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Text(
+                    text = "Model \"${failed.displayName}\" could not run on this device. " +
+                        "The llama.cpp log below shows exactly what happened — usually " +
+                        "GPU offload failed and the CPU path was also unable to load the model.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                HorizontalDivider()
+            }
+        }
+
         Column(
             modifier = Modifier
                 .verticalScroll(rememberScrollState())
@@ -132,10 +175,13 @@ fun DebugConsoleScreen(
                     },
                     enabled = !busy
                 ) { Text("Clear log") }
+                val copyLabel = data.failedLoad?.let {
+                    "Copy failed-load report"
+                } ?: "Copy report"
                 OutlinedButton(
                     onClick = { clipboard.setText(AnnotatedString(viewModel.reportText(data))) },
                     colors = ButtonDefaults.outlinedButtonColors()
-                ) { Text("Copy report") }
+                ) { Text(copyLabel) }
             }
 
             SectionTitle("Engine")

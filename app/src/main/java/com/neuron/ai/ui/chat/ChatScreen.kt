@@ -108,6 +108,7 @@ import com.neuron.ai.di.AppContainer
 import com.neuron.ai.ui.components.ChatComposer
 import com.neuron.ai.ui.markdown.MarkdownText
 import com.neuron.ai.ui.theme.Spacing
+import com.neuron.ai.core.error.NeuronError
 import kotlinx.coroutines.launch
 
 internal fun greeting(): String {
@@ -131,7 +132,14 @@ fun ChatScreen(
     conversationId: String,
     onOpenMenu: () -> Unit = {},
     onOpenSettings: () -> Unit = {},
-    onOpenConversations: () -> Unit = {}
+    onOpenConversations: () -> Unit = {},
+    /** When a local-model load/runtime failure happens AFTER backends are ready,
+     *  the error banner offers a one-tap jump here — the caller routes to
+     *  Settings → Debug console (Routes.debugConsole(...)) so the llama.cpp log
+     *  is visible immediately.
+     *  When the caller passes [failedModelId]/[failedReason], the Debug console
+     *  highlights the relevant model and pre-fills the copy-report affordance. */
+    onOpenDebugConsole: (failedModelId: String?, failedReason: String?) -> Unit = { _, _ -> }
 ) {
     val viewModel: ChatViewModel = viewModel(
         factory = ChatViewModelFactory(container, conversationId)
@@ -345,12 +353,25 @@ fun ChatScreen(
                 }
 
                 is GenerationState.Failed -> item {
+                    val diagnosticsAvailable = gen.error is NeuronError.Provider &&
+                        gen.openDiagnostics == true &&
+                        viewModel.localAiProvider != null
                     ErrorBanner(
                         // error.message carries the provider-specific reason;
                         // userMessage would collapse everything to one generic line.
                         message = gen.error.message,
                         onRetry = { viewModel.retry() },
-                        onDismiss = { viewModel.clearError() }
+                        onDismiss = { viewModel.clearError() },
+                        showDiagnostics = diagnosticsAvailable,
+                        onOpenDiagnostics = {
+                            // Pass a short reason so the Debug console can call out
+                            // the failed model if it is still registered.
+                            val failedModelId = viewModel.localLoadState.value
+                                .takeIf { it is com.neuron.ai.data.local.LocalLoadState.Failed }
+                                ?.modelId
+                            val reason = gen.error.message
+                            onOpenDebugConsole(failedModelId, reason)
+                        }
                     )
                 }
 
@@ -1263,7 +1284,12 @@ private fun AgentActivityCard(steps: List<AgentActivityUi>) {
 private fun ErrorBanner(
     message: String,
     onRetry: () -> Unit,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    /** When the failure is a local-model load/runtime failure AFTER backends
+     *  were ready, offer a one-tap jump to Settings → Debug console where the
+     *  llama.cpp log is visible. The callback is a no-op when false. */
+    showDiagnostics: Boolean = false,
+    onOpenDiagnostics: () -> Unit = {}
 ) {
     Surface(
         shape = MaterialTheme.shapes.medium,
@@ -1280,16 +1306,30 @@ private fun ErrorBanner(
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.onErrorContainer
             )
-            Text(
-                text = message,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onErrorContainer,
+            Column(
                 modifier = Modifier
                     .weight(1f)
                     .padding(horizontal = Spacing.sm)
-            )
+            ) {
+                Text(
+                    text = message,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onErrorContainer
+                )
+                if (showDiagnostics) {
+                    Text(
+                        text = "See why (Settings → Debug console) →",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(top = Spacing.xs)
+                    )
+                }
+            }
             TextButton(onClick = onRetry) { Text("Retry") }
             TextButton(onClick = onDismiss) { Text("Dismiss") }
+            if (showDiagnostics) {
+                TextButton(onClick = onOpenDiagnostics) { Text("See why") }
+            }
         }
     }
 }

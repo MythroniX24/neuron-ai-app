@@ -147,7 +147,15 @@ fun NeuronApp(container: AppContainer) {
                         conversationId = conversationId,
                         onOpenMenu = openDrawer,
                         onOpenSettings = { navController.navigate(Routes.SETTINGS) },
-                        onOpenConversations = { navController.navigate(Routes.CONVERSATIONS) }
+                        onOpenConversations = { navController.navigate(Routes.CONVERSATIONS) },
+                        onOpenDebugConsole = { failedModelId, reason ->
+                            navController.navigate(
+                                Routes.debugConsole(
+                                    failedModelId = failedModelId,
+                                    reason = reason
+                                )
+                            )
+                        }
                     )
                 }
 
@@ -163,10 +171,28 @@ fun NeuronApp(container: AppContainer) {
                     )
                 }
 
-                composable(Routes.DEBUG_CONSOLE) {
+                composable(
+                    route = Routes.DEBUG_CONSOLE,
+                    arguments = listOf(
+                        navArgument("failedModel") {
+                            type = NavType.StringType
+                            nullable = true
+                            defaultValue = null
+                        },
+                        navArgument("reason") {
+                            type = NavType.StringType
+                            nullable = true
+                            defaultValue = null
+                        }
+                    )
+                ) { entry ->
+                    val failedModelId = entry.arguments?.getString("failedModel")
+                    val reason = entry.arguments?.getString("reason")
                     com.neuron.ai.ui.settings.DebugConsoleScreen(
                         container = container,
-                        onBack = { navController.popBackStack() }
+                        onBack = { navController.popBackStack() },
+                        failedModelId = failedModelId,
+                        reason = reason
                     )
                 }
 

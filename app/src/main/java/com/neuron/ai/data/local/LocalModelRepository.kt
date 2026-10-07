@@ -439,7 +439,13 @@ class LocalModelRepository(
                 is LocalEngineLoader.LoadResult.Success -> LocalLoadState.Ready(modelId)
                 is LocalEngineLoader.LoadResult.Failure -> {
                     logger?.w("LocalModels", "Load failed: ${result.reason}")
-                    LocalLoadState.Failed(modelId, result.reason)
+                    // Include the llama.cpp log so Settings → Debug console can show
+                    // exactly what ggml said (e.g. "Unsupported device" on PowerVR).
+                    val log = runCatching { LocalEngineLoader.diagnostics(modelPath = File(modelsDir, record.fileName).absolutePath).logText }
+                        .getOrNull()
+                        ?.trimEnd()
+                    val reason = if (log.isNotBlank()) "${result.reason}\n\nllama.cpp log:\n${log}" else result.reason
+                    LocalLoadState.Failed(modelId, reason)
                 }
             }
             if (result is LocalEngineLoader.LoadResult.Success) Result.success(Unit)

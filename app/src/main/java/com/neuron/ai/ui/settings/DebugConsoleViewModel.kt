@@ -30,6 +30,12 @@ class DebugConsoleViewModel(
     private val _snapshot = MutableStateFlow<DebugSnapshot?>(null)
     val snapshot: StateFlow<DebugSnapshot?> = _snapshot.asStateFlow()
 
+    /** When the user opens the console right after a failed local load,
+     *  pass the failed model so the screen can call it out.
+     *  The model may have been unregistered by the time we run — that's fine. */
+    var failedLoadHint: FailedLoadReference? = null
+        private set
+
     /** One .gguf in the models directory, with what the parser makes of it. */
     data class FileReport(
         val name: String,
@@ -50,11 +56,29 @@ class DebugConsoleViewModel(
         val modelsOnDisk: String,
         val storageUsed: String,
         val modelFiles: List<FileReport>,
-        val logText: String
+        val logText: String,
+        /** When the user arrived here right after a local-model load failure,
+         *  this names the model that failed (if it is still registered) and a
+         *  short human reason — surfaced as a banner so the llama.cpp log is
+         *  the obvious thing to read.
+         */
+        val failedLoad: FailedLoadReference? = null
+    )
+
+    /** Optional context for the "arrived here after a crash" flow. */
+    data class FailedLoadReference(
+        val modelId: String,
+        val displayName: String,
+        val reason: String
     )
 
     fun refresh() {
         viewModelScope.launch { _snapshot.value = collect() }
+    }
+
+    fun setFailedLoadHint(modelId: String, displayName: String, reason: String) {
+        failedLoadHint = FailedLoadReference(modelId, displayName, reason)
+        refresh()
     }
 
     /** Drops the native log ring buffer; call off the main thread. */
@@ -82,7 +106,8 @@ class DebugConsoleViewModel(
             modelsOnDisk = "${files.size} file(s)",
             storageUsed = gb(repository.storageUsedBytes()),
             modelFiles = files,
-            logText = engine.logText
+            logText = engine.logText,
+            failedLoad = failedLoadHint
         )
     }
 
@@ -137,6 +162,12 @@ class DebugConsoleViewModel(
         appendLine()
         appendLine("llama.cpp log:")
         appendLine(if (data.logText.isBlank()) "  (empty)" else data.logText.trimEnd())
+        data.failedLoad?.let { failed ->
+            appendLine()
+            appendLine("FAILED LOAD (auto-diagnostics):")
+            appendLine("  model: ${failed.displayName} (${failed.modelId})")
+            appendLine("  reason: ${failed.reason}")
+        }
     }
 
     private fun gb(bytes: Long): String {

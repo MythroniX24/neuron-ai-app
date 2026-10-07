@@ -58,17 +58,43 @@ class LocalAiProvider(
         }
 
     override suspend fun complete(request: CompletionRequest): Completion {
-        val buffer = StringBuilder()
-        var tokens = 0
-        streamInternal(request) { piece ->
-            buffer.append(piece)
-            tokens++
+        return try {
+            val buffer = StringBuilder()
+            var tokens = 0
+            streamInternal(request) { piece ->
+                buffer.append(piece)
+                tokens++
+            }
+            Completion(
+                message = ChatMessage(ChatMessage.Role.ASSISTANT, buffer.toString()),
+                modelId = request.model.id,
+                outputTokens = tokens
+            )
+        } catch (t: Throwable) {
+            // Never let a local-model load/runtime failure propagate as an
+            // unhandled exception out of the provider API. Return a completed
+            // (but empty) Completion whose message carries the failure so the
+            // caller can surface it as a normal error instead of a crash. The
+            // streaming path ([stream]) already reports failures via
+            // StreamEvent.Failed; this is the non-streaming mirror.
+            val log = runCatching { LocalEngineLoader.diagnostics().logText }
+                .getOrNull()
+                .trimEnd()
+            val detail = buildString {
+                append(LOAD_FAILED_MESSAGE_PREFIX)
+                append(if (t.message.isNullOrBlank()) "unknown error" else t.message)
+                if (log.isNotBlank()) {
+                    append(" | llama.cpp log: ")
+                    append(log.take(2000))
+                }
+                append("]")
+            }
+            Completion(
+                message = ChatMessage(ChatMessage.Role.ASSISTANT, detail),
+                modelId = request.model.id,
+                outputTokens = 0
+            )
         }
-        return Completion(
-            message = ChatMessage(ChatMessage.Role.ASSISTANT, buffer.toString()),
-            modelId = request.model.id,
-            outputTokens = tokens
-        )
     }
 
     override fun stream(request: CompletionRequest): Flow<StreamEvent> = channelFlow {
@@ -209,7 +235,13 @@ class LocalAiProvider(
             ?: throw IllegalStateException(
                 "Local model \"${request.model.id}\" is not registered."
             )
-        repository.ensureLoaded(record.id).getOrThrow()
+        val load = repository.ensureLoaded(record.id)
+        if (load.isFailure) {
+            // Surface the load failure as a message the caller can present
+            // rather than throwing — the [complete] wrapper turns this into a
+            // failed Completion instead of crashing.
+            throw IllegalStateException((load.exceptionOrNull()?.message ?: "unknown load failure").toString())
+        }
         val maxTokens = (request.maxOutputTokens ?: 1024)
             .coerceAtMost(2048)
             .coerceAtMost(repository.maxOutputTokens())
@@ -230,5 +262,14 @@ class LocalAiProvider(
                 throw IllegalStateException(result.message)
             is LocalEngineLoader.GenerationResult.Done -> Unit
         }
+    }
+
+    companion object {
+        /** The message text used as a sentinel for "the model failed to answer".
+         *  [complete()] returns a Completion whose ASSISTANT message body equals
+         *  this string when the local engine could not load or run — so callers
+         *  can detect the failure without catching exceptions.
+         */
+        const val LOAD_FAILED_MESSAGE_PREFIX = "[local model failed to answer: "
     }
 }

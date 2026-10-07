@@ -155,6 +155,18 @@ object LocalEngineLoader {
     }
 
     /**
+     * Descriptive failure for [benchmarkTokensPerSec]. Every benchmark failure
+     * is returned as a [Result.Failure] carrying one of these, never as an
+     * unhandled [IllegalStateException] — so the UI can route to the debug
+     * console instead of crashing.
+     */
+    data class BenchmarkFailure(
+        val reason: String,
+        /** Most recent llama.cpp log lines at the time of failure. May be empty. */
+        val logTail: String? = null
+    )
+
+    /**
      * Loads a model (mmap). ALWAYS unloads any previously active model first —
      * the single-active constraint, enforced here so callers can't violate it.
      * Returns [LoadResult.Failure] with the native error text on failure; the
@@ -408,6 +420,11 @@ object LocalEngineLoader {
      * Runs a short benchmark: tokens generated per second on this device.
      * Loads [path] first (unloading whatever is active) and restores the
      * caller to an unloaded state afterwards.
+     *
+     * Every failure is a [Result.Failure] with a [BenchmarkFailure] that
+     * includes the llama.cpp log when a load or generation failure happened.
+     * Callers must NOT re-throw these as uncatchable exceptions — the UI
+     * treats a failed benchmark as a diagnostic event, not a crash.
      */
     fun benchmarkTokensPerSec(
         path: String,
@@ -418,17 +435,34 @@ object LocalEngineLoader {
         useGpu: Boolean = false
     ): Result<Double> {
         val load = load(path, contextTokens, threads, useGpu)
-        if (load is LoadResult.Failure) return Result.failure(IllegalStateException(load.reason))
+        if (load is LoadResult.Failure) {
+            return Result.failure(
+                BenchmarkFailure(
+                    load.reason,
+                    logTail = runCatching { nativeLogTail(200) }.getOrNull()
+                )
+            )
+        }
         return try {
             val start = System.nanoTime()
             var tokens = 0
             val result = generateStreaming(prompt, maxTokens) { tokens++ }
             if (result is GenerationResult.Error) {
-                Result.failure(IllegalStateException(result.message))
+                Result.failure(
+                    BenchmarkFailure(
+                        result.message,
+                        logTail = runCatching { nativeLogTail(200) }.getOrNull()
+                    )
+                )
             } else {
                 val seconds = (System.nanoTime() - start) / 1_000_000_000.0
                 if (seconds <= 0.0 || tokens == 0) {
-                    Result.failure(IllegalStateException("Benchmark produced no tokens"))
+                    Result.failure(
+                        BenchmarkFailure(
+                            "Benchmark produced no tokens",
+                            logTail = runCatching { nativeLogTail(200) }.getOrNull()
+                        )
+                    )
                 } else {
                     Result.success(tokens / seconds)
                 }
