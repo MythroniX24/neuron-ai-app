@@ -444,6 +444,7 @@ class LocalModelRepository(
                     val log = runCatching { LocalEngineLoader.diagnostics(modelPath = File(modelsDir, record.fileName).absolutePath).logText }
                         .getOrNull()
                         ?.trimEnd()
+                        ?: ""
                     val reason = if (log.isNotBlank()) "${result.reason}\n\nllama.cpp log:\n${log}" else result.reason
                     LocalLoadState.Failed(modelId, reason)
                 }

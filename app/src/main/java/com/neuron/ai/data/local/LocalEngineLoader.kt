@@ -436,11 +436,12 @@ object LocalEngineLoader {
     ): Result<Double> {
         val load = load(path, contextTokens, threads, useGpu)
         if (load is LoadResult.Failure) {
+            val bf = BenchmarkFailure(
+                load.reason,
+                logTail = runCatching { nativeLogTail(200) }.getOrNull()
+            )
             return Result.failure(
-                BenchmarkFailure(
-                    load.reason,
-                    logTail = runCatching { nativeLogTail(200) }.getOrNull()
-                )
+                RuntimeException(bf.reason)
             )
         }
         return try {
@@ -448,20 +449,22 @@ object LocalEngineLoader {
             var tokens = 0
             val result = generateStreaming(prompt, maxTokens) { tokens++ }
             if (result is GenerationResult.Error) {
+                val bf = BenchmarkFailure(
+                    result.message,
+                    logTail = runCatching { nativeLogTail(200) }.getOrNull()
+                )
                 Result.failure(
-                    BenchmarkFailure(
-                        result.message,
-                        logTail = runCatching { nativeLogTail(200) }.getOrNull()
-                    )
+                    RuntimeException(bf.reason)
                 )
             } else {
                 val seconds = (System.nanoTime() - start) / 1_000_000_000.0
                 if (seconds <= 0.0 || tokens == 0) {
+                    val bf = BenchmarkFailure(
+                        "Benchmark produced no tokens",
+                        logTail = runCatching { nativeLogTail(200) }.getOrNull()
+                    )
                     Result.failure(
-                        BenchmarkFailure(
-                            "Benchmark produced no tokens",
-                            logTail = runCatching { nativeLogTail(200) }.getOrNull()
-                        )
+                        RuntimeException(bf.reason)
                     )
                 } else {
                     Result.success(tokens / seconds)

@@ -79,7 +79,8 @@ class LocalAiProvider(
             // StreamEvent.Failed; this is the non-streaming mirror.
             val log = runCatching { LocalEngineLoader.diagnostics().logText }
                 .getOrNull()
-                .trimEnd()
+                ?.trimEnd()
+                    ?: ""
             val detail = buildString {
                 append(LOAD_FAILED_MESSAGE_PREFIX)
                 append(if (t.message.isNullOrBlank()) "unknown error" else t.message)

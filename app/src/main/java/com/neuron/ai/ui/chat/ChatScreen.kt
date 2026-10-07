@@ -366,10 +366,8 @@ fun ChatScreen(
                         onOpenDiagnostics = {
                             // Pass a short reason so the Debug console can call out
                             // the failed model if it is still registered.
-                            val failedModelId = viewModel.localLoadState.value
-                                .takeIf { it is com.neuron.ai.data.local.LocalLoadState.Failed }
-                                ?.modelId
-                            val reason = gen.error.message
+                            val failedModelId = (viewModel.localLoadState.value as? com.neuron.ai.data.local.LocalLoadState.Failed)?.modelId
+                            val reason: String = gen.error.message
                             onOpenDebugConsole(failedModelId, reason)
                         }
                     )
