@@ -356,19 +356,17 @@ fun ChatScreen(
                     val diagnosticsAvailable = gen.error is NeuronError.Provider &&
                         gen.openDiagnostics == true &&
                         viewModel.localAiProvider != null
-                    ErrorBanner(
-                        // error.message carries the provider-specific reason;
-                        // userMessage would collapse everything to one generic line.
-                        message = gen.error.message,
+                    // In-app error display: a styled persistent card instead of a one-line banner.
+                    // The app never crashes on a generation failure — everything is surfaced here.
+                    FailedErrorCard(
+                        error = gen.error,
+                        displayName = conversation?.modelId,
+                        showDiagnostics = diagnosticsAvailable,
                         onRetry = { viewModel.retry() },
                         onDismiss = { viewModel.clearError() },
-                        showDiagnostics = diagnosticsAvailable,
                         onOpenDiagnostics = {
-                            // Pass a short reason so the Debug console can call out
-                            // the failed model if it is still registered.
                             val failedModelId = (viewModel.localLoadState.value as? com.neuron.ai.data.local.LocalLoadState.Failed)?.modelId
-                            val reason: String = gen.error.message
-                            onOpenDebugConsole(failedModelId, reason)
+                            onOpenDebugConsole(failedModelId, gen.error.message)
                         }
                     )
                 }
@@ -1279,54 +1277,77 @@ private fun AgentActivityCard(steps: List<AgentActivityUi>) {
 }
 
 @Composable
-private fun ErrorBanner(
-    message: String,
+private fun FailedErrorCard(
+    error: NeuronError,
+    displayName: String?,
+    showDiagnostics: Boolean,
     onRetry: () -> Unit,
     onDismiss: () -> Unit,
-    /** When the failure is a local-model load/runtime failure AFTER backends
-     *  were ready, offer a one-tap jump to Settings → Debug console where the
-     *  llama.cpp log is visible. The callback is a no-op when false. */
-    showDiagnostics: Boolean = false,
-    onOpenDiagnostics: () -> Unit = {}
+    onOpenDiagnostics: () -> Unit
 ) {
+    // One durable error card per failed turn — the app never crashes; the
+    // raw provider message is shown so the user can see what actually failed
+    // (load reason / thermal / empty response / capability refusal / …).
     Surface(
         shape = MaterialTheme.shapes.medium,
-        color = MaterialTheme.colorScheme.errorContainer
+        color = MaterialTheme.colorScheme.errorContainer,
+        tonalElevation = 3.dp
     ) {
-        Row(
+        Column(
             Modifier
                 .fillMaxWidth()
-                .padding(Spacing.md),
-            verticalAlignment = Alignment.CenterVertically
+                .padding(Spacing.md)
         ) {
-            Icon(
-                Icons.Outlined.ErrorOutline,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onErrorContainer
-            )
-            Column(
-                modifier = Modifier
-                    .weight(1f)
-                    .padding(horizontal = Spacing.sm)
-            ) {
-                Text(
-                    text = message,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onErrorContainer
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    Icons.Outlined.ErrorOutline,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onErrorContainer,
+                    modifier = Modifier.size(22.dp)
                 )
-                if (showDiagnostics) {
+                Spacer(Modifier.width(Spacing.sm))
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "See why (Settings → Debug console) →",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.padding(top = Spacing.xs)
+                        text = "Generation failed",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onErrorContainer
                     )
+                    displayName?.let { name ->
+                        Text(
+                            text = "for $name",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.7f)
+                        )
+                    }
                 }
             }
-            TextButton(onClick = onRetry) { Text("Retry") }
-            TextButton(onClick = onDismiss) { Text("Dismiss") }
+
+            Spacer(Modifier.height(Spacing.sm))
+
+            Text(
+                text = error.message,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onErrorContainer,
+                modifier = Modifier.padding(bottom = Spacing.sm)
+            )
+
             if (showDiagnostics) {
-                TextButton(onClick = onOpenDiagnostics) { Text("See why") }
+                TextButton(
+                    onClick = onOpenDiagnostics,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("See why ▸ go to Debug console")
+                }
+                Spacer(Modifier.height(Spacing.xs))
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End
+            ) {
+                TextButton(onClick = onDismiss) { Text("Dismiss") }
+                Spacer(Modifier.width(Spacing.sm))
+                TextButton(onClick = onRetry) { Text("Retry") }
             }
         }
     }
