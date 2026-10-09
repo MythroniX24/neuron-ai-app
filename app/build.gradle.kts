@@ -16,8 +16,8 @@ android {
         applicationId = "com.neuron.ai"
         minSdk = 26
         targetSdk = 34
-        versionCode = 10
-        versionName = "1.2.2"
+        versionCode = 11
+        versionName = "1.2.3"
 
         ndk {
             // Local AI: 64-bit only — 32-bit ABIs would double build time and
