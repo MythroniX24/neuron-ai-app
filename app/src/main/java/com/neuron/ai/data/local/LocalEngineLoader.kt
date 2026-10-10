@@ -54,6 +54,33 @@ object LocalEngineLoader {
         runCatching { nativeInitBackends(dir) }
     }
 
+    /**
+     * Arms the native signal handler, pointing it at [reportPath] — the same
+     * file [com.neuron.ai.core.error.CrashRecorder] reads on the next launch.
+     *
+     * A native crash (a driver segfault, a GGML_ASSERT, an uncaught C++
+     * exception) kills the process before any Kotlin code can run, which is
+     * why the user only ever saw the app disappear. The handler writes the
+     * signal, the fault address, a backtrace and llama.cpp's log tail at that
+     * moment, so the reason survives the death and can be shown in-app.
+     */
+    fun installCrashHandler(reportPath: String) {
+        if (!nativeLibraryAvailable) return
+        runCatching { nativeInstallCrashHandler(reportPath) }
+    }
+
+    /**
+     * Message from the last C++ exception caught at the JNI boundary. Used
+     * when a call reports its "native error" code (-20), so the reason reaches
+     * the UI instead of terminating the process.
+     */
+    fun lastNativeError(): String =
+        if (nativeLibraryAvailable) {
+            runCatching { nativeLastError() }.getOrElse { "unknown native error" }
+        } else {
+            "the native engine is not loaded"
+        }
+
     /** Informational; from llama.cpp when built, "unavailable" otherwise. */
     external fun nativeVersion(): String
 
@@ -80,6 +107,8 @@ object LocalEngineLoader {
     private external fun nativeIsAvailable(): Boolean
     private external fun nativeGpuAvailable(): Boolean
     private external fun nativeInitBackends(dir: String)
+    private external fun nativeInstallCrashHandler(reportPath: String)
+    private external fun nativeLastError(): String
     private external fun nativeLoad(
         path: String,
         contextTokens: Int,
@@ -195,7 +224,7 @@ object LocalEngineLoader {
         // after the first call.
         ensureBackendsInitialized()
         var err = arrayOfNulls<String>(1)
-        var code = nativeLoad(path, contextTokens, threads, useGpu, mmprojPath, err)
+        var code = nativeLoadSafely(path, contextTokens, threads, useGpu, mmprojPath, err)
         if (code != 0 && useGpu && shouldRetryWithoutGpu(err[0])) {
             // Two very different GPU failures land here, and the exact same
             // file loads fine on the CPU in both cases:
@@ -207,7 +236,7 @@ object LocalEngineLoader {
             // (slower) model instead of an error message.
             val gpuReason = err[0]
             err = arrayOfNulls<String>(1)
-            code = nativeLoad(path, contextTokens, threads, false, mmprojPath, err)
+            code = nativeLoadSafely(path, contextTokens, threads, false, mmprojPath, err)
             if (code == 0) {
                 return LoadResult.Success
             }
@@ -229,6 +258,30 @@ object LocalEngineLoader {
             )
             else -> LoadResult.Failure(err[0] ?: "Engine load failed (code $code)")
         }
+    }
+
+    /**
+     * Calls the native load, turning even a JVM-level Throwable into a failed
+     * load: allocating a multi-GB mapping can raise OutOfMemoryError, and a
+     * broken install raises UnsatisfiedLinkError — neither should reach the
+     * crash handler as an unexplained process death. The native side is
+     * guarded too (NEURON_JNI_TRY in neuron_llama.cpp); this is the same
+     * defence on the other side of the boundary, because this is the call the
+     * user experiences as "the app closed while loading".
+     */
+    private fun nativeLoadSafely(
+        path: String,
+        contextTokens: Int,
+        threads: Int,
+        useGpu: Boolean,
+        mmprojPath: String?,
+        err: Array<String?>
+    ): Int = try {
+        nativeLoad(path, contextTokens, threads, useGpu, mmprojPath, err)
+    } catch (t: Throwable) {
+        err[0] = "Engine load failed (${t.javaClass.simpleName})" +
+            (t.message?.let { ": $it" } ?: "")
+        -1
     }
 
     /**
@@ -280,11 +333,11 @@ object LocalEngineLoader {
 
     /** Fully unloads the active model (no-op when nothing is loaded). */
     fun unload() {
-        if (nativeLibraryAvailable) nativeUnload()
+        if (nativeLibraryAvailable) runCatching { nativeUnload() }
     }
 
     fun loadedChatTemplate(): String =
-        if (nativeLibraryAvailable) nativeChatTemplate() else ""
+        if (nativeLibraryAvailable) runCatching { nativeChatTemplate() }.getOrDefault("") else ""
 
     /**
      * Renders [turns] with the loaded model's own chat template, falling back
@@ -350,13 +403,26 @@ object LocalEngineLoader {
         if (tokens.isEmpty()) {
             return GenerationResult.Error("Could not tokenize the conversation")
         }
-        return when (val code = nativeGenerateTokens(tokens, maxTokens, reuse, callback)) {
+        val code = try {
+            nativeGenerateTokens(tokens, maxTokens, reuse, callback)
+        } catch (t: Throwable) {
+            return GenerationResult.Error(
+                "Generation failed (${t.javaClass.simpleName})" +
+                    (t.message?.let { ": $it" } ?: "")
+            )
+        }
+        return when (code) {
             0 -> GenerationResult.Done(0) // nothing generated (immediate EOS)
             in 1..Int.MAX_VALUE -> GenerationResult.Done(code)
             -100 -> GenerationResult.Error("Engine unavailable (stub build)")
             -3 -> GenerationResult.Error("No model is loaded")
             -4 -> GenerationResult.Error("Could not tokenize the conversation")
             -5 -> GenerationResult.Error("Prompt exceeded the model's context window")
+            // -20: llama.cpp/ggml threw where the JNI boundary caught it (see
+            // NEURON_JNI_TRY). The exception's own message is the reason.
+            -20 -> GenerationResult.Error(
+                failure ?: lastNativeError().ifBlank { "Generation failed (code -20)" }
+            )
             else -> GenerationResult.Error(
                 failure ?: "Generation failed (code $code)"
             )

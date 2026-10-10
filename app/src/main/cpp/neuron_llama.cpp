@@ -13,17 +13,26 @@
 
 #include <jni.h>
 #include <algorithm>
+#include <atomic>
 #include <cctype>
 #include <cerrno>
+#include <csignal>
+#include <cstdint>
 #include <cstring>
 #include <deque>
 #include <dirent.h>
 #include <dlfcn.h>
 #include <exception>
+#include <fcntl.h>
 #include <map>
 #include <mutex>
 #include <string>
+#include <unistd.h>
 #include <vector>
+
+#ifdef __ANDROID__
+#include <unwind.h>
+#endif
 
 #ifdef __ANDROID__
 #include <android/log.h>
@@ -34,7 +43,234 @@
 #define LOGI(...) ((void)0)
 #endif
 
+// ---------------------------------------------------------------------------
+// CRASH CAPTURE (native)
+//
+// A native crash kills the process before ANY Kotlin catch block can run: a
+// driver segfault, a GGML_ASSERT, or a C++ exception escaping the JNI
+// boundary (the runtime calls std::terminate, which aborts). The user's only
+// symptom was "the app just closes when I load a model" — nothing to read,
+// nothing to report.
+//
+// So the signal handler below writes ONE report file at the moment of the
+// crash: the signal, the fault address, a raw backtrace, and the tail of
+// llama.cpp's own log (which names the real cause). Kotlin reads that file on
+// the next launch and shows it full-screen (see CrashRecorder).
+//
+// Everything here is async-signal-safe on purpose: open/write/close only, no
+// locks, no allocation, and a log snapshot kept in a plain buffer.
+// ---------------------------------------------------------------------------
+namespace {
 
+// Tail of the engine log, kept in a flat buffer so the handler can write it
+// without taking a mutex that the crashing thread might still hold.
+const size_t CRASH_SNAPSHOT_BYTES = 12000;
+char g_crashSnapshot[CRASH_SNAPSHOT_BYTES];
+volatile size_t g_crashSnapshotUsed = 0;
+
+// Report path, filled by nativeInstallCrashHandler. The file is NOT held open:
+// open() is async-signal-safe, so it happens inside the handler.
+char g_crashPath[512] = {0};
+bool g_crashHandlersInstalled = false;
+
+// Last message from a C++ exception caught at a JNI boundary (see
+// NEURON_JNI_TRY). Kotlin surfaces it through nativeLastError().
+std::string g_lastNativeError;
+
+void recordNativeError(const char *message) {
+    g_lastNativeError = message != nullptr ? message : "unknown native error";
+}
+
+// Appends one engine log line to the crash snapshot, keeping the newest half
+// when the buffer fills — a crash report only needs the tail.
+void crashSnapshotAppend(const std::string &line) {
+    std::string text = line;
+    text += '\n';
+    size_t used = g_crashSnapshotUsed;
+    if (used + text.size() + 1 >= CRASH_SNAPSHOT_BYTES) {
+        const size_t keep = CRASH_SNAPSHOT_BYTES / 2;
+        std::memmove(g_crashSnapshot, g_crashSnapshot + (used - keep), keep);
+        used = keep;
+    }
+    std::memcpy(g_crashSnapshot + used, text.data(), text.size());
+    used += text.size();
+    g_crashSnapshot[used] = '\0';
+    g_crashSnapshotUsed = used;
+}
+
+void crashWriteAll(int fd, const char *text) {
+    if (fd < 0 || text == nullptr) {
+        return;
+    }
+    size_t remaining = std::strlen(text);
+    while (remaining > 0) {
+        const ssize_t written = write(fd, text, remaining);
+        if (written <= 0) {
+            return;
+        }
+        text += written;
+        remaining -= static_cast<size_t>(written);
+    }
+}
+
+void crashWriteHex(int fd, unsigned long value) {
+    static const char digits[] = "0123456789abcdef";
+    char buf[2 + 16 + 1];
+    int i = static_cast<int>(sizeof(buf)) - 1;
+    buf[i] = '\0';
+    if (value == 0) {
+        buf[--i] = '0';
+    }
+    while (value != 0) {
+        buf[--i] = digits[value & 0xf];
+        value >>= 4;
+    }
+    buf[--i] = 'x';
+    buf[--i] = '0';
+    crashWriteAll(fd, &buf[i]);
+}
+
+const char *crashSignalName(int sig) {
+    switch (sig) {
+        case SIGSEGV: return "SIGSEGV - invalid memory access";
+        case SIGABRT: return "SIGABRT - abort (a failed assertion, or an uncaught "
+                            "native exception)";
+        case SIGBUS:  return "SIGBUS - bad memory access (often a truncated mmap)";
+        case SIGILL:  return "SIGILL - illegal instruction";
+        case SIGFPE:  return "SIGFPE - arithmetic error";
+        default:      return "unknown signal";
+    }
+}
+
+#ifdef __ANDROID__
+int crashTraceStep(struct _Unwind_Context *ctx, void *arg) {
+    const int fd = static_cast<int>(reinterpret_cast<intptr_t>(arg));
+    const uintptr_t ip = _Unwind_GetIP(ctx);
+    if (ip != 0) {
+        crashWriteAll(fd, "  #");
+        crashWriteHex(fd, static_cast<unsigned long>(ip));
+        crashWriteAll(fd, "\n");
+    }
+    return 0; // _URC_NO_REASON: keep unwinding
+}
+
+void crashWriteBacktrace(int fd) {
+    crashWriteAll(fd, "native backtrace (raw addresses):\n");
+    _Unwind_Backtrace(crashTraceStep, reinterpret_cast<void *>(static_cast<intptr_t>(fd)));
+}
+#else
+void crashWriteBacktrace(int) {}
+#endif
+
+// The signals worth explaining, and the dispositions they had BEFORE us.
+const int CRASH_SIGNALS[] = { SIGSEGV, SIGABRT, SIGBUS, SIGILL, SIGFPE };
+const size_t CRASH_SIGNAL_COUNT = sizeof(CRASH_SIGNALS) / sizeof(CRASH_SIGNALS[0]);
+struct sigaction g_previousAction[CRASH_SIGNAL_COUNT];
+
+void crashSignalHandler(int sig, siginfo_t *info, void *ucontext) {
+    int fd = -1;
+    if (g_crashPath[0] != '\0') {
+        fd = open(g_crashPath, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+    }
+    if (fd >= 0) {
+        crashWriteAll(fd, "=== NEURON CRASH REPORT ===\n");
+        crashWriteAll(fd, "kind: native\n");
+        crashWriteAll(fd, "signal: ");
+        crashWriteAll(fd, crashSignalName(sig));
+        crashWriteAll(fd, "\naddress: ");
+        crashWriteHex(fd, info != nullptr
+            ? static_cast<unsigned long>(reinterpret_cast<uintptr_t>(info->si_addr))
+            : 0);
+        crashWriteAll(fd, "\n\n");
+        crashWriteBacktrace(fd);
+        crashWriteAll(fd, "\nlast engine log lines before the crash:\n");
+        crashWriteAll(fd, g_crashSnapshot);
+        crashWriteAll(fd, "\n");
+        close(fd);
+    }
+
+    // Never STEAL the signal: hand it to whoever had it before this handler.
+    // ART uses SIGSEGV itself to turn an implicit null-check fault into a
+    // NullPointerException, so swallowing it here would turn every Java NPE
+    // into a process kill.
+    const struct sigaction *previous = nullptr;
+    for (size_t i = 0; i < CRASH_SIGNAL_COUNT; ++i) {
+        if (CRASH_SIGNALS[i] == sig) {
+            previous = &g_previousAction[i];
+            break;
+        }
+    }
+    if (previous != nullptr && (previous->sa_flags & SA_SIGINFO) != 0 &&
+        previous->sa_sigaction != nullptr) {
+        previous->sa_sigaction(sig, info, ucontext);
+    } else if (previous != nullptr && previous->sa_handler != nullptr &&
+               previous->sa_handler != SIG_DFL && previous->sa_handler != SIG_IGN) {
+        previous->sa_handler(sig);
+    } else {
+        // Nothing (or the default) had it: die the normal way, so the platform
+        // still records a real crash (tombstone, Play Console).
+        signal(sig, SIG_DFL);
+        raise(sig);
+    }
+
+    // Reaching this point means the previous handler RESOLVED the signal — a
+    // Java NullPointerException, say — and the process is still alive. This was
+    // not a crash, so the report must not be shown as one.
+    if (g_crashPath[0] != '\0') {
+        unlink(g_crashPath);
+    }
+}
+
+void installCrashHandlers() {
+    if (g_crashHandlersInstalled) {
+        return;
+    }
+    g_crashHandlersInstalled = true;
+    struct sigaction action;
+    std::memset(&action, 0, sizeof(action));
+    action.sa_sigaction = crashSignalHandler;
+    // SA_NODEFER so chaining/re-raising to the previous handler runs it
+    // immediately instead of being held back until this one returns.
+    action.sa_flags = SA_SIGINFO | SA_NODEFER;
+    sigemptyset(&action.sa_mask);
+    for (size_t i = 0; i < CRASH_SIGNAL_COUNT; ++i) {
+        sigaction(CRASH_SIGNALS[i], &action, &g_previousAction[i]);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// JNI exception guard.
+//
+// llama.cpp THROWS for several perfectly recoverable situations ("Unsupported
+// device" from ggml-vulkan, a context it refuses to build, a bad_alloc). An
+// exception that escapes a JNI function does not become a Java exception — the
+// runtime calls std::terminate and the process aborts, which is exactly the
+// "app closes while loading" crash. NEURON_JNI_TRY turns each of those into a
+// normal failure the UI can show.
+// ---------------------------------------------------------------------------
+#define NEURON_JNI_TRY try {
+#define NEURON_JNI_CATCH_RETURN(fallback) \
+    } catch (const std::exception &e) { \
+        recordNativeError(e.what()); \
+        LOGE("native call threw: %s", e.what()); \
+        return (fallback); \
+    } catch (...) { \
+        recordNativeError("unknown native error"); \
+        LOGE("native call threw an unknown error"); \
+        return (fallback); \
+    }
+#define NEURON_JNI_CATCH_VOID \
+    } catch (const std::exception &e) { \
+        recordNativeError(e.what()); \
+        LOGE("native call threw: %s", e.what()); \
+        return; \
+    } catch (...) { \
+        recordNativeError("unknown native error"); \
+        LOGE("native call threw an unknown error"); \
+        return; \
+    }
+
+}  // namespace
 
 #if NEURON_HAVE_LLAMA
 #include "llama.h"
@@ -358,6 +594,28 @@ jmethodID resolveTextCallback(JNIEnv *env, jobject jCallback) {
     return env->GetMethodID(cbClass, "text", "(Ljava/lang/String;)V");
 }
 
+// A C++ exception escaping llama.cpp / ggml / ggml-vulkan is a FAILED LOAD,
+// not a reason to abort the process. Reports through the same errOut channel
+// every other failure uses and leaves the engine unloaded.
+int loadThrew(JNIEnv *env, jobjectArray jErrOut, const char *why) {
+    recordNativeError(why);
+    std::string message = std::string("The inference engine could not load this model: ") +
+                          (why != nullptr ? why : "unknown native error");
+    if (message.size() > MAX_ERROR_MESSAGE) {
+        message.resize(MAX_ERROR_MESSAGE);
+    }
+    if (jErrOut != nullptr && env != nullptr && env->GetArrayLength(jErrOut) > 0) {
+        env->SetObjectArrayElement(jErrOut, 0, env->NewStringUTF(message.c_str()));
+    }
+    LOGE("load threw: %s", why != nullptr ? why : "?");
+    {
+        std::lock_guard<std::mutex> lock(g_mutex);
+        unloadLocked();
+        llama_backend_free();
+    }
+    return -20;
+}
+
 } // namespace
 #endif // NEURON_HAVE_LLAMA
 
@@ -439,6 +697,7 @@ JNIEXPORT void JNICALL
 Java_com_neuron_ai_data_local_LocalEngineLoader_nativeInitBackends(
         JNIEnv *env, jobject, jstring jDir) {
 #if NEURON_HAVE_LLAMA
+    NEURON_JNI_TRY
     installLogCollector();
     const char *dir = env->GetStringUTFChars(jDir, nullptr);
     if (dir != nullptr) {
@@ -459,10 +718,11 @@ Java_com_neuron_ai_data_local_LocalEngineLoader_nativeInitBackends(
                  regs, path.c_str(), ggml_backend_dev_count());
             if (regs > 0) {
                 g_backendsInitialized = true;
-                // Doing the GPU verdict here rather than at first load means
-                // the debug console shows WHY a GPU is being skipped before
-                // anyone burns a model load finding out.
-                probeGpuDevices();
+                // GPU devices are deliberately NOT probed here. Probing builds
+                // a vk_device through the driver, and a driver that segfaults
+                // while doing it used to take the whole app down even on a
+                // CPU-only load. The verdict is collected the moment a load
+                // actually asks for the GPU (see nativeLoad).
             } else {
                 appendLogLine("no compute backend could be loaded from " + path +
                               " - inference is impossible on this install. The "
@@ -472,6 +732,7 @@ Java_com_neuron_ai_data_local_LocalEngineLoader_nativeInitBackends(
         }
         env->ReleaseStringUTFChars(jDir, dir);
     }
+    NEURON_JNI_CATCH_VOID
 #endif
 }
 
@@ -732,6 +993,7 @@ Java_com_neuron_ai_data_local_LocalEngineLoader_nativeLoad(
         JNIEnv *env, jobject, jstring jPath, jint contextTokens,
         jint threads, jboolean useGpu, jstring jMmprojPath, jobjectArray jErrOut) {
 #if NEURON_HAVE_LLAMA
+    NEURON_JNI_TRY
     // Fail loudly and specifically when ggml has no backend at all. Left
     // unhandled, llama_model_load_from_file() reports the same
     // "no backends are loaded" line for every model, which reads like a
@@ -786,10 +1048,16 @@ Java_com_neuron_ai_data_local_LocalEngineLoader_nativeLoad(
     clearLogLines();
     llama_backend_init();
 
-    probeGpuDevices();
-    logGpuDeviceVerdicts();
-
     bool gpu = useGpu == JNI_TRUE;
+    if (gpu) {
+        // Probing a GPU device builds a vk_device THROUGH THE DRIVER, and a
+        // driver that segfaults while doing it takes the whole process down —
+        // which is why this used to crash even loads that never wanted the
+        // GPU. Gated on the request now: a CPU load never touches the driver,
+        // and the verdict is still printed before the attempt that needs it.
+        probeGpuDevices();
+        logGpuDeviceVerdicts();
+    }
     if (gpu && !vulkanDriverPresent()) {
         return fail(-6, "No Vulkan GPU driver is available on this device");
     }
@@ -926,6 +1194,11 @@ Java_com_neuron_ai_data_local_LocalEngineLoader_nativeLoad(
     LOGI("loaded '%s' (gpu=%d, ctx=%d, threads=%d)",
          modelPath.c_str(), gpu ? 1 : 0, (int) cparams.n_ctx, (int) cparams.n_threads);
     return 0;
+    } catch (const std::exception &e) {
+        return loadThrew(env, jErrOut, e.what());
+    } catch (...) {
+        return loadThrew(env, jErrOut, "unknown native error");
+    }
 #else
     (void)jPath; (void)contextTokens; (void)threads; (void)useGpu; (void)jMmprojPath;
     if (jErrOut != nullptr && env->GetArrayLength(jErrOut) > 0) {
@@ -939,12 +1212,14 @@ Java_com_neuron_ai_data_local_LocalEngineLoader_nativeLoad(
 JNIEXPORT jboolean JNICALL
 Java_com_neuron_ai_data_local_LocalEngineLoader_nativeUnload(JNIEnv *, jobject) {
 #if NEURON_HAVE_LLAMA
+    NEURON_JNI_TRY
     std::lock_guard<std::mutex> lock(g_mutex);
     if (g_ctx != nullptr || g_model != nullptr) {
         unloadLocked();
         llama_backend_free();
     }
     return JNI_TRUE;
+    NEURON_JNI_CATCH_RETURN(JNI_TRUE)
 #else
     return JNI_TRUE;
 #endif
@@ -954,8 +1229,10 @@ Java_com_neuron_ai_data_local_LocalEngineLoader_nativeUnload(JNIEnv *, jobject) 
 JNIEXPORT jstring JNICALL
 Java_com_neuron_ai_data_local_LocalEngineLoader_nativeChatTemplate(JNIEnv *env, jobject) {
 #if NEURON_HAVE_LLAMA
+    NEURON_JNI_TRY
     std::lock_guard<std::mutex> lock(g_mutex);
     return env->NewStringUTF(g_loadedChatTemplate.c_str());
+    NEURON_JNI_CATCH_RETURN(nullptr)
 #else
     return env->NewStringUTF("");
 #endif
@@ -978,6 +1255,7 @@ Java_com_neuron_ai_data_local_LocalEngineLoader_nativeApplyChatTemplate(
         JNIEnv *env, jobject, jobjectArray jRoles, jobjectArray jContents,
         jboolean jAddAssistant) {
 #if NEURON_HAVE_LLAMA
+    NEURON_JNI_TRY
     if (jRoles == nullptr || jContents == nullptr) return nullptr;
     const jsize n = env->GetArrayLength(jRoles);
     if (n <= 0 || env->GetArrayLength(jContents) != n) return nullptr;
@@ -1040,6 +1318,7 @@ Java_com_neuron_ai_data_local_LocalEngineLoader_nativeApplyChatTemplate(
         capacity *= 2;
     }
     return env->NewStringUTF(out.c_str());
+    NEURON_JNI_CATCH_RETURN(nullptr)
 #else
     (void)jRoles; (void)jContents; (void)jAddAssistant;
     return nullptr;
@@ -1053,6 +1332,7 @@ JNIEXPORT jintArray JNICALL
 Java_com_neuron_ai_data_local_LocalEngineLoader_nativeTokenize(
         JNIEnv *env, jobject, jstring jPrompt) {
 #if NEURON_HAVE_LLAMA
+    NEURON_JNI_TRY
     if (jPrompt == nullptr) return env->NewIntArray(0);
     const char *promptChars = env->GetStringUTFChars(jPrompt, nullptr);
     std::string prompt = promptChars != nullptr ? promptChars : "";
@@ -1084,6 +1364,7 @@ Java_com_neuron_ai_data_local_LocalEngineLoader_nativeTokenize(
     }
     env->SetIntArrayRegion(out, 0, n_tokens, asInt.data());
     return out;
+    NEURON_JNI_CATCH_RETURN(env->NewIntArray(0))
 #else
     (void)jPrompt;
     return env->NewIntArray(0);
@@ -1097,6 +1378,7 @@ JNIEXPORT jintArray JNICALL
 Java_com_neuron_ai_data_local_LocalEngineLoader_nativeCachedTokens(
         JNIEnv *env, jobject) {
 #if NEURON_HAVE_LLAMA
+    NEURON_JNI_TRY
     std::lock_guard<std::mutex> lock(g_mutex);
     const int n = static_cast<int>(g_cachedTokens.size());
     jintArray out = env->NewIntArray(n);
@@ -1107,6 +1389,7 @@ Java_com_neuron_ai_data_local_LocalEngineLoader_nativeCachedTokens(
     }
     env->SetIntArrayRegion(out, 0, n, asInt.data());
     return out;
+    NEURON_JNI_CATCH_RETURN(env->NewIntArray(0))
 #else
     return env->NewIntArray(0);
 #endif
@@ -1128,6 +1411,7 @@ Java_com_neuron_ai_data_local_LocalEngineLoader_nativeGenerateTokens(
         JNIEnv *env, jobject, jintArray jTokens, jint maxTokens, jint reusePrefix,
         jobject jCallback) {
 #if NEURON_HAVE_LLAMA
+    NEURON_JNI_TRY
     if (jTokens == nullptr || jCallback == nullptr) return -1;
 
     const int n_tokens = env->GetArrayLength(jTokens);
@@ -1173,6 +1457,7 @@ Java_com_neuron_ai_data_local_LocalEngineLoader_nativeGenerateTokens(
     const llama_vocab *vocab = llama_model_get_vocab(g_model);
     const int generated = generateLoop(env, jCallback, onText, g_ctx, vocab, n_tokens, maxTokens);
     return generated;
+    NEURON_JNI_CATCH_RETURN(-20)
 #else
     (void)jTokens; (void)maxTokens; (void)reusePrefix; (void)jCallback;
     return -100;
@@ -1185,8 +1470,10 @@ JNIEXPORT jboolean JNICALL
 Java_com_neuron_ai_data_local_LocalEngineLoader_nativeVisionAvailable(
         JNIEnv *, jobject) {
 #if NEURON_HAVE_LLAMA && NEURON_HAVE_MTMD
+    NEURON_JNI_TRY
     std::lock_guard<std::mutex> lock(g_mutex);
     return (g_mctx != nullptr) ? JNI_TRUE : JNI_FALSE;
+    NEURON_JNI_CATCH_RETURN(JNI_FALSE)
 #else
     return JNI_FALSE;
 #endif
@@ -1209,6 +1496,7 @@ Java_com_neuron_ai_data_local_LocalEngineLoader_nativeGenerateMultimodal(
         JNIEnv *env, jobject, jstring jPrompt, jbyteArray jImage,
         jint maxTokens, jobject jCallback) {
 #if NEURON_HAVE_LLAMA && NEURON_HAVE_MTMD
+    NEURON_JNI_TRY
     if (jPrompt == nullptr || jImage == nullptr || jCallback == nullptr) return -1;
 
     jmethodID onText = resolveTextCallback(env, jCallback);
@@ -1275,10 +1563,37 @@ Java_com_neuron_ai_data_local_LocalEngineLoader_nativeGenerateMultimodal(
         g_cachedPos = static_cast<int>(n_past);
     }
     return generated;
+    NEURON_JNI_CATCH_RETURN(-20)
 #else
     (void)jPrompt; (void)jImage; (void)maxTokens; (void)jCallback;
     return -6; // this build has no mtmd / no projector
 #endif
+}
+
+// Arms the native crash handler and points it at [jPath] — the SAME file
+// CrashRecorder reads on the next launch. Safe to call from any thread; a
+// no-op stub build still installs the handlers (there is simply no engine log
+// to attach yet).
+JNIEXPORT void JNICALL
+Java_com_neuron_ai_data_local_LocalEngineLoader_nativeInstallCrashHandler(
+        JNIEnv *env, jobject, jstring jPath) {
+    if (env == nullptr || jPath == nullptr) return;
+    const char *path = env->GetStringUTFChars(jPath, nullptr);
+    if (path != nullptr) {
+        std::strncpy(g_crashPath, path, sizeof(g_crashPath) - 1);
+        g_crashPath[sizeof(g_crashPath) - 1] = '\0';
+        env->ReleaseStringUTFChars(jPath, path);
+    }
+    installCrashHandlers();
+}
+
+// Message from the last C++ exception caught at a JNI boundary. Kotlin shows
+// it when a call returns its "native error" code, so the reason reaches the UI
+// instead of dying with the process.
+JNIEXPORT jstring JNICALL
+Java_com_neuron_ai_data_local_LocalEngineLoader_nativeLastError(JNIEnv *env, jobject) {
+    return env->NewStringUTF(g_lastNativeError.empty()
+        ? "unknown native error" : g_lastNativeError.c_str());
 }
 
 } // extern "C"

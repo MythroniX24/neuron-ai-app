@@ -434,7 +434,19 @@ class LocalModelRepository(
             }
 
             _loadState.value = LocalLoadState.Loading(modelId, record.displayName)
-            val result = loadEngine(record)
+            val result = try {
+                loadEngine(record)
+            } catch (t: Throwable) {
+                // A JVM-level failure while loading (an OutOfMemoryError from
+                // the multi-GB mapping, a link error on a broken install) must
+                // surface as a stated failure — that is the difference between
+                // "the app closed" and an error the user can read.
+                logger?.w("LocalModels", "Load threw", t)
+                LocalEngineLoader.LoadResult.Failure(
+                    "Could not load \"${record.displayName}\": " +
+                        (t.message ?: t.javaClass.simpleName)
+                )
+            }
             _loadState.value = when (result) {
                 is LocalEngineLoader.LoadResult.Success -> LocalLoadState.Ready(modelId)
                 is LocalEngineLoader.LoadResult.Failure -> {
@@ -477,6 +489,27 @@ class LocalModelRepository(
         // Milestone 6: the GGUF's declared context, capped to what a phone can
         // hold. Milestone 7: threads + GPU filtered through the throttle policy.
         val contextTokens = LocalModelRouter.effectiveContextTokens(record.contextLength)
+        // Refuse a load the device cannot hold BEFORE anything is allocated.
+        // Being killed by the low-memory killer mid-load is exactly what the
+        // user experiences as "the app crashes when I load a model": nothing
+        // is thrown, nothing is shown, the process is just gone. The numbers
+        // match the guidance the recommended-models list already shows.
+        val requiredFree = LoadMemoryBudget.requiredFreeBytes(
+            modelFileBytes = File(modelsDir, record.fileName).length(),
+            contextTokens = contextTokens,
+            layerCount = record.blockCount
+        )
+        val (_, availBytes) = deviceMemory()
+        if (!LoadMemoryBudget.fits(requiredFree, availBytes)) {
+            logger?.w(
+                "LocalModels",
+                "Load refused: needs ${requiredFree / (1024 * 1024)} MB free, has " +
+                    "${availBytes / (1024 * 1024)} MB"
+            )
+            return LocalEngineLoader.LoadResult.Failure(
+                LoadMemoryBudget.describeShortfall(requiredFree, availBytes)
+            )
+        }
         val throttle = throttleDecision()
         val wantGpu = throttle.allowGpu
         // Milestone 9: attach the projector when one was imported beside the

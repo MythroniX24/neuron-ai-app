@@ -54,7 +54,13 @@ class ModelTransferService : Service() {
     override fun onCreate() {
         super.onCreate()
         createChannel()
-        startForegroundCompat(buildNotification(null, null))
+        // A foreground start can be REFUSED — Android 12+ blocks it when the
+        // app is not in the foreground, and some OEM policies do too. An
+        // uncaught throw from a service lifecycle callback kills the process,
+        // and this runs on the model-load path, so the user would see "the app
+        // crashed while loading" for a notification problem. The work itself
+        // lives on the app scope, so losing the foreground claim is survivable.
+        runCatching { startForegroundCompat(buildNotification(null, null)) }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -85,10 +91,14 @@ class ModelTransferService : Service() {
                 stopSelf()
                 return@collect
             }
-            notificationManager().notify(
-                NOTIFICATION_ID,
-                buildNotification(loadingId, downloading)
-            )
+            // Progress notifications are cosmetic: a refused/broken notify must
+            // never escalate into a process crash on a model load.
+            runCatching {
+                notificationManager().notify(
+                    NOTIFICATION_ID,
+                    buildNotification(loadingId, downloading)
+                )
+            }
         }
     }
 
