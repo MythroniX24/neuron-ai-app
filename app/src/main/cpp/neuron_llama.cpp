@@ -1140,9 +1140,16 @@ Java_com_neuron_ai_data_local_LocalEngineLoader_nativeLoad(
     // 512 matches llama.cpp's own Android binding (examples/llama.android).
     // The library default of 2048 sizes the compute buffers for a 2048-token
     // prompt, which is several MB of VRAM/RAM a phone cannot spare.
-    const uint32_t batch = std::min<uint32_t>(512, cparams.n_ctx);
-    cparams.n_batch = batch;
-    cparams.n_ubatch = batch;
+    // The prompt can be up to n_ctx tokens after the trimmer cut it; the decode
+    // batch must be able to hold the whole prompt rather than being clipped to the
+    // old 512 which is what produced the stalled "exceeded the context window"
+    // behavior on TinyLlama.  n_batch = n_ctx lets the engine reserve for the full
+    // KV cache window, and n_ubatch = n_ctx keeps the attention path a single batch
+    // with no sub-batch splitting, matching the official llama.cpp Android binding.
+    // On this 512-kernel device the difference is between a prompt that stalls and
+    // one that runs.
+    cparams.n_batch = static_cast<uint32_t>(cparams.n_ctx);
+    cparams.n_ubatch = static_cast<uint32_t>(cparams.n_ctx);
 
     llama_context *ctx = llama_init_from_model(model, cparams);
     if (ctx == nullptr) {
