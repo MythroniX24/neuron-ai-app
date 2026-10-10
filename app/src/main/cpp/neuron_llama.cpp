@@ -143,7 +143,9 @@ const char *crashSignalName(int sig) {
 }
 
 #ifdef __ANDROID__
-int crashTraceStep(struct _Unwind_Context *ctx, void *arg) {
+// Signature must be exactly _Unwind_Trace_Fn, i.e. _Unwind_Reason_Code
+// returned, or the NDK's <unwind.h> has no matching _Unwind_Backtrace.
+_Unwind_Reason_Code crashTraceStep(struct _Unwind_Context *ctx, void *arg) {
     const int fd = static_cast<int>(reinterpret_cast<intptr_t>(arg));
     const uintptr_t ip = _Unwind_GetIP(ctx);
     if (ip != 0) {
@@ -151,7 +153,7 @@ int crashTraceStep(struct _Unwind_Context *ctx, void *arg) {
         crashWriteHex(fd, static_cast<unsigned long>(ip));
         crashWriteAll(fd, "\n");
     }
-    return 0; // _URC_NO_REASON: keep unwinding
+    return _URC_NO_REASON; // keep unwinding
 }
 
 void crashWriteBacktrace(int fd) {
