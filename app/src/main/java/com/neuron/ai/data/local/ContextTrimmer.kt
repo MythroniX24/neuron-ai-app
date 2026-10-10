@@ -64,7 +64,13 @@ object ContextTrimmer {
 
         // Prompt + answer must both fit. A context of 0 means "unknown", in
         // which case we leave the conversation alone rather than guess a limit.
-        val room = contextTokens - maxOutputTokens - RESERVED_TOKENS
+        //
+        // The answer reservation never eats the whole window (see
+        // [answerReservation]) — otherwise `room` went negative on a small
+        // model and the old code sent the conversation WHOLE, which is exactly
+        // the "prompt exceeded the context window" failure on every turn.
+        val room = contextTokens - answerReservation(contextTokens, maxOutputTokens) -
+            RESERVED_TOKENS
         if (room <= 0) return measured(turns)
 
         var candidate = turns
@@ -80,8 +86,30 @@ object ContextTrimmer {
                 // One turn left and it is still too big: a pasted document, a
                 // huge tool result. Truncating it beats failing the turn, and
                 // beats silently letting the decode stop mid-answer.
-                val shrunk = shrinkLastTurn(candidate, room, addAssistant, render, countTokens)
-                return if (shrunk != candidate) measured(shrunk) else fitted
+                val shrunkLast = shrinkTurnAt(
+                    candidate, candidate.lastIndex, room, addAssistant, render, countTokens
+                )
+                if (shrunkLast != null) return measured(shrunkLast)
+
+                // Even an EMPTIED final turn does not fit, so what is left is
+                // the mandatory scaffolding: the leading system/memory turns.
+                // Truncate those too (oldest first) rather than handing the
+                // engine a prompt it must reject wholesale — a small-context
+                // model whose system turn alone filled the window used to fail
+                // EVERY turn this way.
+                var squeezed: List<ChatTemplateRenderer.Turn>? = null
+                for (index in 0 until candidate.lastIndex) {
+                    val shortened = shrinkTurnAt(
+                        squeezed ?: candidate, index, room, addAssistant, render, countTokens
+                    ) ?: continue
+                    squeezed = shortened
+                    if (countTokens(render(shortened, addAssistant)) <= room) {
+                        return measured(shortened)
+                    }
+                }
+                // Nothing fits: return the smallest prompt we could build and
+                // let the engine report the real numbers in the failure.
+                return measured(squeezed ?: fitted.turns)
             }
             val next = candidate.toMutableList()
             next.removeAt(systemCount)
@@ -99,18 +127,35 @@ object ContextTrimmer {
     }
 
     /**
-     * Largest prefix of the final turn that still fits, found by bisection
-     * (token count rises monotonically with the text). The vision marker is
-     * re-appended so a truncated picture turn stays usable.
+     * Tokens held back for the answer. Never more than HALF the window: a
+     * 1024-token reservation against a 1024-token model made the prompt budget
+     * negative, and a negative budget used to mean "send everything". Half the
+     * window always leaves room for a prompt, which is the difference between
+     * a trimmed turn and a permanently broken chat on a small model.
      */
-    private fun shrinkLastTurn(
+    fun answerReservation(contextTokens: Int, requestedOutputTokens: Int): Int {
+        if (contextTokens <= 0) return requestedOutputTokens
+        val half = maxOf(1, contextTokens / 2)
+        return requestedOutputTokens.coerceAtLeast(1).coerceAtMost(half)
+    }
+
+    /**
+     * Largest prefix of turn [index] that still fits, found by bisection (token
+     * count rises monotonically with the text). The vision marker is
+     * re-appended so a truncated picture turn stays usable.
+     *
+     * null means NOT EVEN an empty turn fits — the caller then has to shrink
+     * something else instead of giving up with an over-long prompt.
+     */
+    private fun shrinkTurnAt(
         turns: List<ChatTemplateRenderer.Turn>,
+        index: Int,
         room: Int,
         addAssistant: Boolean,
         render: (List<ChatTemplateRenderer.Turn>, Boolean) -> String,
         countTokens: (String) -> Int
-    ): List<ChatTemplateRenderer.Turn> {
-        val last = turns.last()
+    ): List<ChatTemplateRenderer.Turn>? {
+        val last = turns[index]
         val marker = LocalEngineLoader.MEDIA_MARKER
         val hasMarker = last.content.contains(marker)
         val text = if (hasMarker) {
@@ -118,9 +163,11 @@ object ContextTrimmer {
         } else {
             last.content
         }
-        fun withLength(length: Int) = turns.dropLast(1) + last.copy(
-            content = text.take(length) + if (hasMarker) "\n$marker" else ""
-        )
+        fun withLength(length: Int) = turns.toMutableList().also { list ->
+            list[index] = last.copy(
+                content = text.take(length) + if (hasMarker) "\n$marker" else ""
+            )
+        }
         var low = 0
         var high = text.length
         var best: List<ChatTemplateRenderer.Turn>? = null
@@ -134,7 +181,7 @@ object ContextTrimmer {
                 high = mid - 1
             }
         }
-        return best ?: turns
+        return best
     }
 
     /**

@@ -81,6 +81,20 @@ object LocalEngineLoader {
             "the native engine is not loaded"
         }
 
+    /**
+     * Context window of the ACTIVE context, or null when nothing is loaded.
+     *
+     * This is the engine's own number (llama_n_ctx), not the one we asked for:
+     * a trim budget based on a window the engine did not actually build is how
+     * a prompt ends up bigger than the KV cache and every turn dies with
+     * "prompt exceeded the model's context window".
+     */
+    fun activeContextTokens(): Int? {
+        if (!nativeLibraryAvailable) return null
+        val size = runCatching { nativeContextSize() }.getOrDefault(0)
+        return if (size > 0) size else null
+    }
+
     /** Informational; from llama.cpp when built, "unavailable" otherwise. */
     external fun nativeVersion(): String
 
@@ -109,6 +123,7 @@ object LocalEngineLoader {
     private external fun nativeInitBackends(dir: String)
     private external fun nativeInstallCrashHandler(reportPath: String)
     private external fun nativeLastError(): String
+    private external fun nativeContextSize(): Int
     private external fun nativeLoad(
         path: String,
         contextTokens: Int,
@@ -417,7 +432,14 @@ object LocalEngineLoader {
             -100 -> GenerationResult.Error("Engine unavailable (stub build)")
             -3 -> GenerationResult.Error("No model is loaded")
             -4 -> GenerationResult.Error("Could not tokenize the conversation")
-            -5 -> GenerationResult.Error("Prompt exceeded the model's context window")
+            // -5 carries the real numbers from the engine (prompt size, context
+            // size, decoder code) — a bare "exceeded the context window" is
+            // impossible to act on or to report.
+            -5 -> GenerationResult.Error(
+                lastNativeError().ifBlank {
+                    "Prompt exceeded the model's context window"
+                }
+            )
             // -20: llama.cpp/ggml threw where the JNI boundary caught it (see
             // NEURON_JNI_TRY). The exception's own message is the reason.
             -20 -> GenerationResult.Error(

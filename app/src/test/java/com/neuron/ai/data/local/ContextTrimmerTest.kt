@@ -140,6 +140,63 @@ class ContextTrimmerTest {
         }
     }
 
+    /**
+     * The failure this pins down: a model whose window is no bigger than the
+     * answer reservation (a 1k-context GGUF with the default 1024-token
+     * answer budget) used to make the prompt budget NEGATIVE, and the old code
+     * answered that by sending the conversation whole — so the engine rejected
+     * every turn with "prompt exceeded the model's context window".
+     */
+    @Test
+    fun `a small window with a full-size answer budget still trims`() {
+        val fitted = ContextTrimmer.fit(
+            chat(40), contextTokens = 1024, maxOutputTokens = 1024,
+            render = render, countTokens = count
+        )
+        val reserve = ContextTrimmer.answerReservation(1024, 1024)
+        assertEquals(512, reserve)
+        assertTrue(
+            "the conversation had to be trimmed, not sent whole",
+            fitted.droppedTurns > 0
+        )
+        assertTrue(
+            "prompt was ${count(fitted.prompt)} tokens",
+            count(fitted.prompt) + reserve <= 1024
+        )
+    }
+
+    @Test
+    fun `the answer reservation never eats more than half the window`() {
+        assertEquals(512, ContextTrimmer.answerReservation(1024, 1024))
+        assertEquals(64, ContextTrimmer.answerReservation(1024, 64))
+        assertEquals(1024, ContextTrimmer.answerReservation(4096, 1024))
+        // Unknown window: untouched, and the 0-context path bails out instead.
+        assertEquals(1024, ContextTrimmer.answerReservation(0, 1024))
+    }
+
+    /**
+     * When the mandatory scaffolding alone fills the window there is nothing
+     * left to drop — the leading turns have to give ground too, instead of the
+     * whole (over-long) prompt going to the engine.
+     */
+    @Test
+    fun `over-long system instructions are truncated rather than sent whole`() {
+        val turns = listOf(
+            Turn(Turn.SYSTEM, "instructions ".repeat(200)),
+            Turn(Turn.USER, "hi")
+        )
+        val fitted = ContextTrimmer.fit(
+            turns, contextTokens = 200, maxOutputTokens = 64,
+            render = render, countTokens = count
+        )
+        val reserve = ContextTrimmer.answerReservation(200, 64)
+        assertTrue(
+            "prompt was ${count(fitted.prompt)} tokens",
+            count(fitted.prompt) + reserve <= 200
+        )
+        assertFalse(fitted.prompt.contains("instructions ".repeat(20)))
+    }
+
     @Test
     fun `an unknown context length is not guessed at`() {
         val turns = chat(3)

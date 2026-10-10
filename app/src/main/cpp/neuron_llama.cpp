@@ -1158,7 +1158,12 @@ Java_com_neuron_ai_data_local_LocalEngineLoader_nativeLoad(
 
     g_model = model;
     g_ctx = ctx;
-    g_ctxSize = cparams.n_ctx;
+    // llama_n_ctx(), NOT cparams.n_ctx: llama.cpp is free to adjust the
+    // requested window while building the context, and every later decision
+    // (the trim budget, the "prompt too long" check) has to agree with what
+    // the engine ACTUALLY holds or a full prompt is decoded into a smaller
+    // cache and fails with a misleading "context window" error.
+    g_ctxSize = llama_n_ctx(ctx);
     g_cachedTokens.clear();
     g_cachedPos = 0;
 
@@ -1434,7 +1439,16 @@ Java_com_neuron_ai_data_local_LocalEngineLoader_nativeGenerateTokens(
     if (g_model == nullptr || g_ctx == nullptr) return -3;
 
     const int nCtx = static_cast<int>(g_ctxSize);
-    if (nCtx > 0 && n_tokens > nCtx) return -5;
+    if (nCtx > 0 && n_tokens > nCtx) {
+        // Say the NUMBERS. "Exceeded the context window" without them gives
+        // the user nothing to act on, and nothing to report.
+        recordNativeError(("The prompt is " + std::to_string(n_tokens) +
+                           " tokens but this model's context window is only " +
+                           std::to_string(nCtx) + " tokens. The conversation was "
+                           "trimmed as far as it can go - load a model with a "
+                           "larger context, or start a new chat.").c_str());
+        return -5;
+    }
 
     // Verified common prefix: the longest run of identical ids at the start of
     // both the shadow cache and this prompt, capped by what the caller asked.
@@ -1452,7 +1466,19 @@ Java_com_neuron_ai_data_local_LocalEngineLoader_nativeGenerateTokens(
         }
     }
 
-    if (decodeRange(g_ctx, tokens, keep) != 0) return -5;
+    const int decodeCode = decodeRange(g_ctx, tokens, keep);
+    if (decodeCode != 0) {
+        // A refused decode is NOT "the prompt was too long" on its own — it is
+        // the engine rejecting this batch. Report the real inputs, because the
+        // distinction is the whole diagnosis.
+        recordNativeError(("The engine could not process this prompt (" +
+                           std::to_string(n_tokens) + " tokens into a " +
+                           std::to_string(nCtx) + "-token context, " +
+                           std::to_string(keep) + " reused from cache; decoder code " +
+                           std::to_string(decodeCode) + "). Open Settings -> Debug "
+                           "console for the engine log.").c_str());
+        return -5;
+    }
     g_cachedTokens = tokens;
     g_cachedPos = n_tokens;
 
@@ -1463,6 +1489,21 @@ Java_com_neuron_ai_data_local_LocalEngineLoader_nativeGenerateTokens(
 #else
     (void)jTokens; (void)maxTokens; (void)reusePrefix; (void)jCallback;
     return -100;
+#endif
+}
+
+// Real context window of the ACTIVE context (what llama.cpp built, not what
+// was requested), 0 when nothing is loaded. The Kotlin side budgets the prompt
+// against THIS value so prompt size and engine capacity can never disagree.
+JNIEXPORT jint JNICALL
+Java_com_neuron_ai_data_local_LocalEngineLoader_nativeContextSize(JNIEnv *, jobject) {
+#if NEURON_HAVE_LLAMA
+    NEURON_JNI_TRY
+    std::lock_guard<std::mutex> lock(g_mutex);
+    return static_cast<jint>(g_ctxSize);
+    NEURON_JNI_CATCH_RETURN(0)
+#else
+    return 0;
 #endif
 }
 
@@ -1594,8 +1635,9 @@ Java_com_neuron_ai_data_local_LocalEngineLoader_nativeInstallCrashHandler(
 // instead of dying with the process.
 JNIEXPORT jstring JNICALL
 Java_com_neuron_ai_data_local_LocalEngineLoader_nativeLastError(JNIEnv *env, jobject) {
-    return env->NewStringUTF(g_lastNativeError.empty()
-        ? "unknown native error" : g_lastNativeError.c_str());
+    // Deliberately empty when nothing was recorded: the Kotlin side falls back
+    // to its own wording instead of showing a placeholder.
+    return env->NewStringUTF(g_lastNativeError.c_str());
 }
 
 } // extern "C"

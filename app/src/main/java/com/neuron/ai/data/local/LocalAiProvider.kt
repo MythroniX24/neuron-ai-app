@@ -141,7 +141,13 @@ class LocalAiProvider(
         // this the chat breaks permanently once it outgrows the context.
         val fitted = ContextTrimmer.fit(
             turns = buildTurns(request.messages, imageMessageHasMarker = imageBytes != null),
-            contextTokens = request.model.contextWindowTokens
+            // The engine's OWN window wins over the declared one. They can
+            // differ — llama.cpp adjusts what it actually builds — and
+            // budgeting against a window the engine does not have is what
+            // produced "prompt exceeded the model's context window" on a
+            // prompt the trimmer had already approved.
+            contextTokens = LocalEngineLoader.activeContextTokens()
+                ?: request.model.contextWindowTokens
                 ?: LocalModelRouter.effectiveContextTokens(record.contextLength),
             maxOutputTokens = maxTokens,
             render = { turns, addAssistant ->
@@ -246,9 +252,9 @@ class LocalAiProvider(
         val maxTokens = (request.maxOutputTokens ?: 1024)
             .coerceAtMost(2048)
             .coerceAtMost(repository.maxOutputTokens())
-        val contextTokens = request.model.contextWindowTokens
+        val contextTokens = LocalEngineLoader.activeContextTokens()
+            ?: request.model.contextWindowTokens
             ?: LocalModelRouter.effectiveContextTokens(record.contextLength)
-            ?: 0
         val prompt = ContextTrimmer.fit(
             turns = buildTurns(request.messages, imageMessageHasMarker = false),
             contextTokens = contextTokens,
