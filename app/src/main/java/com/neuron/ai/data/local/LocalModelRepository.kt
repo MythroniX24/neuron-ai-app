@@ -2,6 +2,8 @@ package com.neuron.ai.data.local
 
 import android.app.ActivityManager
 import android.content.Context
+import android.content.Intent
+import android.provider.OpenableColumns
 import com.neuron.ai.core.coroutines.DispatcherProvider
 import com.neuron.ai.core.log.Logger
 import java.io.File
@@ -157,30 +159,112 @@ class LocalModelRepository(
     // ---- Import ------------------------------------------------------------
 
     /**
-     * Imports a user-picked GGUF file: copies it into the isolated models
-     * directory, validates the FORMAT (magic + header + metadata, not the
-     * extension) and a quick native load test, then registers it Available.
-     * Returns the new record, or the actual failure reason — never silent.
+     * Imports a user-picked GGUF (or mmproj projector) straight into the
+     * isolated models directory.
+     *
+     * The display name is recovered from the provider's [OpenableColumns.DISPLAY_NAME]
+     * instead of being derived from a throwaway cache file, so an imported
+     * model keeps its real name and quantization label. The bytes are streamed
+     * once, directly into the models directory — no cache-dir staging and no
+     * second copy. Projector files are copied as companions and are NOT
+     * registered as models (see [VisionProjector.isProjectorFile]).
      */
     suspend fun importFromUri(uri: android.net.Uri, resolver: android.content.ContentResolver): Result<LocalModelRecord> =
         withContext(dispatchers.io) {
-            try {
-                val temp = File.createTempFile("import-", ".gguf", context.cacheDir)
-                resolver.openInputStream(uri)?.use { input ->
-                    temp.outputStream().use { output -> input.copyTo(output) }
-                } ?: return@withContext Result.failure(
-                    IOException("Could not read the picked file")
+            // Best-effort: persistable permissions only exist for documents the
+            // picker granted them for (OpenDocument). A failure here is harmless
+            // because we copy the bytes immediately instead of reopening later.
+            runCatching {
+                resolver.takePersistableUriPermission(
+                    uri, Intent.FLAG_GRANT_READ_URI_PERMISSION
                 )
-                try {
-                    importFile(temp, displayName = temp.name.removeSuffix(".gguf"))
-                } finally {
-                    temp.delete()
+            }
+            val displayName = queryDisplayName(uri, resolver)
+                ?: uri.lastPathSegment?.substringAfterLast('/')
+                ?: "imported-model"
+            val isProjector = VisionProjector.isProjectorFile(displayName)
+            val safeName = displayName
+                .replace(Regex("[^A-Za-z0-9._-]"), "_")
+                .take(80)
+                .ifBlank { "model" }
+            var dest: File? = null
+            try {
+                dest = File(modelsDir, "$safeName-${UUID.randomUUID().toString().take(8)}.gguf")
+                resolver.openInputStream(uri)?.use { input ->
+                    dest!!.outputStream().use { output -> input.copyTo(output) }
+                } ?: run {
+                    dest?.delete()
+                    return@withContext Result.failure(
+                        IOException("Could not read the picked file")
+                    )
                 }
+
+                if (!GgufReader.looksLikeGguf(dest!!)) {
+                    dest?.delete()
+                    return@withContext Result.failure(
+                        GgufReader.InvalidGgufException(
+                            "This file is not a GGUF model (missing GGUF magic). Import cancelled."
+                        )
+                    )
+                }
+                val info = try {
+                    GgufReader.parse(dest!!)
+                } catch (t: Throwable) {
+                    dest?.delete()
+                    return@withContext Result.failure(
+                        IllegalArgumentException("Corrupt or unsupported GGUF: ${t.message}")
+                    )
+                }
+
+                val record = LocalModelRecord(
+                    id = "local-" + UUID.randomUUID().toString().take(8),
+                    displayName = displayName.take(60),
+                    fileName = dest!!.name,
+                    sizeBytes = dest!!.length(),
+                    quantization = info.quantization
+                        ?: HfHubClient.quantOf(displayName)
+                        ?: HfHubClient.quantOf(dest!!.name),
+                    architecture = info.architecture,
+                    contextLength = info.contextLength,
+                    blockCount = info.blockCount,
+                    source = LocalModelRecord.SOURCE_IMPORT,
+                    importedAtEpochMs = System.currentTimeMillis(),
+                    supportsTools = info.declaresToolCalling
+                )
+                // Projectors are companions, not models — register them on disk
+                // only, so they never show up as loadable models.
+                if (!isProjector) {
+                    _models.value = _models.value + record
+                    persist()
+                }
+                Result.success(record)
             } catch (t: Throwable) {
+                dest?.delete()
                 logger?.w("LocalModels", "Import failed", t)
                 Result.failure(t)
             }
         }
+
+    /** Queries the provider's human-friendly name for [uri], or null. */
+    private fun queryDisplayName(
+        uri: android.net.Uri,
+        resolver: android.content.ContentResolver
+    ): String? = runCatching {
+        resolver.query(
+            uri,
+            arrayOf(OpenableColumns.DISPLAY_NAME),
+            null,
+            null,
+            null
+        )?.use { cursor ->
+            if (cursor.moveToFirst()) {
+                val index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                if (index >= 0) cursor.getString(index) else null
+            } else {
+                null
+            }
+        }
+    }.getOrNull()
 
     /** Import from a plain file (also used by tests and the download manager later). */
     suspend fun importFile(sourceFile: File, displayName: String): Result<LocalModelRecord> =
@@ -216,7 +300,8 @@ class LocalModelRepository(
                     // back to the file name, which is what every Hub quant
                     // release actually uses (general.file_type is ambiguous —
                     // see GgufReader).
-                    quantization = info.quantization ?: HfHubClient.quantOf(sourceFile.name),
+                    quantization = info.quantization ?: HfHubClient.quantOf(displayName)
+                        ?: HfHubClient.quantOf(dest.name),
                     architecture = info.architecture,
                     contextLength = info.contextLength,
                     blockCount = info.blockCount,
@@ -224,8 +309,12 @@ class LocalModelRepository(
                     importedAtEpochMs = System.currentTimeMillis(),
                     supportsTools = info.declaresToolCalling
                 )
-                _models.value = _models.value + record
-                persist()
+                // Projectors are companions, not models — copy them on disk
+                // but never register them as loadable models.
+                if (!VisionProjector.isProjectorFile(displayName)) {
+                    _models.value = _models.value + record
+                    persist()
+                }
                 Result.success(record)
             } catch (t: Throwable) {
                 dest.delete()
