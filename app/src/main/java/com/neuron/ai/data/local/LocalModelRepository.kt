@@ -25,19 +25,31 @@ import kotlinx.serialization.json.Json
  * Persistence is a JSON manifest in app-private storage.
  */
 class LocalModelRepository(
-    private val context: Context,
+    private val context: Context?,
     private val dispatchers: DispatcherProvider,
     private val logger: Logger?,
     /** Milestone 7: thermal/battery watcher; null = no thermal protection. */
-    private val healthMonitor: DeviceHealthMonitor? = null
+    private val healthMonitor: DeviceHealthMonitor? = null,
+    filesDirOverride: File? = null
 ) {
 
-    /** Workspace-isolated models directory — nothing outside it is touched. */
-    val modelsDir: File = File(context.filesDir, "local-models").apply { mkdirs() }
+    private val filesDir: File = filesDirOverride
+        ?: requireNotNull(context) { "context or filesDir is required" }.filesDir
 
-    private val manifestFile = File(context.filesDir, "local-models.json")
+    /** Workspace-isolated models directory — nothing outside it is touched. */
+    val modelsDir: File = File(filesDir, "local-models").apply { mkdirs() }
+
+    private val manifestFile = File(filesDir, "local-models.json")
     /** Performance prefs (GPU on/off, CPU threads) — tiny JSON, defaults below. */
-    private val perfPrefsFile = File(context.filesDir, "local-perf.json")
+    private val perfPrefsFile = File(filesDir, "local-perf.json")
+
+    /** Test-only constructor: no Android [Context] needed for import/storage paths. */
+    constructor(
+        filesDir: File,
+        dispatchers: DispatcherProvider,
+        logger: Logger?,
+        healthMonitor: DeviceHealthMonitor? = null
+    ) : this(null, dispatchers, logger, healthMonitor, filesDir)
     private val json = Json { ignoreUnknownKeys = true; prettyPrint = true }
 
     private val _models = MutableStateFlow<List<LocalModelRecord>>(emptyList())
@@ -54,7 +66,7 @@ class LocalModelRepository(
     // declaration order, so loading the rules inside init{} would touch
     // uninitialized fields.
 
-    private val routingRulesFile = File(context.filesDir, "local-routing-rules.json")
+    private val routingRulesFile = File(filesDir, "local-routing-rules.json")
 
     private val _routingRules = MutableStateFlow<List<ModelRoutingRule>>(emptyList())
 
@@ -564,7 +576,7 @@ class LocalModelRepository(
         // Mmapping a multi-GB GGUF takes real time, and the user will very
         // often switch apps mid-load. Without this the process can be killed
         // and the whole load restarts from zero when they come back.
-        ModelTransferService.ensureRunning(context)
+        context?.let { ModelTransferService.ensureRunning(it) }
         ModelTransferService.setLoading(record.displayName, true)
         return try {
             loadEngineInternal(record)
@@ -699,7 +711,7 @@ class LocalModelRepository(
 
     /** (totalRamBytes, freeRamBytes) for the "fits your device" indicator. */
     fun deviceMemory(): Pair<Long, Long> {
-        val am = context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
+        val am = context?.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
             ?: return 4L * 1024 * 1024 * 1024 to 2L * 1024 * 1024 * 1024
         val memoryInfo = ActivityManager.MemoryInfo()
         am.getMemoryInfo(memoryInfo)
