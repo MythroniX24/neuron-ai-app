@@ -33,7 +33,9 @@ class HfHubClient(
         val likes: Long,
         val license: String?,
         /** All .gguf files in the repo: name → (size, sha256 or null). */
-        val variants: List<Variant>
+        val variants: List<Variant>,
+        /** Hub's ISO timestamp for the last repo update, when provided. */
+        val lastModified: String? = null
     ) {
         data class Variant(
             val fileName: String,
@@ -71,7 +73,8 @@ class HfHubClient(
                 likes = obj["likes"]?.jsonPrimitive?.longOrNull ?: 0L,
                 license = license,
                 // Search results don't carry file lists — filled by [files].
-                variants = emptyList()
+                variants = emptyList(),
+                lastModified = obj["lastModified"]?.jsonPrimitive?.content
             )
         }.filter { !it.repoId.contains("onnx", ignoreCase = true) }
     }

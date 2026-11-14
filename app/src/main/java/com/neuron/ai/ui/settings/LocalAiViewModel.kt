@@ -34,7 +34,11 @@ data class SearchHit(
     val variants: List<HfHubClient.SearchResult.Variant>,
     val loadingVariants: Boolean = false,
     /** Why this repo has no downloadable files (gated/renamed/rate-limited). */
-    val unavailableReason: String? = null
+    val unavailableReason: String? = null,
+    /** Hub's ISO timestamp for the last repo update. */
+    val lastModified: String? = null,
+    /** Repo needs a Hugging Face login/licence acceptance. */
+    val gated: Boolean = false
 )
 
 /** UI state for the Local AI screen. */
@@ -369,7 +373,15 @@ class LocalAiViewModel(
             return
         }
         val hits = results.map { hit ->
-            SearchHit(hit.repoId, hit.downloads, hit.likes, hit.license, emptyList(), true)
+            SearchHit(
+                repoId = hit.repoId,
+                downloads = hit.downloads,
+                likes = hit.likes,
+                license = hit.license,
+                variants = emptyList(),
+                loadingVariants = true,
+                lastModified = hit.lastModified
+            )
         }
         _state.value = _state.value.copy(searching = false, searchResults = hits)
         // Enrich each hit with its GGUF variants (grouped under one entry —
@@ -392,7 +404,8 @@ class LocalAiViewModel(
                                 it.copy(
                                     variants = listing.variants,
                                     loadingVariants = false,
-                                    unavailableReason = listing.unavailableReason
+                                    unavailableReason = listing.unavailableReason,
+                                    gated = listing.gated
                                 )
                             } else it
                         }
@@ -403,6 +416,52 @@ class LocalAiViewModel(
     }
 
     fun clearSearchError() { _state.value = _state.value.copy(searchError = null) }
+
+    /**
+     * Loads the full GGUF file list for a repo opened from a recommendation
+     * or a search hit. The detail screen calls this when its variants are not
+     * there yet — never downloads anything by itself.
+     */
+    fun ensureFiles(repoId: String) {
+        val search = _state.value.searchResults.firstOrNull { it.repoId == repoId }
+        val recommended = _state.value.recommended.firstOrNull { it.hfRepo == repoId }
+        if (search?.loadingVariants == true) return
+        if (search?.variants?.isNotEmpty() == true || recommended?.variants?.isNotEmpty() == true) return
+        if (search != null) {
+            _state.value = _state.value.copy(
+                searchResults = _state.value.searchResults.map {
+                    if (it.repoId == repoId) it.copy(loadingVariants = true) else it
+                }
+            )
+        }
+        viewModelScope.launch {
+            val listing = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                runCatching { hubClient.listing(repoId) }.getOrElse { t ->
+                    HfHubClient.RepoListing(error = t.message ?: "Could not reach Hugging Face")
+                }
+            }
+            _state.value = _state.value.copy(
+                searchResults = _state.value.searchResults.map {
+                    if (it.repoId == repoId) {
+                        it.copy(
+                            variants = listing.variants,
+                            loadingVariants = false,
+                            unavailableReason = listing.unavailableReason,
+                            gated = listing.gated
+                        )
+                    } else it
+                },
+                recommended = _state.value.recommended.map {
+                    if (it.hfRepo == repoId) {
+                        it.copy(
+                            variants = listing.variants,
+                            unavailableReason = listing.unavailableReason
+                        )
+                    } else it
+                }
+            )
+        }
+    }
 
     fun startDownload(repoId: String, variant: HfHubClient.SearchResult.Variant, displayName: String) {
         if (downloadManager == null) {
