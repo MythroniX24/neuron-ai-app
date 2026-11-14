@@ -2,10 +2,9 @@ package com.neuron.ai.ui
 
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.scaleIn
-import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -36,6 +35,7 @@ import com.neuron.ai.ui.navigation.Routes
 import com.neuron.ai.ui.permissions.PermissionDialogHost
 import com.neuron.ai.ui.providers.ProvidersScreen
 import com.neuron.ai.ui.providers.ProviderEditScreen
+import com.neuron.ai.ui.settings.LocalModelSettingsScreen
 import com.neuron.ai.ui.settings.SettingsScreen
 import com.neuron.ai.ui.tasks.TasksScreen
 import kotlinx.coroutines.launch
@@ -108,19 +108,28 @@ fun NeuronApp(container: AppContainer) {
             NavHost(
                 navController = navController,
                 startDestination = Routes.HOME,
+                // Short slide + fade only. Full-screen scale animations
+                // forced every destination to re-rasterise during the
+                // transition, which is exactly what read as "laggy" on a
+                // phone — especially right after a heavy local-model turn.
                 enterTransition = {
-                    fadeIn(tween(220)) +
-                        slideInHorizontally(tween(260)) { it / 10 } +
-                        scaleIn(tween(260), initialScale = 0.96f)
+                    fadeIn(tween(180)) +
+                        slideInHorizontally(
+                            tween(220, easing = FastOutSlowInEasing)
+                        ) { it / 12 }
                 },
-                exitTransition = { fadeOut(tween(160)) },
+                exitTransition = { fadeOut(tween(140)) },
                 popEnterTransition = {
-                    fadeIn(tween(220)) + scaleIn(tween(220), initialScale = 0.98f)
+                    fadeIn(tween(180)) +
+                        slideInHorizontally(
+                            tween(220, easing = FastOutSlowInEasing)
+                        ) { -it / 12 }
                 },
                 popExitTransition = {
-                    fadeOut(tween(160)) +
-                        slideOutHorizontally(tween(260)) { it / 10 } +
-                        scaleOut(tween(260), targetScale = 0.96f)
+                    fadeOut(tween(140)) +
+                        slideOutHorizontally(
+                            tween(220, easing = FastOutSlowInEasing)
+                        ) { it / 12 }
                 }
             ) {
                 composable(Routes.HOME) {
@@ -199,6 +208,22 @@ fun NeuronApp(container: AppContainer) {
                 composable(Routes.LOCAL_AI) {
                     com.neuron.ai.ui.settings.LocalAiScreen(
                         container = container,
+                        onBack = { navController.popBackStack() },
+                        onOpenModelSettings = { modelId ->
+                            navController.navigate(Routes.localModelSettings(modelId))
+                        }
+                    )
+                }
+
+                composable(
+                    route = Routes.LOCAL_MODEL_SETTINGS,
+                    arguments = listOf(navArgument("modelId") {
+                        type = NavType.StringType
+                    })
+                ) { entry ->
+                    LocalModelSettingsScreen(
+                        container = container,
+                        modelId = entry.arguments?.getString("modelId").orEmpty(),
                         onBack = { navController.popBackStack() }
                     )
                 }

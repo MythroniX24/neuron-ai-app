@@ -19,6 +19,10 @@ data class LocalModelRecord(
     val architecture: String? = null,
     /** From GGUF metadata; drives TokenBudgetManager like any cloud model. */
     val contextLength: Long? = null,
+    /** User override for the context actually allocated (applies next load). */
+    val contextLimit: Int? = null,
+    /** User override for max generated tokens per turn (null = global default). */
+    val maxOutputTokens: Int? = null,
     val blockCount: Long? = null,
     /** "import" or the HF repo id it was downloaded from. */
     val source: String = SOURCE_IMPORT,

@@ -288,6 +288,10 @@ namespace {
 // leave two large models resident.
 std::mutex g_mutex;
 bool g_backendsInitialized = false;
+// Set by Kotlin when the user taps Stop. Checked once per generated token so
+// a blocking native decode loop actually returns instead of running to
+// maxTokens while the UI has already moved on.
+std::atomic<bool> g_cancelGeneration{false};
 
 // --- llama.cpp log capture ------------------------------------------------
 //
@@ -569,6 +573,9 @@ int generateLoop(JNIEnv *env, jobject jCallback, jmethodID onText, llama_context
     int pos = startPos;
     llama_token next = sampleGreedy(ctx, vocab);
     while (generated < maxTokens) {
+        // Stop is cooperative: the UI sets this flag and the NEXT token ends
+        // the loop. The generated text already streamed stays with the caller.
+        if (g_cancelGeneration.load(std::memory_order_relaxed)) break;
         if (llama_vocab_is_eog(vocab, next)) break;
 
         const int n = llama_token_to_piece(vocab, next, pieceBuf, sizeof(pieceBuf), 0, true);
@@ -1450,6 +1457,10 @@ Java_com_neuron_ai_data_local_LocalEngineLoader_nativeGenerateTokens(
 
     std::lock_guard<std::mutex> lock(g_mutex);
     if (g_model == nullptr || g_ctx == nullptr) return -3;
+    // New generation: clear a Stop request left over from the previous turn.
+    // This runs under g_mutex, so the CALLER cannot start until the cancelled
+    // native loop has released the lock and actually returned.
+    g_cancelGeneration.store(false, std::memory_order_relaxed);
 
     const int nCtx = static_cast<int>(g_ctxSize);
     if (nCtx > 0 && n_tokens > nCtx) {
@@ -1502,6 +1513,16 @@ Java_com_neuron_ai_data_local_LocalEngineLoader_nativeGenerateTokens(
 #else
     (void)jTokens; (void)maxTokens; (void)reusePrefix; (void)jCallback;
     return -100;
+#endif
+}
+
+// Asks the ACTIVE native generate loop to stop after the token it is on.
+// Safe from any thread; the loop checks the flag between tokens.
+JNIEXPORT void JNICALL
+Java_com_neuron_ai_data_local_LocalEngineLoader_nativeCancelGeneration(
+        JNIEnv *, jobject) {
+#if NEURON_HAVE_LLAMA
+    g_cancelGeneration.store(true, std::memory_order_relaxed);
 #endif
 }
 
@@ -1570,6 +1591,7 @@ Java_com_neuron_ai_data_local_LocalEngineLoader_nativeGenerateMultimodal(
     std::lock_guard<std::mutex> lock(g_mutex);
     if (g_model == nullptr || g_ctx == nullptr) return -3;
     if (g_mctx == nullptr) return -6;
+    g_cancelGeneration.store(false, std::memory_order_relaxed);
 
     mtmd_helper_bitmap_wrapper wrapper = mtmd_helper_bitmap_init_from_buf(
         g_mctx, image.data(), image.size(), /*placeholder*/ false,

@@ -172,6 +172,12 @@ class ChatViewModel(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     private var job: Job? = null
+    /**
+     * Monotonic turn id. A stopped turn may still be unwinding inside the
+     * blocking JNI call; this keeps its late cancellation/finish from
+     * overwriting the state of a turn the user has already started.
+     */
+    @Volatile private var turnEpoch = 0L
     private var lastUserPrompt: String? = null
     private var lastUserAttachments: List<Attachment> = emptyList()
 
@@ -632,11 +638,31 @@ class ChatViewModel(
     }
 
     fun stop() {
+        // Make Stop feel instant and make the composer usable again. The
+        // native decode loop is blocking, so cancelling the Kotlin Job alone
+        // left the UI in Streaming and the next send went to the queue.
         job?.cancel()
         job = null
+        com.neuron.ai.data.local.LocalEngineLoader.cancelGeneration()
+        cancelQueuedMessage()
+        // Mirror the stop onto the task system immediately. If the user sends
+        // the next message before the old native loop unwinds, its cancellation
+        // handler is skipped (epoch guard) and would otherwise leave the old
+        // task RUNNING forever.
+        val taskToCancel = currentTaskId
+        taskToCancel?.let { id ->
+            viewModelScope.launch(dispatchers.io) {
+                tasks.updateStatus(id, com.neuron.ai.core.task.Task.Status.CANCELLED)
+            }
+        }
+        _generation.value = GenerationState.Idle
+        _activity.value = emptyList()
+        _timeline.value = emptyList()
         // Task CANCELLED status is set inside the turn's cancellation handler,
         // where the scope is already cancelled — safe there via NonCancellable.
-    }    fun retry() {
+    }
+
+    fun retry() {
         val prompt = lastUserPrompt ?: return
         if (_generation.value is GenerationState.Streaming) return
 
@@ -862,6 +888,7 @@ class ChatViewModel(
         /** Local-only: when true, surface the Debug console from the error banner. */
         openDiagnosticsOnFailure: Boolean = false
     ) {
+        val epoch = ++turnEpoch
         // Capability-honest Model for this turn: declared flags + a declared
         // window when the provider has one (cloud estimates from the id,
         // on-device from the GGUF metadata — never a guess).
@@ -1078,26 +1105,33 @@ class ChatViewModel(
         } catch (cancelled: kotlinx.coroutines.CancellationException) {
             // User stopped generation; persist partial text + CANCELLED task
             // inside NonCancellable — the scope is already cancelled here.
-            withContext(kotlinx.coroutines.NonCancellable) {
-                taskId?.let { tasks.updateStatus(it, Task.Status.CANCELLED) }
-                if (assistantBuffer.isNotEmpty()) {
-                    conversations.appendMessage(
-                        conversationId,
-                        Message.Role.ASSISTANT,
-                        assistantBuffer.toString(),
-                        metadata = MessageMetadata(
-                            providerId = configId,
-                            modelId = modelId,
-                            generationMs = System.currentTimeMillis() - started,
-                            agentSteps = cancelStepsSnapshot()
+            // If a NEW turn has already started, this late unwind must not
+            // append a second copy or touch the new turn's UI state.
+            if (epoch == turnEpoch) {
+                withContext(kotlinx.coroutines.NonCancellable) {
+                    taskId?.let { tasks.updateStatus(it, Task.Status.CANCELLED) }
+                    if (assistantBuffer.isNotEmpty()) {
+                        conversations.appendMessage(
+                            conversationId,
+                            Message.Role.ASSISTANT,
+                            assistantBuffer.toString(),
+                            metadata = MessageMetadata(
+                                providerId = configId,
+                                modelId = modelId,
+                                generationMs = System.currentTimeMillis() - started,
+                                agentSteps = cancelStepsSnapshot()
+                            )
                         )
-                    )
+                    }
                 }
+                _generation.value = GenerationState.Idle
+                _activity.value = emptyList()
             }
-            _generation.value = GenerationState.Idle
-            _activity.value = emptyList()
             throw cancelled
         }
+
+        // A stopped turn that finished late must not finalize over the new one.
+        if (epoch != turnEpoch) return
 
         val elapsed = System.currentTimeMillis() - started
 
@@ -1154,6 +1188,7 @@ class ChatViewModel(
     override fun onCleared() {
         if (_generation.value is GenerationState.Streaming || _generation.value is GenerationState.Failed) {
             job?.cancel()
+            com.neuron.ai.data.local.LocalEngineLoader.cancelGeneration()
         }
         // No WebView leaks: the chat's browser session dies with its ViewModel.
         runCatching { browserManager.closeSession(conversationId) }

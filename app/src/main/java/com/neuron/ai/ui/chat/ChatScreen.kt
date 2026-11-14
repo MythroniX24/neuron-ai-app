@@ -166,12 +166,28 @@ fun ChatScreen(
     // First send on a brand-new chat: swap this entry for the real
     // conversation — the SAME ChatScreen composable renders it, so the user
     // never lands on a "different screen" mid-conversation.
-    // Follow the stream: scroll when message count or streaming text changes.
+    // Follow the stream ONLY when the user is already near the bottom. The
+    // old effect animated on every token, which launched a new scroll
+    // animation dozens of times per second and fought the user's finger.
     val streamingText = (generation as? GenerationState.Streaming)?.buffer.orEmpty()
-    LaunchedEffect(messages.size, streamingText.length, activity.size) {
+    LaunchedEffect(messages.size, activity.size) {
         val target = messages.size + if (generation is GenerationState.Streaming) 1 else 0
         if (target > 0) {
-            listState.animateScrollToItem(target - 1)
+            val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
+            if (lastVisible >= target - 3) {
+                listState.animateScrollToItem(target - 1)
+            }
+        }
+    }
+    LaunchedEffect(streamingText.length) {
+        if (streamingText.isNotEmpty()) {
+            val target = messages.size + 1
+            val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
+            if (lastVisible >= target - 3) {
+                // No animation here: a token stream can update many times per
+                // second, and an animated scroll per token IS the jank.
+                listState.scrollToItem(target - 1)
+            }
         }
     }
 
@@ -317,9 +333,10 @@ fun ChatScreen(
                 }
                 remember(message.id) { entranceSeen.add(message.id) }
                 Box(
-                    Modifier
-                        .animateItem()
-                        .messageEntrance(fromEnd = message.role == Message.Role.USER, enabled = animateIn)
+                    Modifier.messageEntrance(
+                        fromEnd = message.role == Message.Role.USER,
+                        enabled = animateIn
+                    )
                 ) {
                     MessageRow(
                         message = message,

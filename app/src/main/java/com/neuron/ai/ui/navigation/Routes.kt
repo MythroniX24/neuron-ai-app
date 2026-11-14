@@ -13,6 +13,7 @@ object Routes {
     const val PROVIDER_EDIT = "provider-edit?providerId={providerId}"
     const val TASKS = "tasks"
     const val LOCAL_AI = "local-ai"
+    const val LOCAL_MODEL_SETTINGS = "local-model-settings/{modelId}"
     const val DEBUG_CONSOLE = "debug-console"
 
     /** When the user arrives here right after a local-model load/runtime failure,
@@ -38,6 +39,8 @@ object Routes {
     }
 
     fun chat(conversationId: String) = "chat/$conversationId"
+
+    fun localModelSettings(modelId: String) = "local-model-settings/$modelId"
 
     fun providerEdit(providerId: String?) =
         if (providerId == null) "provider-edit" else "provider-edit?providerId=$providerId"

@@ -10,6 +10,7 @@ import com.neuron.ai.core.provider.StreamEvent
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.onCompletion
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 
@@ -133,8 +134,8 @@ class LocalAiProvider(
         }
         // Milestone 7: a hot/low-battery device generates fewer tokens per
         // turn, so an answer never runs the phone into a thermal wall.
-        val maxTokens = (request.maxOutputTokens ?: 1024)
-            .coerceAtMost(2048)
+        val maxTokens = (record.maxOutputTokens ?: request.maxOutputTokens ?: 1024)
+            .coerceAtMost(4096)
             .coerceAtMost(repository.maxOutputTokens())
 
         // A 4k-token window and an unbounded transcript do not mix: without
@@ -148,7 +149,9 @@ class LocalAiProvider(
             // prompt the trimmer had already approved.
             contextTokens = LocalEngineLoader.activeContextTokens()
                 ?: request.model.contextWindowTokens
-                ?: LocalModelRouter.effectiveContextTokens(record.contextLength),
+                ?: LocalModelRouter.effectiveContextTokens(
+                    record.contextLimit ?: record.contextLength
+                ),
             maxOutputTokens = maxTokens,
             render = { turns, addAssistant ->
                 LocalEngineLoader.renderWithChatTemplate(turns, addAssistant)
@@ -181,6 +184,11 @@ class LocalAiProvider(
             }
         }
     }.flowOn(Dispatchers.Default)
+        // The JNI generate call is blocking. If the collector is cancelled for
+        // ANY reason (Stop, navigation, ViewModel cleared), tell the native
+        // loop to return after its current token instead of generating the
+        // rest of the answer into a closed channel.
+        .onCompletion { LocalEngineLoader.cancelGeneration() }
 
     /**
      * The most recent image attachment in the conversation — the one the
@@ -249,12 +257,14 @@ class LocalAiProvider(
             // failed Completion instead of crashing.
             throw IllegalStateException((load.exceptionOrNull()?.message ?: "unknown load failure").toString())
         }
-        val maxTokens = (request.maxOutputTokens ?: 1024)
-            .coerceAtMost(2048)
+        val maxTokens = (record.maxOutputTokens ?: request.maxOutputTokens ?: 1024)
+            .coerceAtMost(4096)
             .coerceAtMost(repository.maxOutputTokens())
         val contextTokens = LocalEngineLoader.activeContextTokens()
             ?: request.model.contextWindowTokens
-            ?: LocalModelRouter.effectiveContextTokens(record.contextLength)
+            ?: LocalModelRouter.effectiveContextTokens(
+                record.contextLimit ?: record.contextLength
+            )
         val prompt = ContextTrimmer.fit(
             turns = buildTurns(request.messages, imageMessageHasMarker = false),
             contextTokens = contextTokens,

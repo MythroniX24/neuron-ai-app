@@ -395,6 +395,29 @@ class LocalModelRepository(
 
     // ---- Enable ticks ------------------------------------------------------
 
+    /**
+     * Per-model generation overrides. Null means "use the global default".
+     * Context changes apply at the NEXT load; output length at the next turn.
+     */
+    suspend fun updateGenerationOptions(
+        modelId: String,
+        maxOutputTokens: Int?,
+        contextLimit: Int?
+    ) = withContext(dispatchers.io) {
+        _models.value = _models.value.map {
+            if (it.id == modelId) {
+                it.copy(
+                    maxOutputTokens = maxOutputTokens?.coerceIn(64, 4096),
+                    contextLimit = contextLimit?.coerceIn(
+                        LocalModelRouter.MIN_CONTEXT_TOKENS,
+                        LocalModelRouter.MAX_CONTEXT_TOKENS
+                    )
+                )
+            } else it
+        }
+        persist()
+    }
+
     /** Ticking/unticking reflects in the header switcher immediately. */
     suspend fun setEnabledForChat(modelId: String, enabled: Boolean) = withContext(dispatchers.io) {
         _models.value = _models.value.map {
@@ -612,7 +635,9 @@ class LocalModelRepository(
         val path = File(modelsDir, record.fileName).absolutePath
         // Milestone 6: the GGUF's declared context, capped to what a phone can
         // hold. Milestone 7: threads + GPU filtered through the throttle policy.
-        val contextTokens = LocalModelRouter.effectiveContextTokens(record.contextLength)
+        val contextTokens = LocalModelRouter.effectiveContextTokens(
+            record.contextLimit ?: record.contextLength
+        )
         // Refuse a load the device cannot hold BEFORE anything is allocated.
         // Being killed by the low-memory killer mid-load is exactly what the
         // user experiences as "the app crashes when I load a model": nothing
@@ -690,10 +715,14 @@ class LocalModelRepository(
             val throttle = throttleDecision()
             val result = LocalEngineLoader.benchmarkTokensPerSec(
                 path = File(modelsDir, record.fileName).absolutePath,
-                contextTokens = LocalModelRouter.effectiveContextTokens(record.contextLength),
+                contextTokens = LocalModelRouter.effectiveContextTokens(
+                    record.contextLimit ?: record.contextLength
+                ),
                 threads = throttle.threads,
-                prompt = "Write a short story about a robot who learns to paint.",
-                maxTokens = 128,
+                prompt = "Explain in two short sentences why the sky looks blue.",
+                // A short answer is enough to measure decode speed and keeps
+                // the benchmark from running for minutes on a slow phone.
+                maxTokens = 64,
                 // Benchmark measures the config the user will actually run.
                 useGpu = throttle.allowGpu
             )
@@ -702,7 +731,12 @@ class LocalModelRepository(
             if (previous is LocalLoadState.Ready) {
                 val activeRecord = _models.value.firstOrNull { it.id == previous.modelId }
                 if (activeRecord != null) {
-                    loadEngine(activeRecord)
+                    val restored = loadEngine(activeRecord)
+                    _loadState.value = when (restored) {
+                        is LocalEngineLoader.LoadResult.Success -> previous
+                        is LocalEngineLoader.LoadResult.Failure ->
+                            LocalLoadState.Failed(previous.modelId, restored.reason)
+                    }
                 }
             }
             result

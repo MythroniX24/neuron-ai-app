@@ -313,6 +313,21 @@ class LocalAiViewModel(
         viewModelScope.launch { repository.ensureLoaded(modelId) }
     }
 
+    fun unloadNow() {
+        viewModelScope.launch { repository.unload() }
+    }
+
+    /** Per-model answer-length and context overrides (null = global default). */
+    fun setGenerationOptions(
+        modelId: String,
+        maxOutputTokens: Int?,
+        contextLimit: Int?
+    ) {
+        viewModelScope.launch {
+            repository.updateGenerationOptions(modelId, maxOutputTokens, contextLimit)
+        }
+    }
+
     fun delete(modelId: String) {
         viewModelScope.launch { repository.delete(modelId) }
     }

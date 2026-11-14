@@ -148,6 +148,7 @@ object LocalEngineLoader {
     ): String?
     private external fun nativeTokenize(prompt: String): IntArray
     private external fun nativeCachedTokens(): IntArray
+    private external fun nativeCancelGeneration()
     private external fun nativeGenerateTokens(
         tokens: IntArray,
         maxTokens: Int,
@@ -346,6 +347,16 @@ object LocalEngineLoader {
         return if (exact != null && exact > 0) exact else ContextTrimmer.estimateTokens(prompt)
     }
 
+    /**
+     * Cooperative Stop: asks the active native decode loop to finish after the
+     * token it is currently on. The next [generateStreaming] call clears the
+     * flag while holding the same native mutex, so a new turn cannot overtake
+     * a cancelled loop that is still unwinding.
+     */
+    fun cancelGeneration() {
+        if (nativeLibraryAvailable) runCatching { nativeCancelGeneration() }
+    }
+
     /** Fully unloads the active model (no-op when nothing is loaded). */
     fun unload() {
         if (nativeLibraryAvailable) runCatching { nativeUnload() }
@@ -522,42 +533,55 @@ object LocalEngineLoader {
         maxTokens: Int,
         useGpu: Boolean = false
     ): Result<Double> {
-        val load = load(path, contextTokens, threads, useGpu)
-        if (load is LoadResult.Failure) {
-            val bf = BenchmarkFailure(
-                load.reason,
-                logTail = runCatching { nativeLogTail(200) }.getOrNull()
-            )
-            return Result.failure(
-                RuntimeException(bf.reason)
-            )
+        fun failure(reason: String): Result<Double> {
+            val tail = runCatching { nativeLogTail(200) }.getOrNull()
+            // Keep the engine's own explanation: "Benchmark failed" without
+            // the load/decode error is impossible to act on.
+            val detail = if (tail.isNullOrBlank()) {
+                reason
+            } else {
+                "$reason\n\nllama.cpp log:\n${tail.takeLast(1200)}"
+            }
+            val bf = BenchmarkFailure(reason, logTail = tail)
+            return Result.failure(RuntimeException(detail.ifBlank { bf.reason }))
         }
-        return try {
+
+        fun attempt(gpu: Boolean): Result<Double> {
+            val load = load(path, contextTokens, threads, gpu)
+            if (load is LoadResult.Failure) return failure(load.reason)
+
+            // Benchmark the SAME chat-template shape a real answer uses. A raw
+            // completion prompt made instruct/chat models continue the text or
+            // miss their stop token, which looked like a benchmark failure.
+            val rendered = renderWithChatTemplate(
+                listOf(ChatTemplateRenderer.Turn(
+                    ChatTemplateRenderer.Turn.USER,
+                    prompt
+                )),
+                addAssistant = true
+            )
             val start = System.nanoTime()
             var tokens = 0
-            val result = generateStreaming(prompt, maxTokens) { tokens++ }
-            if (result is GenerationResult.Error) {
-                val bf = BenchmarkFailure(
-                    result.message,
-                    logTail = runCatching { nativeLogTail(200) }.getOrNull()
-                )
-                Result.failure(
-                    RuntimeException(bf.reason)
-                )
-            } else {
-                val seconds = (System.nanoTime() - start) / 1_000_000_000.0
-                if (seconds <= 0.0 || tokens == 0) {
-                    val bf = BenchmarkFailure(
-                        "Benchmark produced no tokens",
-                        logTail = runCatching { nativeLogTail(200) }.getOrNull()
-                    )
-                    Result.failure(
-                        RuntimeException(bf.reason)
-                    )
-                } else {
-                    Result.success(tokens / seconds)
-                }
+            val result = generateStreaming(rendered, maxTokens) { tokens++ }
+            if (result is GenerationResult.Error) return failure(result.message)
+
+            val seconds = (System.nanoTime() - start) / 1_000_000_000.0
+            if (seconds <= 0.0 || tokens == 0) {
+                return failure("Benchmark produced no tokens")
             }
+            return Result.success(tokens / seconds)
+        }
+
+        return try {
+            var result = attempt(useGpu)
+            // A GPU path that loads but fails during decode is still a failed
+            // benchmark. Retry once on the CPU so the user gets a real number
+            // and a clear note instead of a dead end.
+            if (result.isFailure && useGpu) {
+                unload()
+                result = attempt(false)
+            }
+            result
         } finally {
             unload()
         }
