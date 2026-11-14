@@ -110,7 +110,9 @@ object LocalModelRouter {
         val declared = record.contextLength?.toInt()
         // The user's per-model context override wins for the ACTUAL load; the
         // GGUF's declared length is still reported for context.
-        val context = effectiveContextTokens(record.contextLimit ?: record.contextLength)
+        val context = effectiveContextTokens(
+            record.contextLimit?.toLong() ?: record.contextLength
+        )
 
         val declaredVision = architectureSupportsVision(record.architecture)
         val vision = declaredVision && hasProjector

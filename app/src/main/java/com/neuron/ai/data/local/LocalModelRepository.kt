@@ -636,7 +636,7 @@ class LocalModelRepository(
         // Milestone 6: the GGUF's declared context, capped to what a phone can
         // hold. Milestone 7: threads + GPU filtered through the throttle policy.
         val contextTokens = LocalModelRouter.effectiveContextTokens(
-            record.contextLimit ?: record.contextLength
+            record.contextLimit?.toLong() ?: record.contextLength
         )
         // Refuse a load the device cannot hold BEFORE anything is allocated.
         // Being killed by the low-memory killer mid-load is exactly what the
@@ -716,7 +716,7 @@ class LocalModelRepository(
             val result = LocalEngineLoader.benchmarkTokensPerSec(
                 path = File(modelsDir, record.fileName).absolutePath,
                 contextTokens = LocalModelRouter.effectiveContextTokens(
-                    record.contextLimit ?: record.contextLength
+                    record.contextLimit?.toLong() ?: record.contextLength
                 ),
                 threads = throttle.threads,
                 prompt = "Explain in two short sentences why the sky looks blue.",

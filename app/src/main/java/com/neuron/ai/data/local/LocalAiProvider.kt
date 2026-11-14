@@ -150,7 +150,7 @@ class LocalAiProvider(
             contextTokens = LocalEngineLoader.activeContextTokens()
                 ?: request.model.contextWindowTokens
                 ?: LocalModelRouter.effectiveContextTokens(
-                    record.contextLimit ?: record.contextLength
+                    record.contextLimit?.toLong() ?: record.contextLength
                 ),
             maxOutputTokens = maxTokens,
             render = { turns, addAssistant ->
@@ -263,7 +263,7 @@ class LocalAiProvider(
         val contextTokens = LocalEngineLoader.activeContextTokens()
             ?: request.model.contextWindowTokens
             ?: LocalModelRouter.effectiveContextTokens(
-                record.contextLimit ?: record.contextLength
+                record.contextLimit?.toLong() ?: record.contextLength
             )
         val prompt = ContextTrimmer.fit(
             turns = buildTurns(request.messages, imageMessageHasMarker = false),
