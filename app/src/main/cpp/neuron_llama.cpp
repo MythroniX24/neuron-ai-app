@@ -520,6 +520,10 @@ int decodeRange(llama_context *ctx, const std::vector<llama_token> &tokens, int 
     if (batch.token == nullptr) {
         return 1;
     }
+    // llama_batch_init() initialises n_tokens to 0, NOT to the allocation
+    // size. Leaving it unset makes llama_decode reject every batch with
+    // "invalid input batch" (-1) even though the token arrays are correct.
+    batch.n_tokens = count;
     for (int i = 0; i < count; ++i) {
         batch.token[i] = tokens[from + i];
         batch.pos[i] = from + i;
@@ -542,6 +546,8 @@ int decodeToken(llama_context *ctx, llama_token token, int pos) {
     if (batch.token == nullptr) {
         return 1;
     }
+    // Same trap as decodeRange(): llama_batch_init() leaves n_tokens at 0.
+    batch.n_tokens = 1;
     batch.token[0] = token;
     batch.pos[0] = pos;
     batch.n_seq_id[0] = 1;

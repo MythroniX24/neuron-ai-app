@@ -40,6 +40,8 @@ class LocalModelRepository(
     val modelsDir: File = File(filesDir, "local-models").apply { mkdirs() }
 
     private val manifestFile = File(filesDir, "local-models.json")
+    /** One-time marker for enabling pre-existing models in the chat switcher. */
+    private val chatEnabledMigrationFile = File(filesDir, "local-models-chat-enabled-v2")
     /** Performance prefs (GPU on/off, CPU threads) — tiny JSON, defaults below. */
     private val perfPrefsFile = File(filesDir, "local-perf.json")
 
@@ -107,7 +109,7 @@ class LocalModelRepository(
     // ---- Manifest ----------------------------------------------------------
 
     private fun loadManifest() {
-        _models.value = try {
+        var loaded = try {
             if (manifestFile.exists()) {
                 json.decodeFromString<List<LocalModelRecord>>(manifestFile.readText())
             } else {
@@ -117,6 +119,20 @@ class LocalModelRepository(
             logger?.w("LocalModels", "Manifest unreadable — starting empty", t)
             emptyList()
         }
+        // Older builds registered downloads with enabledForChat=false, so a
+        // successfully downloaded model never appeared in the chat switcher.
+        // Migrate once: if NOTHING was explicitly enabled, turn the existing
+        // models on. A user with at least one enabled model keeps their choices.
+        var migrated = false
+        if (!chatEnabledMigrationFile.exists()) {
+            if (loaded.isNotEmpty() && loaded.none { it.enabledForChat }) {
+                loaded = loaded.map { it.copy(enabledForChat = true) }
+                migrated = true
+            }
+            runCatching { chatEnabledMigrationFile.writeText("1") }
+        }
+        _models.value = loaded
+        if (migrated) persist()
     }
 
     private fun persist() {
@@ -241,7 +257,10 @@ class LocalModelRepository(
                     blockCount = info.blockCount,
                     source = LocalModelRecord.SOURCE_IMPORT,
                     importedAtEpochMs = System.currentTimeMillis(),
-                    supportsTools = info.declaresToolCalling
+                    supportsTools = info.declaresToolCalling,
+                    // A freshly imported model is immediately usable in chat;
+                    // the Settings checkbox can still disable it later.
+                    enabledForChat = true
                 )
                 // Projectors are companions, not models — register them on disk
                 // only, so they never show up as loadable models.
@@ -319,7 +338,8 @@ class LocalModelRepository(
                     blockCount = info.blockCount,
                     source = LocalModelRecord.SOURCE_IMPORT,
                     importedAtEpochMs = System.currentTimeMillis(),
-                    supportsTools = info.declaresToolCalling
+                    supportsTools = info.declaresToolCalling,
+                    enabledForChat = true
                 )
                 // Projectors are companions, not models — copy them on disk
                 // but never register them as loadable models.
@@ -363,7 +383,10 @@ class LocalModelRepository(
                 blockCount = info.blockCount,
                 source = source,
                 importedAtEpochMs = System.currentTimeMillis(),
-                supportsTools = info.declaresToolCalling
+                supportsTools = info.declaresToolCalling,
+                // Download completion must make the model selectable without
+                // a second trip to Settings to find the Chat tick.
+                enabledForChat = true
             )
             _models.value = _models.value + record
             persist()

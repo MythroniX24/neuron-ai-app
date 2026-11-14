@@ -5,6 +5,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -27,6 +29,7 @@ import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.Memory
 import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.Switch
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
@@ -104,6 +107,7 @@ fun LocalAiScreen(
     }
 
     var deleteTarget by remember { mutableStateOf<LocalModelRecord?>(null) }
+    var settingsTarget by remember { mutableStateOf<LocalModelRecord?>(null) }
     var variantTarget by remember {
         mutableStateOf<VariantTarget?>(null)
     }
@@ -222,6 +226,7 @@ fun LocalAiScreen(
                         onLoad = { viewModel.loadNow(model.id) },
                         onBenchmark = { viewModel.benchmark(model.id) },
                         onDelete = { deleteTarget = model },
+                        onSettings = { settingsTarget = model },
                         formatBytes = viewModel::formatBytes
                     )
                 }
@@ -561,6 +566,189 @@ fun LocalAiScreen(
             }
         )
     }
+
+    // Per-model settings: everything that affects THIS model lives here, so a
+    // downloaded model is not a dead card that only offers Load/Benchmark.
+    settingsTarget?.let { target ->
+        val current = state.models.firstOrNull { it.id == target.id } ?: target
+        val load = state.loadState
+        ModelSettingsDialog(
+            model = current,
+            state = state,
+            visionReady = viewModel.visionReady(current),
+            routing = viewModel.routingRuleFor(current.id),
+            isActive = load is LocalLoadState.Ready && load.modelId == current.id,
+            isLoading = load is LocalLoadState.Loading && load.modelId == current.id,
+            benchmarking = state.benchmarkingId == current.id,
+            onDismiss = { settingsTarget = null },
+            onToggleEnabled = { viewModel.setEnabled(current.id, it) },
+            onRouting = { kind, enabled ->
+                viewModel.setRoutingRule(current.id, kind, enabled)
+            },
+            onUseGpu = viewModel::setUseGpu,
+            onCpuThreads = viewModel::setCpuThreads,
+            onLoad = { viewModel.loadNow(current.id) },
+            onBenchmark = { viewModel.benchmark(current.id) },
+            formatBytes = viewModel::formatBytes
+        )
+    }
+}
+
+/**
+ * All settings that apply to one downloaded/imported model. Global prefs
+ * (GPU, CPU threads) are exposed here too because they change how THIS model
+ * will load; the repository reloads the active model when they change.
+ */
+@Composable
+private fun ModelSettingsDialog(
+    model: LocalModelRecord,
+    state: LocalAiUiState,
+    visionReady: Boolean,
+    routing: ModelRoutingRule,
+    isActive: Boolean,
+    isLoading: Boolean,
+    benchmarking: Boolean,
+    onDismiss: () -> Unit,
+    onToggleEnabled: (Boolean) -> Unit,
+    onRouting: (LocalTurnKind, Boolean) -> Unit,
+    onUseGpu: (Boolean) -> Unit,
+    onCpuThreads: (Int) -> Unit,
+    onLoad: () -> Unit,
+    onBenchmark: () -> Unit,
+    formatBytes: (Long) -> String
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("${model.displayName} settings") },
+        text = {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(Spacing.sm)
+            ) {
+                Text(
+                    listOf(
+                        formatBytes(model.sizeBytes),
+                        model.quantization ?: "unknown quant",
+                        model.contextLength?.let { "$it ctx" } ?: "ctx n/a",
+                        model.architecture ?: "arch n/a"
+                    ).joinToString(" · "),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Enable for chat", style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            "Show this model in the top-bar model selector",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = model.enabledForChat,
+                        onCheckedChange = onToggleEnabled
+                    )
+                }
+
+                HorizontalDivider()
+                Text(
+                    "Use this model for",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(Spacing.xs)) {
+                    RoutingToggle("Text", routing.text) {
+                        onRouting(LocalTurnKind.TEXT, !routing.text)
+                    }
+                    RoutingToggle("Tools", routing.tools) {
+                        onRouting(LocalTurnKind.TOOLS, !routing.tools)
+                    }
+                    RoutingToggle(
+                        label = "Vision",
+                        active = routing.vision,
+                        enabled = visionReady
+                    ) { onRouting(LocalTurnKind.VISION, !routing.vision) }
+                }
+                Text(
+                    if (visionReady) "Vision projector detected"
+                    else "No mmproj projector — images are refused by this model",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (visionReady) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                HorizontalDivider()
+                Text(
+                    "Performance",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("GPU acceleration (Vulkan)", style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            when {
+                                !state.gpuAvailable -> "Not available on this device/build — CPU is used"
+                                state.gpuThrottled -> "Paused while the device is hot or the battery is low"
+                                state.useGpu -> "Layers run on the GPU; CPU fallback if it fails"
+                                else -> "Disabled — everything runs on the CPU"
+                            },
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = state.useGpu,
+                        enabled = state.gpuAvailable,
+                        onCheckedChange = onUseGpu
+                    )
+                }
+                Text(
+                    if (state.cpuThreads == 0) "CPU threads: Auto"
+                    else "CPU threads: ${state.cpuThreads}",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                Slider(
+                    value = state.cpuThreads.toFloat(),
+                    onValueChange = { onCpuThreads(it.toInt()) },
+                    valueRange = 0f..8f,
+                    steps = 7
+                )
+                if (state.effectiveThreads > 0) {
+                    Text(
+                        "Next answer: ${state.effectiveThreads} thread(s)" +
+                            if (state.gpuThrottled) ", GPU off" else "",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+
+                HorizontalDivider()
+                Text(
+                    "Context window: ${model.contextLength ?: "not declared"} tokens" +
+                        " (engine caps it at 4096)",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                Row(horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+                    TextButton(
+                        onClick = onLoad,
+                        enabled = !isActive && !isLoading
+                    ) {
+                        Text(if (isActive) "Loaded" else if (isLoading) "Loading…" else "Load now")
+                    }
+                    TextButton(onClick = onBenchmark, enabled = !benchmarking) {
+                        Text(if (benchmarking) "Running…" else "Benchmark")
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("Done") }
+        }
+    )
 }
 
 /** Quantization picker target: one repo + its GGUF variants. */
@@ -718,6 +906,7 @@ private fun ModelCard(
     onLoad: () -> Unit,
     onBenchmark: () -> Unit,
     onDelete: () -> Unit,
+    onSettings: () -> Unit,
     formatBytes: (Long) -> String
 ) {
     val isActive = loadState is LocalLoadState.Ready && loadState.modelId == model.id
@@ -765,6 +954,12 @@ private fun ModelCard(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Checkbox(checked = enabled, onCheckedChange = onToggleEnabled)
+                    IconButton(onClick = onSettings) {
+                        Icon(
+                            Icons.Outlined.Settings,
+                            contentDescription = "Model settings"
+                        )
+                    }
                 }
             }
 

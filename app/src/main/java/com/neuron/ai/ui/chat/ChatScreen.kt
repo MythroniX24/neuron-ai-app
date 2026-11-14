@@ -718,7 +718,8 @@ private fun ChatTopBar(
                                     ) {
                                         Column(Modifier.weight(1f)) {
                                             Text(
-                                                option.modelId.removePrefix("local-"),
+                                                option.displayName
+                                                    ?: option.modelId.removePrefix("local-"),
                                                 style = MaterialTheme.typography.bodyMedium,
                                                 maxLines = 1,
                                                 overflow = TextOverflow.Ellipsis

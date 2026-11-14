@@ -41,7 +41,9 @@ import kotlinx.coroutines.withContext
 data class ModelOption(
     val providerId: String,
     val providerName: String,
-    val modelId: String
+    val modelId: String,
+    /** Human-readable model name (local models); null for cloud models. */
+    val displayName: String? = null
 )
 
 /** Streaming state of the current assistant turn. */
@@ -196,7 +198,12 @@ class ChatViewModel(
                 ids.map { ModelOption(config.id, config.displayName, it) }
             }
             val local = locals.filter { it.enabledForChat }.map {
-                ModelOption(LOCAL_PROVIDER_ID, "On-device", it.id)
+                ModelOption(
+                    providerId = LOCAL_PROVIDER_ID,
+                    providerName = "On-device",
+                    modelId = it.id,
+                    displayName = it.displayName
+                )
             }
             cloud + local
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())

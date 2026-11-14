@@ -58,6 +58,8 @@ class LocalModelRepositoryImportTest {
         assertEquals(2048L, record.contextLength)
         assertEquals(22L, record.blockCount)
         assertEquals(LocalModelRecord.SOURCE_IMPORT, record.source)
+        // A successful import must be immediately selectable in chat.
+        assertTrue(record.enabledForChat)
         assertEquals(listOf(record), repo.models.value)
 
         // The model really landed inside the isolated models directory.
