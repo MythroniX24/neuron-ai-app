@@ -84,6 +84,15 @@ sealed class AgentEvent {
      */
     data class IntermediateMessage(val text: String) : AgentEvent()
 
+    /**
+     * A structured recommendation payload the native UI should render as
+     * rich cards instead of Markdown. Emitted only after the UI tool has
+     * parsed and validated the model's JSON.
+     */
+    data class RichContent(
+        val content: com.neuron.ai.core.conversation.RichRecommendationSet
+    ) : AgentEvent()
+
     data class TextDelta(val text: String) : AgentEvent()
 
     /**

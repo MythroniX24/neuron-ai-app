@@ -86,7 +86,13 @@ class ToolUsingAgent(
                     "ATTACHMENTS: The current user message may carry files. Text-like files are " +
                     "flattened into the user text as \u3010FILE\u3011 blocks — treat that content as " +
                     "REAL file content and answer about it directly. Images arrive as vision " +
-                    "input — describe/analyse what is actually visible."
+                    "input — describe/analyse what is actually visible.\n" +
+                    "RICH RECOMMENDATIONS: When the user asks for recommendations, comparisons or " +
+                    "a list of distinct real items that have images/descriptions/links (movies, " +
+                    "products, books, tools, repos, places, recipes), call ui.rich_items with " +
+                    "structured JSON instead of writing the list in Markdown. Never invent image " +
+                    "or source URLs. Keep the final text to a short intro/closing note. For " +
+                    "ordinary questions, answer normally without calling it."
             } else {
                 "You are Neuron, a helpful on-device AI assistant. Answer the user's " +
                     "message directly, clearly and concisely. Use Markdown when it helps. " +
@@ -471,6 +477,17 @@ class ToolUsingAgent(
                     is com.neuron.ai.core.agent.ToolResult.TimedOut -> result.message
                     is com.neuron.ai.core.agent.ToolResult.Denied -> result.message
                 }
+                // The UI tool carries structured cards, not just result text:
+                // emit the validated payload so the ViewModel can render it
+                // live and persist it onto the assistant message.
+                if (call.toolId == com.neuron.ai.core.conversation.RichItemsParser.TOOL_ID &&
+                    result is com.neuron.ai.core.agent.ToolResult.Success
+                ) {
+                    com.neuron.ai.core.conversation.RichItemsParser
+                        .parse(call.argumentsJson)
+                        ?.let { send(AgentEvent.RichContent(it)) }
+                }
+
                 send(
                     AgentEvent.ActivityUpdated(
                         activity.copy(

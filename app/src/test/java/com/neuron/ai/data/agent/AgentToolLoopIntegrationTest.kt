@@ -15,6 +15,7 @@ import com.neuron.ai.core.provider.StreamEvent
 import com.neuron.ai.core.provider.ToolSpec
 import com.neuron.ai.data.permissions.SessionPermissionManager
 import com.neuron.ai.data.tool.InMemoryToolRegistry
+import com.neuron.ai.data.tool.RichItemsTool
 import com.neuron.ai.data.tool.SafeTools
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.Flow
@@ -96,6 +97,7 @@ class AgentToolLoopIntegrationTest {
         val registry = InMemoryToolRegistry()
         registry.register(SafeTools.Calculator())
         registry.register(SafeTools.CurrentTime())
+        registry.register(RichItemsTool())
         val executor = DefaultToolExecutor(registry, permissions, logger = null, maxRetries = 0)
         val agent = ToolUsingAgent(
             provider = provider,
@@ -141,6 +143,34 @@ class AgentToolLoopIntegrationTest {
         // Final response surfaced as Finished.
         val finished = events.filterIsInstance<AgentEvent.Finished>().single()
         assertEquals("The answer is 42.", finished.summary)
+    }
+
+    @Test
+    fun `rich items tool emits structured cards and a final note`() = runTest {
+        val provider = ScriptedProvider()
+        provider.script.add(
+            toolRequestEvent(
+                "ui.rich_items",
+                """{"title":"Your picks","intro":"Two options.","items":[{"title":"A"},{"title":"B"}]}"""
+            )
+        )
+        provider.script.add(StreamEvent.Delta("These are my top two picks."))
+
+        val (agent, _) = buildAgent(provider)
+        val events = withTimeout(5_000) {
+            collect(agent, AgentGoal(instruction = "recommend two things", conversationId = "c1"))
+        }
+
+        val rich = events.filterIsInstance<AgentEvent.RichContent>().single()
+        assertEquals("Your picks", rich.content.title)
+        assertEquals(listOf("A", "B"), rich.content.items.map { it.title })
+        assertEquals(
+            "These are my top two picks.",
+            events.filterIsInstance<AgentEvent.Finished>().single().summary
+        )
+        // The tool result tells the model the cards are already visible.
+        val toolRow = provider.requests[1].filter { it.role == ChatMessage.Role.TOOL }.single()
+        assertTrue(toolRow.content.contains("Rendered 2 recommendation card"))
     }
 
     @Test

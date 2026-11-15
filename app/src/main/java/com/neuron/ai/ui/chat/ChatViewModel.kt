@@ -160,6 +160,12 @@ class ChatViewModel(
     private val _timeline = MutableStateFlow<List<com.neuron.ai.core.conversation.AgentStepRecord>>(emptyList())
     val timeline: StateFlow<List<com.neuron.ai.core.conversation.AgentStepRecord>> = _timeline.asStateFlow()
 
+    /** Structured cards emitted by the ui.rich_items tool during this turn. */
+    private val _liveRichRecommendations =
+        MutableStateFlow<List<com.neuron.ai.core.conversation.RichRecommendationSet>>(emptyList())
+    val liveRichRecommendations: StateFlow<List<com.neuron.ai.core.conversation.RichRecommendationSet>> =
+        _liveRichRecommendations.asStateFlow()
+
     /** Wall-clock time of the ACTIVE turn; the timer label reads this. */
     private val _turnElapsedMs = MutableStateFlow(0L)
     val turnElapsedMs: StateFlow<Long> = _turnElapsedMs.asStateFlow()
@@ -963,6 +969,7 @@ class ChatViewModel(
         // The user's message is already in the conversation history.
         _activity.value = emptyList()
         _timeline.value = emptyList()
+        _liveRichRecommendations.value = emptyList()
         // The routing resolution is the FIRST timeline row: which model runs,
         // with what capabilities, and what was degraded (incl. live thermal
         // throttle). It persists with the answer, so the transcript explains
@@ -980,6 +987,8 @@ class ChatViewModel(
         // disappears immediately). Snapshot it FIRST: the persisted assistant
         // message must still carry the Thought/tool rows.
         var finishedSteps: List<AgentStepRecord> = emptyList()
+        var finishedRich =
+            emptyList<com.neuron.ai.core.conversation.RichRecommendationSet>()
 
         val agent = agentFactory(
             provider,
@@ -1064,6 +1073,15 @@ class ChatViewModel(
                             }
                         }
 
+                        is AgentEvent.RichContent -> {
+                            // One set per tool call; replace an earlier identical
+                            // set so a retried call cannot render twice.
+                            _liveRichRecommendations.value =
+                                (_liveRichRecommendations.value.filterNot {
+                                    it.title == event.content.title
+                                } + event.content)
+                        }
+
                         is AgentEvent.TextDelta -> {
                             assistantBuffer.append(event.text)
                             _generation.value = GenerationState.Streaming(assistantBuffer.toString())
@@ -1104,12 +1122,26 @@ class ChatViewModel(
                         }
 
                         is AgentEvent.Finished -> {
+                            // Fallback for models that cannot call the UI tool:
+                            // a fenced recommendation JSON block is removed from
+                            // the visible answer and rendered as cards instead.
+                            var summary = event.summary
+                            if (_liveRichRecommendations.value.isEmpty()) {
+                                com.neuron.ai.core.conversation.RichItemsParser
+                                    .extractFenced(summary)
+                                    ?.let { (set, visible) ->
+                                        _liveRichRecommendations.value = listOf(set)
+                                        summary = visible
+                                    }
+                            }
                             // Never shrink an already-streamed buffer: a
                             // transient empty model turn or a stray Finished
                             // must not erase partial output the user saw.
-                            if (event.summary.length > assistantBuffer.length) {
-                                assistantBuffer = StringBuilder(event.summary)
+                            if (summary.length > assistantBuffer.length) {
+                                assistantBuffer = StringBuilder(summary)
                             }
+                            finishedRich = _liveRichRecommendations.value
+                            _liveRichRecommendations.value = emptyList()
                             _generation.value = GenerationState.Streaming(assistantBuffer.toString())
                             // Snapshot before clearing — the assistant message
                             // metadata is written after collection completes.
@@ -1148,7 +1180,7 @@ class ChatViewModel(
                 stopElapsedClock(started)
                 withContext(kotlinx.coroutines.NonCancellable) {
                     taskId?.let { tasks.updateStatus(it, Task.Status.CANCELLED) }
-                    if (assistantBuffer.isNotEmpty()) {
+                    if (assistantBuffer.isNotEmpty() || _liveRichRecommendations.value.isNotEmpty()) {
                         conversations.appendMessage(
                             conversationId,
                             Message.Role.ASSISTANT,
@@ -1157,13 +1189,16 @@ class ChatViewModel(
                                 providerId = configId,
                                 modelId = modelId,
                                 generationMs = System.currentTimeMillis() - started,
-                                agentSteps = finishedSteps.ifEmpty { cancelStepsSnapshot() }
+                                agentSteps = finishedSteps.ifEmpty { cancelStepsSnapshot() },
+                                richRecommendations = _liveRichRecommendations.value
+                                    .ifEmpty { finishedRich }
                             )
                         )
                     }
                 }
                 _generation.value = GenerationState.Idle
                 _activity.value = emptyList()
+                _liveRichRecommendations.value = emptyList()
             }
             throw cancelled
         }
@@ -1179,7 +1214,7 @@ class ChatViewModel(
                 streamError!!,
                 openDiagnostics = openDiagnosticsOnFailure
             )
-        } else if (assistantBuffer.isNotBlank()) {
+        } else if (assistantBuffer.isNotBlank() || finishedRich.isNotEmpty()) {
             conversations.appendMessage(
                 conversationId,
                 Message.Role.ASSISTANT,
@@ -1188,7 +1223,8 @@ class ChatViewModel(
                     providerId = configId,
                     modelId = modelId,
                     generationMs = elapsed,
-                    agentSteps = finishedSteps.ifEmpty { persistableSteps() }
+                    agentSteps = finishedSteps.ifEmpty { persistableSteps() },
+                    richRecommendations = finishedRich
                 )
             )
         } else {
@@ -1199,6 +1235,7 @@ class ChatViewModel(
         }
 
         _activity.value = emptyList()
+        _liveRichRecommendations.value = emptyList()
         // Keep the finished timeline visible until the next turn begins.
         if (_generation.value is GenerationState.Streaming) {
             _generation.value = GenerationState.Idle

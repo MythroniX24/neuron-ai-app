@@ -1,6 +1,10 @@
 package com.neuron.ai.data.db
 
 import com.neuron.ai.core.conversation.Attachment
+import com.neuron.ai.core.conversation.MessageMetadata
+import com.neuron.ai.core.conversation.RichItem
+import com.neuron.ai.core.conversation.RichItemLink
+import com.neuron.ai.core.conversation.RichRecommendationSet
 import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -39,6 +43,36 @@ class MessageCodecTest {
         val decoded = codec.decodeAttachments(encoded)
 
         assertEquals(attachments, decoded)
+    }
+
+    @Test
+    fun `rich recommendation cards survive message metadata round trip`() {
+        val metadata = MessageMetadata(
+            providerId = "prov-1",
+            modelId = "model-1",
+            richRecommendations = listOf(
+                RichRecommendationSet(
+                    title = "Your picks",
+                    intro = "Three useful tools.",
+                    items = listOf(
+                        RichItem(
+                            title = "Neuron",
+                            year = "2026",
+                            meta = "Android AI app",
+                            badge = "Best match",
+                            imageUrl = "https://example.com/icon.png",
+                            links = listOf(
+                                RichItemLink("Website", "https://example.com")
+                            )
+                        )
+                    )
+                )
+            )
+        )
+
+        val decoded = codec.decodeMetadata(codec.encodeMetadata(metadata))
+
+        assertEquals(metadata, decoded)
     }
 
     @Test

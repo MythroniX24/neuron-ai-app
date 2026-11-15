@@ -77,7 +77,9 @@ data class MessageMetadata(
     val toolCallId: String? = null,
     val toolName: String? = null,
     /** Steps of the agent turn that produced this assistant message. */
-    val agentSteps: List<AgentStepRecord> = emptyList()
+    val agentSteps: List<AgentStepRecord> = emptyList(),
+    /** Structured recommendation cards produced by a UI tool call. */
+    val richRecommendations: List<RichRecommendationSet> = emptyList()
 )
 
 /** A chat conversation. */

@@ -154,6 +154,7 @@ fun ChatScreen(
     val messages by viewModel.messages.collectAsStateWithLifecycle()
     val generation by viewModel.generationState.collectAsStateWithLifecycle()
     val liveRun by viewModel.liveAgentRun.collectAsStateWithLifecycle()
+    val liveRichRecommendations by viewModel.liveRichRecommendations.collectAsStateWithLifecycle()
     val draftAttachments by viewModel.draftAttachments.collectAsStateWithLifecycle()
     val attachmentNotice by viewModel.attachmentNotice.collectAsStateWithLifecycle()
     val queuedMessage by viewModel.queuedMessage.collectAsStateWithLifecycle()
@@ -375,7 +376,8 @@ fun ChatScreen(
                     LiveAgentTurn(
                         run = liveRun,
                         buffer = gen.buffer,
-                        responseSpacing = responseSpacing
+                        responseSpacing = responseSpacing,
+                        richRecommendations = liveRichRecommendations
                     )
                 }
 
@@ -1108,6 +1110,15 @@ private fun MessageRow(
             ) {
                 MarkdownText(markdown = message.content, spacing = responseSpacing)
             }
+            message.metadata?.richRecommendations
+                ?.takeIf { it.isNotEmpty() }
+                ?.let { sets ->
+                    RichRecommendationSection(
+                        recommendations = sets,
+                        responseSpacing = responseSpacing,
+                        modifier = Modifier.padding(top = Spacing.md)
+                    )
+                }
         }
 
         Message.Role.SYSTEM -> Unit
@@ -1123,7 +1134,8 @@ private fun MessageRow(
 private fun LiveAgentTurn(
     run: AgentRunState?,
     buffer: String,
-    responseSpacing: ResponseSpacing
+    responseSpacing: ResponseSpacing,
+    richRecommendations: List<com.neuron.ai.core.conversation.RichRecommendationSet> = emptyList()
 ) {
     var expanded by remember { mutableStateOf(true) }
     Column(Modifier.fillMaxWidth()) {
@@ -1144,6 +1156,13 @@ private fun LiveAgentTurn(
             )
         }
         StreamingBubble(buffer.ifEmpty { "…" }, responseSpacing)
+        if (richRecommendations.isNotEmpty()) {
+            RichRecommendationSection(
+                recommendations = richRecommendations,
+                responseSpacing = responseSpacing,
+                modifier = Modifier.padding(top = Spacing.md)
+            )
+        }
     }
 }
 

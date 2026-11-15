@@ -224,6 +224,9 @@ class AppContainer(context: Context) {
                 com.neuron.ai.data.tool.WebTools.WebSearch(searchOrchestrator, pageFetcher)
             )
             toolRegistry.register(com.neuron.ai.data.tool.WebTools.WebRead(pageFetcher))
+            // Universal rich recommendation cards: available in every chat,
+            // independent of terminal/browser/workspace capabilities.
+            toolRegistry.register(com.neuron.ai.data.tool.RichItemsTool())
             memoryTools.forEach { toolRegistry.register(it) }
         }
     }
