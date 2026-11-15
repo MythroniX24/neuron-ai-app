@@ -357,10 +357,14 @@ class ChatViewModel(
         .map { it?.terminalEnabled ?: false }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
-    /** Browser capability state of THIS conversation (Milestone 3). */
+    /**
+     * Browser capability state of THIS conversation. Defaults ON so the sheet
+     * never flashes OFF while the conversation is still loading, and so new
+     * chats really start with web access enabled.
+     */
     val browserEnabled: StateFlow<Boolean> = _conversation
-        .map { it?.browserEnabled ?: false }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+        .map { it?.browserEnabled ?: true }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), true)
 
     /** Creates a workspace, binds it to this chat and returns its id. */
     fun createWorkspace(name: String, onCreated: (String) -> Unit) {

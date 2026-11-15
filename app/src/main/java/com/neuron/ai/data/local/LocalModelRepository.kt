@@ -418,6 +418,26 @@ class LocalModelRepository(
         persist()
     }
 
+    /**
+     * Per-model behavior: extra system instructions and a reply-length style.
+     * These are prompt-side settings (the engine exposes no sampler knobs), so
+     * they apply on the very next turn without reloading the model.
+     */
+    suspend fun updateBehaviorOptions(
+        modelId: String,
+        customInstructions: String,
+        replyStyle: String
+    ) = withContext(dispatchers.io) {
+        val style = LocalReplyStyle.fromNameOrDefault(replyStyle).name
+        val clean = customInstructions.trim().take(LocalPromptOptions.MAX_INSTRUCTIONS_CHARS)
+        _models.value = _models.value.map {
+            if (it.id == modelId) {
+                it.copy(customInstructions = clean, replyStyle = style)
+            } else it
+        }
+        persist()
+    }
+
     /** Ticking/unticking reflects in the header switcher immediately. */
     suspend fun setEnabledForChat(modelId: String, enabled: Boolean) = withContext(dispatchers.io) {
         _models.value = _models.value.map {

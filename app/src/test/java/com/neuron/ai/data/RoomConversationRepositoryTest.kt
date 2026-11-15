@@ -15,6 +15,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -169,6 +170,20 @@ class RoomConversationRepositoryTest {
         assertEquals("My chat", repo.getConversation(conversation.id)?.title)
         assertEquals("New chat", repo.getConversation(blank.id)?.title)
         assertEquals(2, repo.conversations.first().size)
+    }
+
+    @Test
+    fun `new conversations enable browser access by default and keep a manual opt-out`() = runTest {
+        val repo = repository()
+        val conversation = repo.createConversation("Web chat")
+
+        assertTrue(repo.getConversation(conversation.id)!!.browserEnabled)
+
+        repo.setConversationBrowser(conversation.id, false)
+        assertFalse(repo.getConversation(conversation.id)!!.browserEnabled)
+
+        repo.setConversationBrowser(conversation.id, true)
+        assertTrue(repo.getConversation(conversation.id)!!.browserEnabled)
     }
 
     @Test

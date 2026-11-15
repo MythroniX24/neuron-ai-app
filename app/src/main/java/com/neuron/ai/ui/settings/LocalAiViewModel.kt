@@ -328,6 +328,13 @@ class LocalAiViewModel(
         }
     }
 
+    /** Per-model custom instructions + reply style (applies to the next turn). */
+    fun updateBehavior(modelId: String, instructions: String, replyStyle: String) {
+        viewModelScope.launch {
+            repository.updateBehaviorOptions(modelId, instructions, replyStyle)
+        }
+    }
+
     fun delete(modelId: String) {
         viewModelScope.launch { repository.delete(modelId) }
     }

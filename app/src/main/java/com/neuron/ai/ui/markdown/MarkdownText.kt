@@ -28,11 +28,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.isSp
 import androidx.compose.ui.unit.sp
 import com.google.accompanist.drawablepainter.rememberDrawablePainter
+import com.neuron.ai.core.settings.ResponseSpacing
 import com.neuron.ai.ui.theme.Radius
 import com.neuron.ai.ui.theme.Spacing
 
@@ -44,16 +47,31 @@ import com.neuron.ai.ui.theme.Spacing
 @Composable
 fun MarkdownText(
     markdown: String,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    /** User-controlled spacing between every line/block of an AI reply. */
+    spacing: ResponseSpacing = ResponseSpacing.COMFORTABLE
 ) {
     val blocks = remember(markdown) { MarkdownParser.parse(markdown) }
-    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
-        blocks.forEach { block -> BlockView(block) }
+    Column(
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(Spacing.sm * spacing.blockGapScale)
+    ) {
+        blocks.forEach { block -> BlockView(block, spacing) }
+    }
+}
+
+/** Scales a design-system style's existing line height, never its font size. */
+private fun TextStyle.withResponseSpacing(spacing: ResponseSpacing): TextStyle {
+    val base = lineHeight
+    return if (base.isSp) {
+        copy(lineHeight = (base.value * spacing.lineHeightScale).sp)
+    } else {
+        this
     }
 }
 
 @Composable
-private fun BlockView(block: MdBlock) {
+private fun BlockView(block: MdBlock, spacing: ResponseSpacing) {
     when (block) {
         is MdBlock.Heading -> Text(
             text = InlineMarkdown.toAnnotatedString(block.text),
@@ -67,7 +85,7 @@ private fun BlockView(block: MdBlock) {
 
         is MdBlock.Paragraph -> Text(
             text = InlineMarkdown.toAnnotatedString(block.text),
-            style = MaterialTheme.typography.bodyLarge
+            style = MaterialTheme.typography.bodyLarge.withResponseSpacing(spacing)
         )
 
         is MdBlock.CodeBlock -> CodeBlockView(block)
@@ -84,7 +102,7 @@ private fun BlockView(block: MdBlock) {
             ) {}
             Text(
                 text = InlineMarkdown.toAnnotatedString(block.text),
-                style = MaterialTheme.typography.bodyLarge,
+                style = MaterialTheme.typography.bodyLarge.withResponseSpacing(spacing),
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
@@ -97,17 +115,19 @@ private fun BlockView(block: MdBlock) {
                 .background(MaterialTheme.colorScheme.outline)
         ) {}
 
-        is MdBlock.ListBlock -> Column(verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
+        is MdBlock.ListBlock -> Column(
+            verticalArrangement = Arrangement.spacedBy(Spacing.xs * spacing.blockGapScale)
+        ) {
             block.items.forEachIndexed { index, item ->
                 Row {
                     Text(
                         text = if (block.ordered) "${index + 1}." else "•",
-                        style = MaterialTheme.typography.bodyLarge,
+                        style = MaterialTheme.typography.bodyLarge.withResponseSpacing(spacing),
                         modifier = Modifier.padding(end = Spacing.sm)
                     )
                     Text(
                         text = InlineMarkdown.toAnnotatedString(item),
-                        style = MaterialTheme.typography.bodyLarge
+                        style = MaterialTheme.typography.bodyLarge.withResponseSpacing(spacing)
                     )
                 }
             }

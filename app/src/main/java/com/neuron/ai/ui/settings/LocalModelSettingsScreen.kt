@@ -20,7 +20,9 @@ import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.Stop
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -44,6 +46,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.neuron.ai.data.local.LocalLoadState
 import com.neuron.ai.data.local.LocalModelRecord
+import com.neuron.ai.data.local.LocalReplyStyle
 import com.neuron.ai.data.local.LocalTurnKind
 import com.neuron.ai.di.AppContainer
 import com.neuron.ai.ui.theme.Spacing
@@ -99,6 +102,12 @@ fun LocalModelSettingsScreen(
     }
     var threadValue by remember(model.id, state.cpuThreads) {
         mutableFloatStateOf(state.cpuThreads.toFloat())
+    }
+    var instructions by remember(model.id, model.customInstructions) {
+        mutableStateOf(model.customInstructions)
+    }
+    var replyStyle by remember(model.id, model.replyStyle) {
+        mutableStateOf(LocalReplyStyle.fromNameOrDefault(model.replyStyle))
     }
     var showDelete by remember { mutableStateOf(false) }
 
@@ -216,6 +225,83 @@ fun LocalModelSettingsScreen(
                     viewModel.setRoutingRule(model.id, LocalTurnKind.VISION, it)
                 }
             )
+
+            HorizontalDivider()
+
+            // ---- Behavior / prompt customization --------------------------
+            SettingsSection("Behavior")
+            Text(
+                "Custom instructions",
+                style = MaterialTheme.typography.bodyMedium
+            )
+            Text(
+                "Added to the system prompt for every turn on this model. " +
+                    "Use it for tone, language, formatting or rules — max 2,000 characters.",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            OutlinedTextField(
+                value = instructions,
+                onValueChange = {
+                    if (it.length <= com.neuron.ai.data.local.LocalPromptOptions.MAX_INSTRUCTIONS_CHARS) {
+                        instructions = it
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(),
+                placeholder = {
+                    Text("e.g. Answer in Hindi, use short bullet points, and cite file names.")
+                },
+                minLines = 3,
+                maxLines = 6,
+                shape = RoundedCornerShape(14.dp)
+            )
+            Text(
+                "${instructions.length} / ${com.neuron.ai.data.local.LocalPromptOptions.MAX_INSTRUCTIONS_CHARS}",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.align(Alignment.End)
+            )
+            Text(
+                "Reply style",
+                style = MaterialTheme.typography.bodyMedium
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+                LocalReplyStyle.entries.forEach { option ->
+                    FilterChip(
+                        selected = replyStyle == option,
+                        onClick = {
+                            replyStyle = option
+                            viewModel.updateBehavior(model.id, instructions, option.name)
+                        },
+                        label = { Text(option.label) }
+                    )
+                }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+                TextButton(
+                    onClick = {
+                        viewModel.updateBehavior(model.id, instructions, replyStyle.name)
+                    },
+                    enabled = instructions != model.customInstructions
+                ) {
+                    Text("Save instructions")
+                }
+                TextButton(
+                    onClick = {
+                        instructions = ""
+                        replyStyle = LocalReplyStyle.BALANCED
+                        viewModel.updateBehavior(
+                            model.id,
+                            "",
+                            LocalReplyStyle.BALANCED.name
+                        )
+                    },
+                    enabled = instructions.isNotBlank() ||
+                        replyStyle != LocalReplyStyle.BALANCED
+                ) {
+                    Text("Reset behavior")
+                }
+            }
 
             HorizontalDivider()
 

@@ -29,7 +29,7 @@ class ConversationToolEnv(
         conversations.getConversation(conversationId)?.terminalEnabled ?: false
 
     override suspend fun browserEnabled(): Boolean =
-        conversations.getConversation(conversationId)?.browserEnabled ?: false
+        conversations.getConversation(conversationId)?.browserEnabled ?: true
 
     override suspend fun terminalSessionKey(): String = conversationId
 }

@@ -141,7 +141,11 @@ class LocalAiProvider(
         // A 4k-token window and an unbounded transcript do not mix: without
         // this the chat breaks permanently once it outgrows the context.
         val fitted = ContextTrimmer.fit(
-            turns = buildTurns(request.messages, imageMessageHasMarker = imageBytes != null),
+            turns = LocalPromptOptions.applyToTurns(
+                turns = buildTurns(request.messages, imageMessageHasMarker = imageBytes != null),
+                instructions = record.customInstructions,
+                replyStyle = record.replyStyle
+            ),
             // The engine's OWN window wins over the declared one. They can
             // differ — llama.cpp adjusts what it actually builds — and
             // budgeting against a window the engine does not have is what
@@ -266,7 +270,11 @@ class LocalAiProvider(
                 record.contextLimit?.toLong() ?: record.contextLength
             )
         val prompt = ContextTrimmer.fit(
-            turns = buildTurns(request.messages, imageMessageHasMarker = false),
+            turns = LocalPromptOptions.applyToTurns(
+                turns = buildTurns(request.messages, imageMessageHasMarker = false),
+                instructions = record.customInstructions,
+                replyStyle = record.replyStyle
+            ),
             contextTokens = contextTokens,
             maxOutputTokens = maxTokens,
             render = { turns, addAssistant ->

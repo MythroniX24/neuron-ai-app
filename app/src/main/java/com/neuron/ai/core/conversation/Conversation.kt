@@ -95,8 +95,8 @@ data class Conversation(
     val workspaceId: String? = null,
     /** Per-conversation AI Terminal capability — OFF by default. */
     val terminalEnabled: Boolean = false,
-    /** Per-conversation AI Browser capability — OFF by default (Milestone 3). */
-    val browserEnabled: Boolean = false
+    /** Per-conversation AI Browser capability — ON by default. */
+    val browserEnabled: Boolean = true
 )
 
 /** A message inside a [Conversation]. */

@@ -2,9 +2,7 @@ package com.neuron.ai.ui.chat
 
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -32,9 +30,11 @@ import androidx.compose.material.icons.outlined.Photo
 import androidx.compose.material.icons.outlined.PhotoCamera
 import androidx.compose.material.icons.outlined.Public
 import androidx.compose.material.icons.outlined.Terminal
+import androidx.compose.material.icons.outlined.TextFields
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -45,21 +45,19 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.neuron.ai.core.settings.ResponseSpacing
 import com.neuron.ai.ui.components.entrancePop
 import com.neuron.ai.ui.components.pressScale
 import com.neuron.ai.ui.theme.Spacing
 
 /**
- * Bottom sheet behind the composer's "+" — v2 redesign.
- *
- * Design language: a compact drag handle + title row; media actions as a
- * vivid horizontal TILE GRID (taller touch targets, tinted icon medallions,
- * press-scale feedback); capabilities as unified single-tap STATUS CARDS
- * (whole card toggles — no fiddly little switch); workspace as horizontal
- * selectable chips with inline "New" — one row, no side buttons. Sections
- * stagger in with entrancePop so the panel feels alive on open.
+ * Redesigned composer "+" panel: a single, grouped control surface for the
+ * conversation. Built from three sections only — attach, tools, readability —
+ * plus workspace, so every option is visible in one scroll instead of being
+ * hidden behind nested actions. Browser access defaults ON and says so.
  */
 @Composable
 fun AttachmentSheet(
@@ -71,94 +69,43 @@ fun AttachmentSheet(
     onToggleTerminal: (Boolean) -> Unit,
     browserEnabled: Boolean,
     onToggleBrowser: (Boolean) -> Unit,
+    responseSpacing: ResponseSpacing,
+    onResponseSpacingChange: (ResponseSpacing) -> Unit,
     workspaces: List<com.neuron.ai.core.workspace.Workspace>,
     activeWorkspaceId: String?,
     onAttachWorkspace: (String) -> Unit,
     onDetachWorkspace: () -> Unit,
     onCreateWorkspace: () -> Unit
 ) {
+    val activeWorkspaceName = activeWorkspaceId?.let { id ->
+        workspaces.firstOrNull { it.id == id }?.name
+    }
+
     Surface(
         shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
         color = MaterialTheme.colorScheme.surface,
-        tonalElevation = 2.dp
+        tonalElevation = 3.dp
     ) {
         Column(
             Modifier
                 .fillMaxWidth()
                 .verticalScroll(rememberScrollState())
-                .animateContentSize(spring(dampingRatio = 0.85f, stiffness = 320f))
         ) {
-            // ---- Compact header: handle + title + close -------------------
-            Box(
-                Modifier
-                    .fillMaxWidth()
-                    .background(
-                        Brush.verticalGradient(
-                            listOf(
-                                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.28f),
-                                Color.Transparent
-                            )
-                        )
-                    )
-            ) {
-                Column(Modifier.fillMaxWidth()) {
-                    Spacer(Modifier.height(10.dp))
-                    Box(
-                        Modifier
-                            .align(Alignment.CenterHorizontally)
-                            .width(44.dp)
-                            .height(4.dp)
-                            .clip(RoundedCornerShape(2.dp))
-                            .background(MaterialTheme.colorScheme.outlineVariant)
-                    )
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(start = Spacing.lg, end = Spacing.sm, top = Spacing.sm)
-                    ) {
-                        Column(Modifier.weight(1f)) {
-                            Text(
-                                text = "Add to chat",
-                                style = MaterialTheme.typography.titleMedium
-                            )
-                            Text(
-                                text = "Media, tools and workspace for this conversation",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        // Explicit close affordance — the scrim taps back too.
-                        Box(
-                            contentAlignment = Alignment.Center,
-                            modifier = Modifier
-                                .size(32.dp)
-                                .clip(CircleShape)
-                                .background(MaterialTheme.colorScheme.surfaceVariant)
-                                .clickable { onDismiss() }
-                        ) {
-                            Icon(
-                                Icons.Outlined.Close,
-                                contentDescription = "Close",
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(16.dp)
-                            )
-                        }
-                    }
-                    Spacer(Modifier.height(Spacing.sm))
-                }
-            }
+            SheetHeader(onDismiss)
 
-            // ---- Media tiles -----------------------------------------------
+            Spacer(Modifier.height(Spacing.sm))
+
+            // ---- Attach: three equal, high-contrast actions -----------------
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = Spacing.lg),
-                horizontalArrangement = Arrangement.spacedBy(Spacing.md)
+                horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
             ) {
-                MediaTile(
+                QuickAction(
                     icon = Icons.Outlined.PhotoCamera,
-                    label = "Camera",
+                    title = "Camera",
+                    hint = "Take a photo",
                     tint = MaterialTheme.colorScheme.primary,
                     modifier = Modifier
                         .weight(1f)
@@ -168,9 +115,10 @@ fun AttachmentSheet(
                         onCamera()
                     }
                 )
-                MediaTile(
+                QuickAction(
                     icon = Icons.Outlined.Photo,
-                    label = "Photos",
+                    title = "Photos",
+                    hint = "From gallery",
                     tint = MaterialTheme.colorScheme.tertiary,
                     modifier = Modifier
                         .weight(1f)
@@ -180,9 +128,10 @@ fun AttachmentSheet(
                         onPhotos()
                     }
                 )
-                MediaTile(
+                QuickAction(
                     icon = Icons.Outlined.Description,
-                    label = "Files",
+                    title = "Files",
+                    hint = "Any document",
                     tint = MaterialTheme.colorScheme.secondary,
                     modifier = Modifier
                         .weight(1f)
@@ -195,36 +144,71 @@ fun AttachmentSheet(
             }
 
             Spacer(Modifier.height(Spacing.lg))
-
-            // ---- Capability status cards (single-tap toggle) ---------------
-            SectionHeader("Capabilities")
-            CapabilityCard(
-                icon = Icons.Outlined.Terminal,
-                title = "Terminal",
-                subtitle = "AI runs commands in this chat",
-                tint = MaterialTheme.colorScheme.primary,
-                enabled = terminalEnabled,
-                onToggle = { onToggleTerminal(!terminalEnabled) },
-                modifier = Modifier
-                    .padding(horizontal = Spacing.lg, vertical = Spacing.xs)
-                    .entrancePop(delayMs = 120)
-            )
-            CapabilityCard(
+            SectionLabel("Tools & access")
+            ToolToggleRow(
                 icon = Icons.Outlined.Public,
                 title = "Browser",
-                subtitle = "AI opens and reads web pages",
-                tint = MaterialTheme.colorScheme.tertiary,
+                subtitle = if (browserEnabled) {
+                    "On — AI can open and read web pages in this chat"
+                } else {
+                    "Off — browsing tools are unavailable"
+                },
+                tint = MaterialTheme.colorScheme.primary,
                 enabled = browserEnabled,
                 onToggle = { onToggleBrowser(!browserEnabled) },
                 modifier = Modifier
                     .padding(horizontal = Spacing.lg, vertical = Spacing.xs)
-                    .entrancePop(delayMs = 160)
+                    .entrancePop(delayMs = 120)
+            )
+            ToolToggleRow(
+                icon = Icons.Outlined.Terminal,
+                title = "Terminal",
+                subtitle = if (terminalEnabled) {
+                    "On — AI can run commands in the attached workspace"
+                } else {
+                    "Off — command tools are unavailable"
+                },
+                tint = MaterialTheme.colorScheme.tertiary,
+                enabled = terminalEnabled,
+                onToggle = { onToggleTerminal(!terminalEnabled) },
+                modifier = Modifier
+                    .padding(horizontal = Spacing.lg, vertical = Spacing.xs)
+                    .entrancePop(delayMs = 150)
             )
 
-            Spacer(Modifier.height(Spacing.md))
+            Spacer(Modifier.height(Spacing.lg))
+            SectionLabel("Answer spacing")
+            Text(
+                text = "Choose how much space every reply gets between its lines.",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = Spacing.lg)
+            )
+            Spacer(Modifier.height(Spacing.sm))
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = Spacing.lg),
+                horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
+            ) {
+                ResponseSpacing.entries.forEach { option ->
+                    SpacingOption(
+                        option = option,
+                        selected = option == responseSpacing,
+                        modifier = Modifier.weight(1f),
+                        onClick = { onResponseSpacingChange(option) }
+                    )
+                }
+            }
+            Text(
+                text = "Applies instantly to every AI answer and is saved for future chats.",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = Spacing.lg, vertical = Spacing.xs)
+            )
 
-            // ---- Workspace chips -------------------------------------------
-            SectionHeader("Workspace")
+            Spacer(Modifier.height(Spacing.lg))
+            SectionLabel("Workspace")
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier
@@ -238,8 +222,7 @@ fun AttachmentSheet(
                     modifier = Modifier.size(16.dp)
                 )
                 Text(
-                    text = activeWorkspaceId?.let { id -> workspaces.find { it.id == id }?.name }
-                        ?: "No project attached",
+                    text = activeWorkspaceName ?: "No project attached",
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
@@ -248,6 +231,17 @@ fun AttachmentSheet(
                         .weight(1f)
                         .padding(start = Spacing.xs)
                 )
+                if (activeWorkspaceId != null) {
+                    Text(
+                        text = "Detach",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable { onDetachWorkspace() }
+                            .padding(horizontal = Spacing.xs, vertical = 2.dp)
+                    )
+                }
             }
             Row(
                 horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
@@ -255,7 +249,7 @@ fun AttachmentSheet(
                     .fillMaxWidth()
                     .padding(horizontal = Spacing.lg, vertical = Spacing.xs)
             ) {
-                workspaces.take(4).forEach { ws ->
+                workspaces.take(3).forEach { ws ->
                     WorkspaceChip(
                         name = ws.name,
                         selected = ws.id == activeWorkspaceId,
@@ -272,25 +266,121 @@ fun AttachmentSheet(
                     onClick = onCreateWorkspace
                 )
             }
-            if (activeWorkspaceId != null) {
+
+            // A quiet confirmation line instead of another button: every
+            // control above is a live, saved preference.
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(
+                    start = Spacing.lg,
+                    end = Spacing.lg,
+                    top = Spacing.md,
+                    bottom = Spacing.xl
+                )
+            ) {
+                Icon(
+                    Icons.Outlined.Check,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(14.dp)
+                )
+                Spacer(Modifier.width(Spacing.xs))
                 Text(
-                    text = "Tap the active chip again to detach",
+                    text = "Changes are saved automatically",
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(horizontal = Spacing.lg, vertical = Spacing.xs)
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-
-            Spacer(Modifier.height(Spacing.xl))
         }
     }
 }
 
-/** Vivid media tile: tinted medallion icon over a labeled column. */
 @Composable
-private fun MediaTile(
+private fun SheetHeader(onDismiss: () -> Unit) {
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .background(
+                Brush.verticalGradient(
+                    listOf(
+                        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.30f),
+                        Color.Transparent
+                    )
+                )
+            )
+    ) {
+        Column(Modifier.fillMaxWidth()) {
+            Spacer(Modifier.height(10.dp))
+            Box(
+                Modifier
+                    .align(Alignment.CenterHorizontally)
+                    .width(42.dp)
+                    .height(4.dp)
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(MaterialTheme.colorScheme.outlineVariant)
+            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = Spacing.lg, end = Spacing.sm, top = Spacing.sm)
+            ) {
+                Box(
+                    contentAlignment = Alignment.Center,
+                    modifier = Modifier
+                        .size(38.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.14f))
+                ) {
+                    Icon(
+                        Icons.Outlined.TextFields,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+                Column(
+                    Modifier
+                        .weight(1f)
+                        .padding(horizontal = Spacing.sm)
+                ) {
+                    Text(
+                        text = "Chat controls",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        text = "Attach, tools and how answers read",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Box(
+                    contentAlignment = Alignment.Center,
+                    modifier = Modifier
+                        .size(32.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.surfaceVariant)
+                        .clickable { onDismiss() }
+                ) {
+                    Icon(
+                        Icons.Outlined.Close,
+                        contentDescription = "Close",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+            }
+            Spacer(Modifier.height(Spacing.sm))
+        }
+    }
+}
+
+@Composable
+private fun QuickAction(
     icon: ImageVector,
-    label: String,
+    title: String,
+    hint: String,
     tint: Color,
     onClick: () -> Unit,
     modifier: Modifier = Modifier
@@ -299,52 +389,44 @@ private fun MediaTile(
     Surface(
         onClick = onClick,
         interactionSource = interaction,
-        shape = RoundedCornerShape(20.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant,
+        shape = RoundedCornerShape(18.dp),
+        color = tint.copy(alpha = 0.10f),
+        border = androidx.compose.foundation.BorderStroke(1.dp, tint.copy(alpha = 0.25f)),
         modifier = modifier
-            .height(96.dp)
-            .pressScale(interaction, pressedScale = 0.94f)
+            .height(88.dp)
+            .pressScale(interaction, pressedScale = 0.95f)
     ) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
+            verticalArrangement = Arrangement.Center,
+            modifier = Modifier.padding(horizontal = 4.dp)
         ) {
-            Box(
-                Modifier
-                    .size(44.dp)
-                    .clip(CircleShape)
-                    .background(
-                        Brush.linearGradient(
-                            listOf(tint.copy(alpha = 0.22f), tint.copy(alpha = 0.10f))
-                        )
-                    ),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(icon, contentDescription = label, tint = tint, modifier = Modifier.size(22.dp))
-            }
-            Spacer(Modifier.height(Spacing.xs))
-            Text(label, style = MaterialTheme.typography.labelMedium)
+            Icon(icon, contentDescription = title, tint = tint, modifier = Modifier.size(24.dp))
+            Spacer(Modifier.height(6.dp))
+            Text(title, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Medium)
+            Text(
+                hint,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1
+            )
         }
     }
 }
 
 @Composable
-private fun SectionHeader(text: String) {
+private fun SectionLabel(text: String) {
     Text(
         text = text.uppercase(),
         style = MaterialTheme.typography.labelSmall,
+        fontWeight = FontWeight.SemiBold,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.padding(horizontal = Spacing.lg, vertical = Spacing.xs)
     )
 }
 
-/**
- * Capability card: the WHOLE card is the toggle — a leading medallion, title
- * + subtitle, and an animated status badge on the right. No separate switch
- * to aim for; one big tap target with clear on/off color language.
- */
 @Composable
-private fun CapabilityCard(
+private fun ToolToggleRow(
     icon: ImageVector,
     title: String,
     subtitle: String,
@@ -354,40 +436,41 @@ private fun CapabilityCard(
     modifier: Modifier = Modifier
 ) {
     val interaction = remember { MutableInteractionSource() }
-    val badgeColor by animateColorAsState(
-        targetValue = if (enabled) tint else MaterialTheme.colorScheme.surfaceVariant,
-        animationSpec = tween(220),
-        label = "capBadge"
+    val background by animateColorAsState(
+        targetValue = if (enabled) tint.copy(alpha = 0.10f)
+        else MaterialTheme.colorScheme.surfaceVariant,
+        animationSpec = tween(200),
+        label = "toolRowBackground"
     )
-    val badgeIcon by animateFloatAsState(
+    val badgeAlpha by animateFloatAsState(
         targetValue = if (enabled) 1f else 0f,
-        animationSpec = spring(dampingRatio = 0.6f, stiffness = 380f),
-        label = "capBadgeIcon"
+        animationSpec = tween(180),
+        label = "toolRowBadge"
     )
     Surface(
         onClick = onToggle,
         interactionSource = interaction,
         shape = RoundedCornerShape(18.dp),
-        color = if (enabled) tint.copy(alpha = 0.10f)
-        else MaterialTheme.colorScheme.surfaceVariant,
+        color = background,
         border = androidx.compose.foundation.BorderStroke(
             1.dp,
-            if (enabled) tint.copy(alpha = 0.55f) else MaterialTheme.colorScheme.outline.copy(alpha = 0.4f)
+            if (enabled) tint.copy(alpha = 0.45f)
+            else MaterialTheme.colorScheme.outline.copy(alpha = 0.35f)
         ),
         modifier = modifier
             .fillMaxWidth()
-            .pressScale(interaction, pressedScale = 0.98f)
+            .pressScale(interaction, pressedScale = 0.985f)
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.padding(horizontal = Spacing.md, vertical = Spacing.sm)
         ) {
             Box(
-                Modifier
+                contentAlignment = Alignment.Center,
+                modifier = Modifier
                     .size(38.dp)
                     .clip(CircleShape)
-                    .background(tint.copy(alpha = if (enabled) 0.20f else 0.12f)),
-                contentAlignment = Alignment.Center
+                    .background(tint.copy(alpha = 0.16f))
             ) {
                 Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(20.dp))
             }
@@ -396,30 +479,82 @@ private fun CapabilityCard(
                     .weight(1f)
                     .padding(horizontal = Spacing.md)
             ) {
-                Text(title, style = MaterialTheme.typography.bodyMedium)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(title, style = MaterialTheme.typography.bodyMedium)
+                    if (badgeAlpha > 0.5f) {
+                        Spacer(Modifier.width(Spacing.xs))
+                        Text(
+                            text = "ON",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = tint,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(tint.copy(alpha = 0.14f))
+                                .padding(horizontal = 5.dp, vertical = 1.dp)
+                        )
+                    }
+                }
                 Text(
                     subtitle,
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-            // Animated ON/OFF status badge.
-            Box(
-                contentAlignment = Alignment.Center,
-                modifier = Modifier
-                    .size(width = 52.dp, height = 26.dp)
-                    .clip(RoundedCornerShape(13.dp))
-                    .background(badgeColor)
-            ) {
-                Text(
-                    text = if (badgeIcon > 0.5f) "ON" else "OFF",
-                    style = MaterialTheme.typography.labelSmall,
-                    // onPrimary adapts per theme: white on the deep indigo
-                    // (light), dark ink on the lifted lavender (dark).
-                    color = if (enabled) MaterialTheme.colorScheme.onPrimary
-                    else MaterialTheme.colorScheme.onSurfaceVariant
-                )
+            // The whole row is the tap target; the switch only mirrors state.
+            Switch(checked = enabled, onCheckedChange = null)
+        }
+    }
+}
+
+@Composable
+private fun SpacingOption(
+    option: ResponseSpacing,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val interaction = remember { MutableInteractionSource() }
+    val color by animateColorAsState(
+        targetValue = if (selected) MaterialTheme.colorScheme.primaryContainer
+        else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+        animationSpec = tween(180),
+        label = "spacingOption"
+    )
+    Surface(
+        onClick = onClick,
+        interactionSource = interaction,
+        shape = RoundedCornerShape(14.dp),
+        color = color,
+        border = androidx.compose.foundation.BorderStroke(
+            1.dp,
+            if (selected) MaterialTheme.colorScheme.primary
+            else MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)
+        ),
+        modifier = modifier.pressScale(interaction, pressedScale = 0.95f)
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier.padding(vertical = Spacing.sm, horizontal = 4.dp)
+        ) {
+            // Tiny line preview: the actual gap changes with the option.
+            Column(verticalArrangement = Arrangement.spacedBy(option.previewGap)) {
+                repeat(3) {
+                    Box(
+                        Modifier
+                            .width(22.dp)
+                            .height(2.dp)
+                            .clip(RoundedCornerShape(1.dp))
+                            .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f))
+                    )
+                }
             }
+            Spacer(Modifier.height(Spacing.xs))
+            Text(
+                text = option.label,
+                style = MaterialTheme.typography.labelSmall,
+                maxLines = 1
+            )
         }
     }
 }
@@ -442,7 +577,7 @@ private fun WorkspaceChip(
         border = androidx.compose.foundation.BorderStroke(
             1.dp,
             if (selected) MaterialTheme.colorScheme.primary
-            else MaterialTheme.colorScheme.outline.copy(alpha = 0.4f)
+            else MaterialTheme.colorScheme.outline.copy(alpha = 0.35f)
         ),
         modifier = Modifier.pressScale(interaction, pressedScale = 0.94f)
     ) {

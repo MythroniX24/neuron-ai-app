@@ -9,7 +9,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
     entities = [ConversationEntity::class, MessageEntity::class, TaskEntity::class, MemoryEntryEntity::class],
-    version = 4,
+    version = 5,
     exportSchema = false
 )
 abstract class NeuronDatabase : RoomDatabase() {
@@ -56,6 +56,18 @@ abstract class NeuronDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * v4 → v5: browser access becomes the default. Existing chats are
+         * upgraded too — a chat persisted under the old OFF default showed the
+         * composer toggle as OFF even though browsing was meant to be enabled.
+         * Users can still switch it off per chat afterwards.
+         */
+        private val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("UPDATE conversations SET browserEnabled = 1")
+            }
+        }
+
         /** v3 → v4: browser capability + memory table (Milestone 3). */
         private val MIGRATION_3_4 = object : Migration(3, 4) {
             override fun migrate(db: SupportSQLiteDatabase) {
@@ -85,7 +97,7 @@ abstract class NeuronDatabase : RoomDatabase() {
                     NeuronDatabase::class.java,
                     "neuron.db"
                 )
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
                     .build()
                     .also { instance = it }
             }

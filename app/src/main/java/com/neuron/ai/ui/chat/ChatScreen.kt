@@ -109,6 +109,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.neuron.ai.core.conversation.Message
+import com.neuron.ai.core.settings.ResponseSpacing
 import com.neuron.ai.di.AppContainer
 import com.neuron.ai.ui.components.ChatComposer
 import com.neuron.ai.ui.markdown.MarkdownText
@@ -157,6 +158,15 @@ fun ChatScreen(
     val attachmentNotice by viewModel.attachmentNotice.collectAsStateWithLifecycle()
     val queuedMessage by viewModel.queuedMessage.collectAsStateWithLifecycle()
     val conversation by viewModel.conversation.collectAsStateWithLifecycle()
+    val responseSpacing by container.settingsRepository.responseSpacing
+        .collectAsStateWithLifecycle(initialValue = ResponseSpacing.COMFORTABLE)
+
+    // TOOL rows are agent plumbing, not chat messages. Their output is shown
+    // inside the new timeline rows; rendering them here produced the old
+    // standalone "Ran command / Web search" cards beside the new UI.
+    val visibleMessages = remember(messages) {
+        messages.filter { it.role == Message.Role.USER || it.role == Message.Role.ASSISTANT }
+    }
 
     var draft by remember { mutableStateOf("") }
     val listState = rememberLazyListState()
@@ -176,8 +186,8 @@ fun ChatScreen(
     // old effect animated on every token, which launched a new scroll
     // animation dozens of times per second and fought the user's finger.
     val streamingText = (generation as? GenerationState.Streaming)?.buffer.orEmpty()
-    LaunchedEffect(messages.size, liveRun?.steps?.size) {
-        val target = messages.size + if (generation is GenerationState.Streaming) 1 else 0
+    LaunchedEffect(visibleMessages.size, liveRun?.steps?.size) {
+        val target = visibleMessages.size + if (generation is GenerationState.Streaming) 1 else 0
         if (target > 0) {
             val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
             if (lastVisible >= target - 3) {
@@ -187,7 +197,7 @@ fun ChatScreen(
     }
     LaunchedEffect(streamingText.length) {
         if (streamingText.isNotEmpty()) {
-            val target = messages.size + 1
+            val target = visibleMessages.size + 1
             val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
             if (lastVisible >= target - 3) {
                 // No animation here: a token stream can update many times per
@@ -331,11 +341,11 @@ fun ChatScreen(
                 }
             }
 
-            items(messages, key = { it.id }) { message ->
+            items(visibleMessages, key = { it.id }) { message ->
                 // Entrance choreography runs ONCE per freshly-sent message:
                 // recycled rows (scrolled back into view) render statically.
                 val animateIn = remember(message.id) {
-                    message.id !in entranceSeen && (message.id == messages.lastOrNull()?.id)
+                    message.id !in entranceSeen && (message.id == visibleMessages.lastOrNull()?.id)
                 }
                 remember(message.id) { entranceSeen.add(message.id) }
                 Box(
@@ -346,6 +356,7 @@ fun ChatScreen(
                 ) {
                     MessageRow(
                         message = message,
+                        responseSpacing = responseSpacing,
                         onRetryFromHere = { viewModel.retryFrom(message.id) },
                         onEditAndResend = { viewModel.editAndResend(message.id, message.content) },
                         fullResultResolver = { callId ->
@@ -363,7 +374,8 @@ fun ChatScreen(
                 is GenerationState.Streaming -> item {
                     LiveAgentTurn(
                         run = liveRun,
-                        buffer = gen.buffer
+                        buffer = gen.buffer,
+                        responseSpacing = responseSpacing
                     )
                 }
 
@@ -564,6 +576,10 @@ fun ChatScreen(
             onToggleTerminal = { viewModel.setTerminalEnabled(it) },
             browserEnabled = browserEnabled,
             onToggleBrowser = { viewModel.setBrowserEnabled(it) },
+            responseSpacing = responseSpacing,
+            onResponseSpacingChange = { spacing ->
+                screenScope.launch { container.settingsRepository.setResponseSpacing(spacing) }
+            },
             workspaces = workspaces,
             activeWorkspaceId = activeWorkspaceId,
             onAttachWorkspace = { viewModel.attachWorkspace(it) },
@@ -956,6 +972,7 @@ private fun MessageAttachmentTile(attachment: Attachment) {
 @Composable
 private fun MessageRow(
     message: Message,
+    responseSpacing: ResponseSpacing,
     onRetryFromHere: (() -> Unit)? = null,
     onEditAndResend: (() -> Unit)? = null,
     fullResultResolver: (String) -> String? = { null }
@@ -1022,7 +1039,7 @@ private fun MessageRow(
             }
         }
 
-        Message.Role.TOOL -> ToolMessageCard(message)
+        Message.Role.TOOL -> Unit
 
         Message.Role.ASSISTANT -> Column(
             // Subtle inset so AI text never touches the screen edges; no
@@ -1089,85 +1106,11 @@ private fun MessageRow(
                     onLongClick = { showMenu = true }
                 )
             ) {
-                MarkdownText(markdown = message.content)
+                MarkdownText(markdown = message.content, spacing = responseSpacing)
             }
         }
 
         Message.Role.SYSTEM -> Unit
-    }
-}
-
-/**
- * One agent tool step, rendered as a COLLAPSIBLE card: collapsed shows just
- * the tool title with a chevron; tapping expands the full output (command,
- * exit code, [err] lines…). Defaults to collapsed so a command-running chat
- * stays scannable; nothing is lost — expand to inspect.
- */
-@OptIn(ExperimentalFoundationApi::class)
-@Composable
-private fun ToolMessageCard(message: Message) {
-    var expanded by remember(message.id) { mutableStateOf(false) }
-    val interaction = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
-    val chevronRotation by animateFloatAsState(
-        targetValue = if (expanded) 180f else 0f,
-        animationSpec = tween(220, easing = FastOutSlowInEasing),
-        label = "chevron"
-    )
-    Surface(
-        shape = MaterialTheme.shapes.medium,
-        color = MaterialTheme.colorScheme.surfaceVariant,
-        modifier = Modifier
-            .fillMaxWidth()
-            .pressScale(interaction, pressedScale = 0.985f)
-            .combinedClickable(
-                interactionSource = interaction,
-                indication = null,
-                onClick = { expanded = !expanded }
-            )
-    ) {
-        Column(
-            Modifier
-                .padding(Spacing.md)
-                .animateContentSize(spring(dampingRatio = 0.85f, stiffness = 320f))
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = "🛠 ${message.metadata?.toolName ?: "Tool"}",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.weight(1f)
-                )
-                Icon(
-                    imageVector = Icons.Outlined.KeyboardArrowDown,
-                    contentDescription = if (expanded) "Collapse" else "Expand",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier
-                        .size(18.dp)
-                        .graphicsLayer { rotationZ = chevronRotation }
-                )
-            }
-            // Animated expand/collapse — subtle, purposeful.
-            androidx.compose.animation.AnimatedVisibility(visible = expanded) {
-                Column {
-                    Text(
-                        text = message.content,
-                        style = MaterialTheme.typography.bodySmall,
-                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                        modifier = Modifier.padding(top = Spacing.xs)
-                    )
-                }
-            }
-            if (!expanded) {
-                Text(
-                    text = "Tap to view details",
-                    style = MaterialTheme.typography.labelSmall,
-                    // Full muted color: at 60% alpha this dropped below
-                    // readable contrast on the dark surface variant.
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(top = 2.dp)
-                )
-            }
-        }
     }
 }
 
@@ -1177,7 +1120,11 @@ private fun ToolMessageCard(message: Message) {
  * arrive here through [AgentRunState].
  */
 @Composable
-private fun LiveAgentTurn(run: AgentRunState?, buffer: String) {
+private fun LiveAgentTurn(
+    run: AgentRunState?,
+    buffer: String,
+    responseSpacing: ResponseSpacing
+) {
     var expanded by remember { mutableStateOf(true) }
     Column(Modifier.fillMaxWidth()) {
         AgentTurnHeader(
@@ -1196,12 +1143,12 @@ private fun LiveAgentTurn(run: AgentRunState?, buffer: String) {
                 modifier = Modifier.padding(bottom = Spacing.xs)
             )
         }
-        StreamingBubble(buffer.ifEmpty { "…" })
+        StreamingBubble(buffer.ifEmpty { "…" }, responseSpacing)
     }
 }
 
 @Composable
-private fun StreamingBubble(text: String) {
+private fun StreamingBubble(text: String, responseSpacing: ResponseSpacing) {
     Column(
         Modifier
             .fillMaxWidth()
@@ -1216,7 +1163,7 @@ private fun StreamingBubble(text: String) {
                 SkeletonBar(Modifier.size(width = 120.dp, height = 12.dp))
             }
         } else {
-            MarkdownText(markdown = text)
+            MarkdownText(markdown = text, spacing = responseSpacing)
             BlinkingCaret()
         }
     }
@@ -1328,44 +1275,6 @@ private fun ComposerBar(
                             else MaterialTheme.colorScheme.outline
                         )
                     }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun AgentActivityCard(steps: List<AgentActivityUi>) {
-    Surface(
-        shape = MaterialTheme.shapes.medium,
-        color = MaterialTheme.colorScheme.surfaceVariant,
-        modifier = Modifier.entrancePop()
-    ) {
-        Column(Modifier.padding(Spacing.md)) {
-            steps.forEach { step ->
-                val icon = when (step.state) {
-                    AgentActivityUi.AgentActivityState.DONE -> "✓"
-                    AgentActivityUi.AgentActivityState.FAILED -> "✗"
-                    AgentActivityUi.AgentActivityState.RUNNING -> "⟳"
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = icon,
-                        style = MaterialTheme.typography.labelMedium,
-                        color = when (step.state) {
-                            AgentActivityUi.AgentActivityState.DONE ->
-                                MaterialTheme.colorScheme.primary
-                            AgentActivityUi.AgentActivityState.FAILED ->
-                                MaterialTheme.colorScheme.error
-                            AgentActivityUi.AgentActivityState.RUNNING ->
-                                MaterialTheme.colorScheme.onSurfaceVariant
-                        }
-                    )
-                    Text(
-                        text = " ${step.title}",
-                        style = MaterialTheme.typography.bodySmall,
-                        modifier = Modifier.padding(start = Spacing.xs)
-                    )
                 }
             }
         }

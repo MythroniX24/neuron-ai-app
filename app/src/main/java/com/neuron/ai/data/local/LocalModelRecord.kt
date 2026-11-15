@@ -34,7 +34,11 @@ data class LocalModelRecord(
      * once at import/download time — capability-aware routing uses it instead
      * of guessing from the model name. False for older manifests (default).
      */
-    val supportsTools: Boolean = false
+    val supportsTools: Boolean = false,
+    /** Free-form user instructions prepended to this model's system turn. */
+    val customInstructions: String = "",
+    /** [LocalReplyStyle] name; unknown/old values fall back to BALANCED. */
+    val replyStyle: String = LocalReplyStyle.BALANCED.name
 ) {
     companion object {
         const val SOURCE_IMPORT = "import"

@@ -3,6 +3,7 @@ package com.neuron.ai.core.settings
 import android.content.Context
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.compose.ui.unit.dp
 import androidx.datastore.preferences.preferencesDataStore
 import com.neuron.ai.core.coroutines.DispatcherProvider
 import kotlinx.coroutines.flow.Flow
@@ -25,6 +26,30 @@ enum class ThemeMode {
     }
 }
 
+/**
+ * How much vertical room each AI reply gets between lines. Stored as a name so
+ * a future option can be added without renumbering anyone's saved choice.
+ */
+enum class ResponseSpacing(
+    val label: String,
+    /** Multiplier for text line-height; 1.0 keeps the design-system default. */
+    val lineHeightScale: Float,
+    /** Gap between markdown blocks; scales gently with the line spacing. */
+    val blockGapScale: Float
+) {
+    COMPACT("Compact", 0.86f, 0.7f),
+    COMFORTABLE("Default", 1f, 1f),
+    RELAXED("Relaxed", 1.18f, 1.2f),
+    AIRY("Airy", 1.38f, 1.45f);
+
+    val previewGap get() = (3f * blockGapScale).dp
+
+    companion object {
+        fun fromNameOrDefault(name: String?): ResponseSpacing =
+            entries.firstOrNull { it.name == name } ?: COMFORTABLE
+    }
+}
+
 interface SettingsRepository {
     val themeMode: Flow<ThemeMode>
     suspend fun setThemeMode(mode: ThemeMode)
@@ -32,6 +57,10 @@ interface SettingsRepository {
     /** Last model the user picked — survives restarts and pre-fills new chats. */
     val lastModelSelection: Flow<Pair<String, String>?>
     suspend fun setLastModelSelection(providerId: String, modelId: String)
+
+    /** User's preferred line spacing for assistant replies. */
+    val responseSpacing: Flow<ResponseSpacing>
+    suspend fun setResponseSpacing(spacing: ResponseSpacing)
 }
 
 private val Context.neuronDataStore by preferencesDataStore(name = "neuron_settings")
@@ -65,9 +94,17 @@ class SettingsRepositoryImpl(
         }
     }
 
+    override val responseSpacing: Flow<ResponseSpacing> = dataStore.data
+        .map { prefs -> ResponseSpacing.fromNameOrDefault(prefs[KEY_RESPONSE_SPACING]) }
+
+    override suspend fun setResponseSpacing(spacing: ResponseSpacing) {
+        dataStore.edit { prefs -> prefs[KEY_RESPONSE_SPACING] = spacing.name }
+    }
+
     private companion object {
         val KEY_THEME_MODE = stringPreferencesKey("theme_mode")
         val KEY_LAST_PROVIDER = stringPreferencesKey("last_provider_id")
         val KEY_LAST_MODEL = stringPreferencesKey("last_model_id")
+        val KEY_RESPONSE_SPACING = stringPreferencesKey("response_spacing")
     }
 }

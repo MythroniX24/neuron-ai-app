@@ -18,8 +18,8 @@ data class ConversationEntity(
     val workspaceId: String? = null,
     /** Per-conversation Terminal capability (AI terminal access), default OFF. */
     val terminalEnabled: Boolean = false,
-    /** Per-conversation AI Browser capability, default OFF (Milestone 3). */
-    val browserEnabled: Boolean = false
+    /** Per-conversation AI Browser capability, default ON. */
+    val browserEnabled: Boolean = true
 )
 
 @Entity(

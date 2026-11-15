@@ -46,6 +46,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.FloatingActionButtonDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -68,6 +69,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalFocusManager
@@ -356,13 +358,24 @@ private fun ModelsHome(
             onClick = onAdd,
             modifier = Modifier
                 .align(Alignment.BottomEnd)
-                .padding(Spacing.lg)
-                .size(56.dp),
-            containerColor = MaterialTheme.colorScheme.surfaceVariant,
-            contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                // Lifted above the usual 16dp inset so it clears the list's
+                // last row and sits comfortably above the nav gesture area.
+                .padding(end = Spacing.lg, bottom = 96.dp)
+                .size(58.dp),
+            // Strong blue with white glyph: never blends into a white page.
+            containerColor = Color(0xFF2563EB),
+            contentColor = Color.White,
+            elevation = FloatingActionButtonDefaults.elevation(
+                defaultElevation = 8.dp,
+                pressedElevation = 4.dp
+            ),
             shape = CircleShape
         ) {
-            Icon(Icons.Outlined.Add, contentDescription = "Add model")
+            Icon(
+                Icons.Outlined.Add,
+                contentDescription = "Add model",
+                modifier = Modifier.size(28.dp)
+            )
         }
     }
 }
