@@ -31,8 +31,8 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.isSp
 import androidx.compose.ui.unit.sp
 import com.google.accompanist.drawablepainter.rememberDrawablePainter
 import com.neuron.ai.core.settings.ResponseSpacing
@@ -63,7 +63,7 @@ fun MarkdownText(
 /** Scales a design-system style's existing line height, never its font size. */
 private fun TextStyle.withResponseSpacing(spacing: ResponseSpacing): TextStyle {
     val base = lineHeight
-    return if (base.isSp) {
+    return if (base != TextUnit.Unspecified) {
         copy(lineHeight = (base.value * spacing.lineHeightScale).sp)
     } else {
         this
