@@ -92,6 +92,82 @@ object TextToolCallParser {
     private fun parseBlock(block: String): Recovered? {
         parseJsonBlock(block)?.let { return it }
         return parseXmlDashBlock(block)
+            ?: parseFunctionAssignmentBlock(block)
+    }
+
+    /**
+     * Some local models emit Qwen-style markup without the angle bracket
+     * around the function tag:
+     *
+     *   <tool_call>
+     *   function=terminal.run
+     *   <parameter=command>date</parameter>
+     *   </function>
+     *   </tool_call>
+     *
+     * Treat that as the same call instead of leaking the raw block into chat.
+     * Only consulted when no real `<function...>` opening tag exists.
+     */
+    private fun parseFunctionAssignmentBlock(block: String): Recovered? {
+        if (nextFnTag(block, 0) >= 0) return null
+        val fn = block.indexOf("function")
+        if (fn < 0) return null
+        var cursor = fn + "function".length
+        while (cursor < block.length && block[cursor].isWhitespace()) cursor++
+        if (cursor >= block.length || (block[cursor] != '=' && block[cursor] != ':' && block[cursor] != '-')) {
+            return null
+        }
+        cursor++
+        while (cursor < block.length && block[cursor].isWhitespace()) cursor++
+        var end = cursor
+        while (end < block.length && block[end] !in charArrayOf('\n', '\r', '<', '>')) end++
+        val toolId = block.substring(cursor, end).trim().trim('"', '\'')
+        if (toolId.isEmpty()) return null
+
+        val argumentsJson = parseParams(block)?.let { buildParamsJson(it) }
+            ?: block.indexOf('{').takeIf { it >= 0 }?.let { block.substring(it) }
+            ?: "{}"
+        return Recovered(
+            call = ProposedToolCall(
+                callId = "text-call-${System.nanoTime()}",
+                toolId = toolId,
+                argumentsJson = argumentsJson
+            ),
+            rawBlocks = listOf(block)
+        )
+    }
+
+    /** Parses every `<parameter-…>` / `<parameter=…>` tag in [block]. */
+    private fun parseParams(block: String): LinkedHashMap<String, String>? {
+        val params = LinkedHashMap<String, String>()
+        var i = nextParamTag(block, 0)
+        while (i >= 0) {
+            val keyStart = i + PARAM.length + 1 // skip separator
+            val keyEnd = block.indexOf('>', keyStart)
+            if (keyEnd < 0) break
+            val key = block.substring(keyStart, keyEnd).trim()
+            if (key.isEmpty()) {
+                i = nextParamTag(block, keyEnd + 1)
+                continue
+            }
+            // Models close parameters three ways: "</parameter>", and the
+            // named forms "</parameter-key>" / "</parameter=key>". Accept
+            // whichever appears first after the value starts.
+            val plainEnd = block.indexOf(PARAM_CLOSE, keyEnd + 1)
+            val namedDash = block.indexOf("</parameter-$key>", keyEnd + 1)
+            val namedEq = block.indexOf("</parameter=$key>", keyEnd + 1)
+            val namedEnd = listOf(namedDash, namedEq).filter { it >= 0 }.minOrNull()
+            val (valEnd, closerLen) = when {
+                plainEnd >= 0 && (namedEnd == null || plainEnd < namedEnd) ->
+                    plainEnd to PARAM_CLOSE.length
+                namedEnd != null ->
+                    namedEnd to (if (namedEnd == namedDash) "</parameter-$key>".length else "</parameter=$key>".length)
+                else -> break
+            }
+            params[key] = block.substring(keyEnd + 1, valEnd).trim()
+            i = nextParamTag(block, valEnd + closerLen)
+        }
+        return params.ifEmpty { null }
     }
 
     /** Index of the next REAL opening <function-…/>=… tag (skips closers). */
@@ -155,36 +231,8 @@ object TextToolCallParser {
         val toolId = block.substring(nameStart, nameEnd).trim()
         if (toolId.isEmpty()) return null
 
-        val params = LinkedHashMap<String, String>()
-        var i = nextParamTag(block, 0)
-        while (i >= 0) {
-            val keyStart = i + PARAM.length + 1 // skip separator
-            val keyEnd = block.indexOf('>', keyStart)
-            if (keyEnd < 0) break
-            val key = block.substring(keyStart, keyEnd).trim()
-            if (key.isEmpty()) {
-                i = nextParamTag(block, keyEnd + 1)
-                continue
-            }
-            // Models close parameters three ways: "</parameter>", and the
-            // named forms "</parameter-key>" / "</parameter=key>". Accept
-            // whichever appears first after the value starts.
-            val plainEnd = block.indexOf(PARAM_CLOSE, keyEnd + 1)
-            val namedDash = block.indexOf("</parameter-$key>", keyEnd + 1)
-            val namedEq = block.indexOf("</parameter=$key>", keyEnd + 1)
-            val namedEnd = listOf(namedDash, namedEq).filter { it >= 0 }.minOrNull()
-            val (valEnd, closerLen) = when {
-                plainEnd >= 0 && (namedEnd == null || plainEnd < namedEnd) ->
-                    plainEnd to PARAM_CLOSE.length
-                namedEnd != null ->
-                    namedEnd to (if (namedEnd == namedDash) "</parameter-$key>".length else "</parameter=$key>".length)
-                else -> break
-            }
-            params[key] = block.substring(keyEnd + 1, valEnd).trim()
-            i = nextParamTag(block, valEnd + closerLen)
-        }
-
-        val argumentsJson: String = if (params.isEmpty()) {
+        val params = parseParams(block)
+        val argumentsJson: String = if (params == null) {
             val brace = block.indexOf('{')
             if (brace >= 0) block.substring(brace) else "{}"
         } else {

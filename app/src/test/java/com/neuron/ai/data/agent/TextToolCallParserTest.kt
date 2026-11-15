@@ -110,6 +110,31 @@ class TextToolCallParserTest {
     }
 
     @Test
+    fun `parses function-assignment markup from qwen with no angle bracket`() {
+        val text = "I'll run the first one: echo \"Neuron test OK\".\n" +
+            "<tool_call>\n" +
+            "function=terminal.run\n" +
+            "<parameter=command>\n" +
+            "echo \"Neuron test OK\"\n" +
+            "</parameter>\n" +
+            "</function>\n" +
+            "</tool_call>"
+
+        val recovered = TextToolCallParser.parse(text)
+        assertEquals(1, recovered.size)
+        assertEquals("terminal.run", recovered[0].call.toolId)
+        val args = kotlinx.serialization.json.Json.parseToJsonElement(
+            recovered[0].call.argumentsJson
+        ).jsonObject
+        assertEquals("echo \"Neuron test OK\"", args["command"]?.toString()?.trim('"'))
+
+        val cleaned = TextToolCallParser.stripToolMarkup(text)
+        assertFalse(cleaned.contains("<tool_call>"))
+        assertFalse(cleaned.contains("function=terminal.run"))
+        assertTrue(cleaned.contains("I'll run the first one"))
+    }
+
+    @Test
     fun `escaped parameter values produce valid json`() {
         val text = "<tool_call><function-fs.write>" +
             "<parameter-path>notes.txt</parameter-path>" +
