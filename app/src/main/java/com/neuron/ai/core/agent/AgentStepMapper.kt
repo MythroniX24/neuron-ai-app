@@ -38,7 +38,8 @@ object AgentStepMapper {
             // CoT guard: thinking steps NEVER carry detail.
             detail = if (isThinking) null else activity.actionDetail?.take(200),
             toolId = activity.toolId,
-            actionDetail = activity.actionDetail?.take(200),
+            // Same CoT guard as [detail]: thinking steps carry no raw context.
+            actionDetail = if (isThinking) null else activity.actionDetail?.take(200),
             status = when (activity.state) {
                 AgentActivity.State.PENDING, AgentActivity.State.WAITING_FOR_PERMISSION ->
                     com.neuron.ai.core.conversation.AgentStepRecord.STATUS_RUNNING
