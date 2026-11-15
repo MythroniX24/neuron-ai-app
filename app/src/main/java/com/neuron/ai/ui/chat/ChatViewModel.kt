@@ -71,6 +71,17 @@ data class AgentActivityUi(
 }
 
 /**
+ * Unified live run state for BOTH agent systems: the new step timeline when
+ * it exists, otherwise the legacy [AgentActivityUi] list mapped onto the same
+ * record shape. The chat UI has one renderer and one state machine.
+ */
+data class AgentRunState(
+    val steps: List<AgentStepRecord>,
+    val elapsedMs: Long,
+    val isRunning: Boolean
+)
+
+/**
  * Phase 1 chat engine. Streams assistant responses through the agent core so
  * tool calls happen transparently; the user can stop, retry, regenerate and
  * edit messages. All provider access goes through [ProviderRepository].
@@ -148,6 +159,33 @@ class ChatViewModel(
      */
     private val _timeline = MutableStateFlow<List<com.neuron.ai.core.conversation.AgentStepRecord>>(emptyList())
     val timeline: StateFlow<List<com.neuron.ai.core.conversation.AgentStepRecord>> = _timeline.asStateFlow()
+
+    /** Wall-clock time of the ACTIVE turn; the timer label reads this. */
+    private val _turnElapsedMs = MutableStateFlow(0L)
+    val turnElapsedMs: StateFlow<Long> = _turnElapsedMs.asStateFlow()
+    private var elapsedJob: Job? = null
+
+    /**
+     * One state for the live agent run. Old activity rows and new timeline
+     * records both become [AgentStepRecord]s, so the unified chat renderer
+     * never needs to know which agent implementation produced them.
+     */
+    val liveAgentRun: StateFlow<AgentRunState?> = combine(
+        _generation,
+        _timeline,
+        _activity,
+        _turnElapsedMs
+    ) { generation, timeline, activity, elapsed ->
+        if (generation !is GenerationState.Streaming) {
+            null
+        } else {
+            AgentRunState(
+                steps = if (timeline.isNotEmpty()) timeline else activity.map { it.asStepRecord() },
+                elapsedMs = elapsed,
+                isRunning = true
+            )
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     private val _conversation = MutableStateFlow<Conversation?>(null)
     val conversation: StateFlow<Conversation?> = _conversation.asStateFlow()
@@ -931,6 +969,7 @@ class ChatViewModel(
         _generation.value = GenerationState.Streaming("")
 
         val started = System.currentTimeMillis()
+        startElapsedClock(started)
         var assistantBuffer = StringBuilder()
         var streamError: NeuronError? = null
 
@@ -1023,40 +1062,27 @@ class ChatViewModel(
                         }
 
                         is AgentEvent.IntermediateMessage -> {
-                            // Mid-loop narration is ONGOING progress — persist
-                            // it as its own ASSISTANT message so the transcript
-                            // reads IN SEQUENCE: narration → tool card →
-                            // narration → tool card → final answer. It also
-                            // lands in the live timeline as a step. It is never
-                            // merged into the final answer bubble.
-                            if (USE_LIVE_TIMELINE) {
+                            // Mid-loop narration is the model's visible PLAN —
+                            // render it as the collapsible Thought block inside
+                            // THIS turn's timeline instead of a separate
+                            // assistant bubble. Old turns that already stored
+                            // narration messages keep rendering normally.
+                            val thought = event.text.trim()
+                            if (USE_LIVE_TIMELINE && thought.isNotBlank()) {
+                                val now = System.currentTimeMillis()
                                 _timeline.value = _timeline.value +
-                                    com.neuron.ai.core.agent.AgentStepMapper.toRecord(
-                                        com.neuron.ai.core.agent.AgentActivity(
-                                            stepId = "narrate-${event.text.hashCode()}",
-                                            title = event.text.take(120),
-                                            state = com.neuron.ai.core.agent.AgentActivity.State.DONE,
-                                            toolId = null,
-                                            startedAtEpochMs = System.currentTimeMillis()
-                                        ),
-                                        typeOverride =
-                                            com.neuron.ai.core.conversation.AgentStepRecord.TYPE_INTERMEDIATE
+                                    com.neuron.ai.core.conversation.AgentStepRecord(
+                                        stepId = "thought-${now}-${thought.hashCode()}",
+                                        type = com.neuron.ai.core.conversation.AgentStepRecord.TYPE_THINKING,
+                                        label = "Thought",
+                                        detail = thought,
+                                        status = com.neuron.ai.core.conversation.AgentStepRecord.STATUS_DONE,
+                                        startedAtEpochMs = now,
+                                        finishedAtEpochMs = now
                                     )
-                            }
-                            runCatching {
-                                conversations.appendMessage(
-                                    conversationId,
-                                    Message.Role.ASSISTANT,
-                                    event.text.trim(),
-                                    metadata = MessageMetadata(
-                                        providerId = configId,
-                                        modelId = modelId,
-                                        isError = false
-                                    )
-                                )
                             }
                             // The streaming bubble must not carry narration
-                            // forward: each turn's text stands alone.
+                            // forward: only the final answer goes there.
                             assistantBuffer = StringBuilder()
                             _generation.value = GenerationState.Streaming("")
                         }
@@ -1108,6 +1134,7 @@ class ChatViewModel(
             // If a NEW turn has already started, this late unwind must not
             // append a second copy or touch the new turn's UI state.
             if (epoch == turnEpoch) {
+                stopElapsedClock(started)
                 withContext(kotlinx.coroutines.NonCancellable) {
                     taskId?.let { tasks.updateStatus(it, Task.Status.CANCELLED) }
                     if (assistantBuffer.isNotEmpty()) {
@@ -1133,6 +1160,7 @@ class ChatViewModel(
         // A stopped turn that finished late must not finalize over the new one.
         if (epoch != turnEpoch) return
 
+        stopElapsedClock(started)
         val elapsed = System.currentTimeMillis() - started
 
         if (streamError != null) {
@@ -1272,6 +1300,49 @@ class ChatViewModel(
                 step
             }
         }
+    }
+
+    // ---- Unified run timer -------------------------------------------------
+
+    private fun startElapsedClock(startedAt: Long) {
+        elapsedJob?.cancel()
+        _turnElapsedMs.value = 0L
+        elapsedJob = viewModelScope.launch {
+            while (true) {
+                _turnElapsedMs.value = System.currentTimeMillis() - startedAt
+                kotlinx.coroutines.delay(1_000)
+            }
+        }
+    }
+
+    private fun stopElapsedClock(startedAt: Long) {
+        elapsedJob?.cancel()
+        elapsedJob = null
+        _turnElapsedMs.value = (System.currentTimeMillis() - startedAt).coerceAtLeast(0L)
+    }
+
+    /** Legacy activity → unified step, so old and new runs share one renderer. */
+    private fun AgentActivityUi.asStepRecord(): AgentStepRecord {
+        val genericThinking = title.startsWith("Understanding") ||
+            title.startsWith("Continuing") ||
+            title.startsWith("Thinking")
+        return AgentStepRecord(
+            stepId = stepId,
+            type = if (genericThinking) {
+                AgentStepRecord.TYPE_THINKING
+            } else {
+                AgentStepRecord.TYPE_TOOL_CALL
+            },
+            label = title,
+            detail = detail,
+            toolId = null,
+            status = when (state) {
+                AgentActivityUi.AgentActivityState.RUNNING -> AgentStepRecord.STATUS_RUNNING
+                AgentActivityUi.AgentActivityState.DONE -> AgentStepRecord.STATUS_DONE
+                AgentActivityUi.AgentActivityState.FAILED -> AgentStepRecord.STATUS_FAILED
+            },
+            startedAtEpochMs = 0L
+        )
     }
 
     companion object {

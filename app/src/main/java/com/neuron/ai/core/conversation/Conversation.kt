@@ -36,6 +36,8 @@ data class AgentStepRecord(
     val label: String,
     val detail: String? = null,
     val toolId: String? = null,
+    /** Query / command / path the tool was called with (UI-safe, truncated). */
+    val actionDetail: String? = null,
     /** running | done | failed */
     val status: String,
     val startedAtEpochMs: Long = 0,

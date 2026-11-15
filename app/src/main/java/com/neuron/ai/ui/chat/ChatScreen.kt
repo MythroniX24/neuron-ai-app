@@ -3,7 +3,10 @@ package com.neuron.ai.ui.chat
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.Spring
@@ -79,6 +82,7 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -148,8 +152,7 @@ fun ChatScreen(
 
     val messages by viewModel.messages.collectAsStateWithLifecycle()
     val generation by viewModel.generationState.collectAsStateWithLifecycle()
-    val activity by viewModel.activity.collectAsStateWithLifecycle()
-    val timeline by viewModel.timeline.collectAsStateWithLifecycle()
+    val liveRun by viewModel.liveAgentRun.collectAsStateWithLifecycle()
     val draftAttachments by viewModel.draftAttachments.collectAsStateWithLifecycle()
     val attachmentNotice by viewModel.attachmentNotice.collectAsStateWithLifecycle()
     val queuedMessage by viewModel.queuedMessage.collectAsStateWithLifecycle()
@@ -157,6 +160,9 @@ fun ChatScreen(
 
     var draft by remember { mutableStateOf("") }
     val listState = rememberLazyListState()
+    val showJumpToLatest by remember {
+        derivedStateOf { listState.canScrollForward }
+    }
 
     // Message ids that already played their entrance animation.
     val entranceSeen = remember { androidx.compose.runtime.mutableStateListOf<String>() }
@@ -170,7 +176,7 @@ fun ChatScreen(
     // old effect animated on every token, which launched a new scroll
     // animation dozens of times per second and fought the user's finger.
     val streamingText = (generation as? GenerationState.Streaming)?.buffer.orEmpty()
-    LaunchedEffect(messages.size, activity.size) {
+    LaunchedEffect(messages.size, liveRun?.steps?.size) {
         val target = messages.size + if (generation is GenerationState.Streaming) 1 else 0
         if (target > 0) {
             val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
@@ -353,21 +359,12 @@ fun ChatScreen(
                 }
             }
 
-            if (timeline.isNotEmpty() || activity.isNotEmpty()) {
-                item {
-                    // Live timeline (flag-gated in the ViewModel); falls back
-                    // to the legacy step card until the rollout completes.
-                    if (timeline.isNotEmpty()) {
-                        AgentTimelineCard(steps = timeline)
-                    } else {
-                        AgentActivityCard(activity)
-                    }
-                }
-            }
-
             when (val gen = generation) {
                 is GenerationState.Streaming -> item {
-                    StreamingBubble(gen.buffer.ifEmpty { "…" })
+                    LiveAgentTurn(
+                        run = liveRun,
+                        buffer = gen.buffer
+                    )
                 }
 
                 is GenerationState.Failed -> item {
@@ -489,6 +486,40 @@ fun ChatScreen(
                 .fillMaxWidth()
                 .padding(Spacing.lg)
         )
+    }
+
+    // Quick jump to the newest message / live generation step. It only shows
+    // while the list can still scroll forward, i.e. the user has moved up.
+    AnimatedVisibility(
+        visible = showJumpToLatest,
+        enter = fadeIn(tween(140)) + slideInVertically(tween(180)) { it / 2 },
+        exit = fadeOut(tween(120)) + slideOutVertically(tween(160)) { it / 2 },
+        modifier = Modifier
+            .align(Alignment.BottomEnd)
+            .padding(end = Spacing.lg, bottom = 116.dp)
+    ) {
+        Surface(
+            onClick = {
+                screenScope.launch {
+                    val last = (listState.layoutInfo.totalItemsCount - 1).coerceAtLeast(0)
+                    listState.animateScrollToItem(last)
+                }
+            },
+            shape = RoundedCornerShape(50),
+            color = MaterialTheme.colorScheme.surfaceVariant,
+            tonalElevation = 3.dp,
+            shadowElevation = 6.dp,
+            modifier = Modifier.size(42.dp)
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(
+                    imageVector = Icons.Outlined.KeyboardArrowDown,
+                    contentDescription = "Jump to latest",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(22.dp)
+                )
+            }
+        }
     }
 
     // Custom presentation: dim scrim + bottom-anchored panel (replaces the
@@ -1025,15 +1056,32 @@ private fun MessageRow(
                     }
                 )
             }
-            // Persisted activity timeline for this turn (flag-gated data —
-            // only present when the live timeline produced the message).
+            // Persisted agent work: one collapsible duration header, then
+            // Thought + grouped tool rows. The final answer below stays
+            // visible when the work section is collapsed.
             val persistedSteps = message.metadata?.agentSteps.orEmpty()
             if (persistedSteps.isNotEmpty()) {
-                AgentTimelineCard(
-                    steps = persistedSteps,
-                    fullResultResolver = fullResultResolver,
-                    modifier = Modifier.padding(bottom = Spacing.xs)
+                var workExpanded by remember(message.id) { mutableStateOf(true) }
+                AgentTurnHeader(
+                    elapsedMs = runDurationMs(
+                        steps = persistedSteps,
+                        fallbackMs = message.metadata?.generationMs
+                    ),
+                    expanded = workExpanded,
+                    isLive = false,
+                    onToggle = { workExpanded = !workExpanded }
                 )
+                AnimatedVisibility(
+                    visible = workExpanded,
+                    enter = expandVertically(tween(200)) + fadeIn(tween(160)),
+                    exit = shrinkVertically(tween(160)) + fadeOut(tween(120))
+                ) {
+                    AgentTimelineCard(
+                        steps = persistedSteps,
+                        fullResultResolver = fullResultResolver,
+                        modifier = Modifier.padding(bottom = Spacing.xs)
+                    )
+                }
             }
             Box(
                 Modifier.combinedClickable(
@@ -1120,6 +1168,35 @@ private fun ToolMessageCard(message: Message) {
                 )
             }
         }
+    }
+}
+
+/**
+ * The live turn is ONE agent surface: duration header → Thought/tools →
+ * streaming answer. Both the old activity list and the new timeline records
+ * arrive here through [AgentRunState].
+ */
+@Composable
+private fun LiveAgentTurn(run: AgentRunState?, buffer: String) {
+    var expanded by remember { mutableStateOf(true) }
+    Column(Modifier.fillMaxWidth()) {
+        AgentTurnHeader(
+            elapsedMs = run?.elapsedMs ?: 0L,
+            expanded = expanded,
+            isLive = true,
+            onToggle = { expanded = !expanded }
+        )
+        AnimatedVisibility(
+            visible = expanded && run?.steps?.isNotEmpty() == true,
+            enter = expandVertically(tween(200)) + fadeIn(tween(160)),
+            exit = shrinkVertically(tween(160)) + fadeOut(tween(120))
+        ) {
+            AgentTimelineCard(
+                steps = run?.steps.orEmpty(),
+                modifier = Modifier.padding(bottom = Spacing.xs)
+            )
+        }
+        StreamingBubble(buffer.ifEmpty { "…" })
     }
 }
 

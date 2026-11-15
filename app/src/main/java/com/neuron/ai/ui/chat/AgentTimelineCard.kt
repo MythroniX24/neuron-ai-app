@@ -1,15 +1,16 @@
 package com.neuron.ai.ui.chat
 
-import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -18,21 +19,17 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Bolt
 import androidx.compose.material.icons.outlined.Build
-import androidx.compose.material.icons.outlined.Chat
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.Edit
-import androidx.compose.material.icons.outlined.Info
-import androidx.compose.material.icons.outlined.Psychology
+import androidx.compose.material.icons.outlined.FolderOpen
+import androidx.compose.material.icons.outlined.KeyboardArrowDown
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Terminal
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -41,6 +38,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
@@ -50,13 +49,82 @@ import com.neuron.ai.ui.theme.Spacing
 import kotlin.math.max
 
 /**
- * Live agent activity timeline (Claude-style).
- *
- * Slim vertical rail: one line per step, a distinct icon per step type, muted
- * secondary text, a soft pulse ONLY on the currently running step, collapsed
- * by default. Tapping a finished step expands its full detail — resolved
- * lazily by [fullResultResolver] from the conversation's persisted TOOL
- * messages, so no output is duplicated into the timeline itself.
+ * Collapsible "Worked for …" header shown above one agent turn. Tapping it
+ * hides/shows the Thought + tool rows; the final answer text stays visible.
+ */
+@Composable
+fun AgentTurnHeader(
+    elapsedMs: Long,
+    expanded: Boolean,
+    isLive: Boolean,
+    onToggle: () -> Unit
+) {
+    val rotation by animateFloatAsState(
+        targetValue = if (expanded) 0f else -180f,
+        animationSpec = tween(200, easing = FastOutSlowInEasing),
+        label = "runHeaderChevron"
+    )
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onToggle)
+            .padding(vertical = Spacing.xs),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = if (isLive) {
+                "Working for ${formatRunDuration(elapsedMs)}"
+            } else {
+                "Worked for ${formatRunDuration(elapsedMs)}"
+            },
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.weight(1f)
+        )
+        Icon(
+            imageVector = Icons.Outlined.KeyboardArrowDown,
+            contentDescription = if (expanded) "Collapse work" else "Expand work",
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier
+                .size(18.dp)
+                .graphicsLayer { rotationZ = rotation }
+        )
+    }
+}
+
+/** "56m 39s" / "1h 2m 3s" — matches the reference's compact duration label. */
+fun formatRunDuration(elapsedMs: Long): String {
+    val totalSeconds = (elapsedMs / 1_000L).coerceAtLeast(0L)
+    val hours = totalSeconds / 3_600L
+    val minutes = (totalSeconds % 3_600L) / 60L
+    val seconds = totalSeconds % 60L
+    return when {
+        hours > 0 -> "${hours}h ${minutes}m ${seconds}s"
+        minutes > 0 -> "${minutes}m ${seconds}s"
+        else -> "${seconds}s"
+    }
+}
+
+/** Total span of a persisted turn, falling back to stored generation time. */
+fun runDurationMs(
+    steps: List<AgentStepRecord>,
+    fallbackMs: Long? = null
+): Long {
+    val starts = steps.mapNotNull { it.startedAtEpochMs.takeIf { time -> time > 0L } }
+    val ends = steps.mapNotNull { it.finishedAtEpochMs }
+    val span = if (starts.isNotEmpty() && ends.isNotEmpty()) {
+        (ends.maxOrNull() ?: 0L) - (starts.minOrNull() ?: 0L)
+    } else {
+        0L
+    }
+    return max(fallbackMs ?: 0L, span.coerceAtLeast(0L))
+}
+
+/**
+ * Borderless agent timeline (Thought blocks + grouped tool calls). No card
+ * surface: the rows read as part of the assistant message, exactly like the
+ * reference. Every row expands downward; tool output is resolved lazily from
+ * the persisted TOOL messages.
  */
 @Composable
 fun AgentTimelineCard(
@@ -64,18 +132,21 @@ fun AgentTimelineCard(
     modifier: Modifier = Modifier,
     fullResultResolver: (String) -> String? = { null }
 ) {
-    if (steps.isEmpty()) return
-    Surface(
-        shape = RoundedCornerShape(14.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant,
-        modifier = modifier
+    val entries = remember(steps) { buildAgentRunEntries(steps) }
+    if (entries.isEmpty()) return
+
+    Column(
+        modifier = modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(2.dp)
     ) {
-        Column(Modifier.padding(horizontal = Spacing.md, vertical = Spacing.sm)) {
-            steps.forEachIndexed { index, step ->
-                TimelineRow(
-                    step = step,
-                    first = index == 0,
-                    last = index == steps.lastIndex,
+        entries.forEachIndexed { index, entry ->
+            when (entry) {
+                is AgentRunEntry.Thought -> AgentThoughtBlock(
+                    entry = entry,
+                    defaultExpanded = index == 0
+                )
+                is AgentRunEntry.Tools -> AgentToolGroupBlock(
+                    group = entry.group,
                     fullResultResolver = fullResultResolver
                 )
             }
@@ -84,148 +155,316 @@ fun AgentTimelineCard(
 }
 
 @Composable
-private fun TimelineRow(
-    step: AgentStepRecord,
-    first: Boolean,
-    last: Boolean,
-    fullResultResolver: (String) -> String?
+private fun AgentThoughtBlock(
+    entry: AgentRunEntry.Thought,
+    defaultExpanded: Boolean
 ) {
-    var expanded by remember(step.stepId) { mutableStateOf(false) }
-    val running = step.status == AgentStepRecord.STATUS_RUNNING
-    val failed = step.status == AgentStepRecord.STATUS_FAILED
-
-    val iconTint by animateColorAsState(
-        targetValue = when {
-            failed -> MaterialTheme.colorScheme.error
-            running -> MaterialTheme.colorScheme.primary
-            else -> MaterialTheme.colorScheme.onSurfaceVariant
-        },
-        label = "timelineTint"
+    var expanded by remember(entry.stepId) { mutableStateOf(defaultExpanded) }
+    val rotation by animateFloatAsState(
+        targetValue = if (expanded) 0f else -180f,
+        animationSpec = tween(180, easing = FastOutSlowInEasing),
+        label = "thoughtChevron"
     )
 
-    Row(
-        verticalAlignment = Alignment.Top,
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(enabled = !running) { expanded = !expanded }
-            .padding(vertical = 2.dp)
-    ) {
-        // Leading rail column: connector segments above/below the icon.
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Box(
-                Modifier
-                    .width(2.dp)
-                    .height(if (first) 6.dp else 12.dp)
-                    .background(MaterialTheme.colorScheme.outlineVariant)
+    Column(Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { expanded = !expanded }
+                .padding(vertical = Spacing.xs),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "✦",
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.primary
             )
-            Box(
-                contentAlignment = Alignment.Center,
-                modifier = Modifier.size(26.dp)
-            ) {
-                if (running) {
-                    val transition = rememberInfiniteTransition(label = "timelinePulse")
-                    val alpha by transition.animateFloat(
-                        initialValue = 0.3f,
-                        targetValue = 1f,
-                        infiniteRepeatable(
-                            animation = tween(700, easing = LinearEasing),
-                            repeatMode = RepeatMode.Reverse
-                        ),
-                        label = "timelinePulseAlpha"
-                    )
-                    Box(
-                        Modifier
-                            .size(24.dp)
-                            .background(
-                                MaterialTheme.colorScheme.primary.copy(alpha = 0.16f * alpha),
-                                CircleShape
-                            )
-                    )
-                }
-                Icon(
-                    imageVector = typeIcon(step.type),
-                    contentDescription = null,
-                    tint = iconTint,
-                    modifier = Modifier.size(15.dp)
-                )
-            }
-            Box(
-                Modifier
-                    .width(2.dp)
-                    .height(if (last) 6.dp else 12.dp)
-                    .background(MaterialTheme.colorScheme.outlineVariant)
+            Spacer(Modifier.width(Spacing.sm))
+            Text(
+                text = "Thought",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.weight(1f)
+            )
+            Icon(
+                imageVector = Icons.Outlined.KeyboardArrowDown,
+                contentDescription = if (expanded) "Collapse thought" else "Expand thought",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier
+                    .size(16.dp)
+                    .graphicsLayer { rotationZ = rotation }
             )
         }
+        AnimatedVisibility(
+            visible = expanded && entry.text.isNotBlank(),
+            enter = expandVertically(tween(190)) + fadeIn(tween(160)),
+            exit = shrinkVertically(tween(160)) + fadeOut(tween(120))
+        ) {
+            Text(
+                text = entry.text,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.padding(start = 26.dp, bottom = Spacing.sm)
+            )
+        }
+    }
+}
 
-        Spacer(Modifier.width(Spacing.sm))
+@Composable
+private fun AgentToolGroupBlock(
+    group: AgentToolGroup,
+    fullResultResolver: (String) -> String?
+) {
+    var expanded by remember(group.key) { mutableStateOf(false) }
+    val rotation by animateFloatAsState(
+        targetValue = if (expanded) 0f else -180f,
+        animationSpec = tween(180, easing = FastOutSlowInEasing),
+        label = "toolChevron"
+    )
+    val count = group.calls.size
+    val header = if (count > 1) {
+        "${group.kind.groupLabel} · $count calls"
+    } else {
+        group.kind.singleLabel
+    }
+    val path = group.calls.firstOrNull()?.path
+    val failed = group.calls.any { it.step.status == AgentStepRecord.STATUS_FAILED }
 
-        Column(Modifier.weight(1f)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+    Column(Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { expanded = !expanded }
+                .padding(vertical = Spacing.xs),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = group.kind.icon,
+                contentDescription = null,
+                tint = if (failed) MaterialTheme.colorScheme.error else group.kind.tint,
+                modifier = Modifier.size(18.dp)
+            )
+            Spacer(Modifier.width(Spacing.sm))
+            Text(
+                text = header,
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            if (count == 1 && !path.isNullOrBlank()) {
+                Spacer(Modifier.width(Spacing.sm))
                 Text(
-                    text = step.label,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = if (failed) {
-                        MaterialTheme.colorScheme.error
-                    } else {
-                        MaterialTheme.colorScheme.onSurface
-                    },
-                    maxLines = if (expanded) 4 else 1,
+                    text = path,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f, fill = false)
+                    modifier = Modifier.weight(1f)
                 )
-                val duration = durationLabel(step)
-                if (duration != null) {
-                    Spacer(Modifier.width(Spacing.xs))
-                    Text(
-                        text = duration,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
+            } else {
+                Spacer(Modifier.weight(1f))
             }
-            if (expanded) {
-                val full = fullResultResolver(step.stepId)
-                if (!full.isNullOrBlank()) {
-                    Text(
-                        text = full,
-                        style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 14,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.padding(top = Spacing.xs)
+            Icon(
+                imageVector = Icons.Outlined.KeyboardArrowDown,
+                contentDescription = if (expanded) "Collapse tool call" else "Expand tool call",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier
+                    .size(16.dp)
+                    .graphicsLayer { rotationZ = rotation }
+            )
+        }
+        AnimatedVisibility(
+            visible = expanded,
+            enter = expandVertically(tween(200)) + fadeIn(tween(160)),
+            exit = shrinkVertically(tween(160)) + fadeOut(tween(120))
+        ) {
+            Column(
+                modifier = Modifier.padding(start = 26.dp, bottom = Spacing.sm),
+                verticalArrangement = Arrangement.spacedBy(Spacing.xs)
+            ) {
+                group.calls.forEach { call ->
+                    AgentToolCallDetail(
+                        call = call,
+                        fullResultResolver = fullResultResolver
                     )
                 }
             }
         }
+    }
+}
 
-        Spacer(Modifier.width(Spacing.sm))
+@Composable
+private fun AgentToolCallDetail(
+    call: AgentToolCall,
+    fullResultResolver: (String) -> String?
+) {
+    val detail = call.step.actionDetail ?: call.path
+    if (!detail.isNullOrBlank()) {
         Text(
-            text = when (step.status) {
-                AgentStepRecord.STATUS_DONE -> "✓"
-                AgentStepRecord.STATUS_FAILED -> "✗"
-                else -> "⟳"
-            },
-            style = MaterialTheme.typography.labelMedium,
-            color = iconTint
+            text = detail,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            fontFamily = FontFamily.Monospace,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis
+        )
+    }
+    val output = fullResultResolver(call.step.stepId) ?: call.step.detail
+    if (!output.isNullOrBlank()) {
+        Text(
+            text = output.take(4_000),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            fontFamily = FontFamily.Monospace,
+            maxLines = 12,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(
+                    MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                    RoundedCornerShape(10.dp)
+                )
+                .padding(8.dp)
         )
     }
 }
 
-private fun typeIcon(type: String): ImageVector = when (type) {
-    AgentStepRecord.TYPE_ROUTING -> Icons.Outlined.Info
-    AgentStepRecord.TYPE_THINKING -> Icons.Outlined.Psychology
-    AgentStepRecord.TYPE_INTERMEDIATE -> Icons.Outlined.Chat
-    AgentStepRecord.TYPE_COMMAND -> Icons.Outlined.Terminal
-    AgentStepRecord.TYPE_WEB_SEARCH -> Icons.Outlined.Search
-    AgentStepRecord.TYPE_FILE_READ -> Icons.Outlined.Description
-    AgentStepRecord.TYPE_FILE_EDIT -> Icons.Outlined.Edit
-    AgentStepRecord.TYPE_BUILD_TEST -> Icons.Outlined.Build
-    else -> Icons.Outlined.Bolt
+// ---------------------------------------------------------------------------
+// Pure mapping: persisted/live steps → renderable Thought and tool groups
+// ---------------------------------------------------------------------------
+
+internal sealed interface AgentRunEntry {
+    data class Thought(
+        val stepId: String,
+        val text: String
+    ) : AgentRunEntry
+
+    data class Tools(val group: AgentToolGroup) : AgentRunEntry
 }
 
-/** "1.2s" style duration for finished steps; null while running. */
-private fun durationLabel(step: AgentStepRecord): String? {
-    val end = step.finishedAtEpochMs ?: return null
-    val seconds = max(0, end - step.startedAtEpochMs) / 1000.0
-    return if (seconds >= 0.05) String.format("%.1fs", seconds) else null
+internal data class AgentToolGroup(
+    val key: String,
+    val kind: AgentToolKind,
+    val calls: List<AgentToolCall>
+)
+
+internal data class AgentToolCall(
+    val step: AgentStepRecord,
+    val title: String,
+    val path: String?
+)
+
+internal enum class AgentToolKind(
+    val groupLabel: String,
+    val singleLabel: String,
+    val icon: ImageVector,
+    val tint: Color
+) {
+    SEARCH("Search", "Search", Icons.Outlined.Search, Color(0xFFE6B450)),
+    READ("Read", "Read files", Icons.Outlined.Description, Color(0xFF7BC47F)),
+    LIST("List", "List", Icons.Outlined.FolderOpen, Color(0xFF7BC47F)),
+    FIND("Find files", "Find files", Icons.Outlined.Search, Color(0xFFE6B450)),
+    EDIT("Edit", "Edit files", Icons.Outlined.Edit, Color(0xFF9AA4B2)),
+    COMMAND("Run", "Run", Icons.Outlined.Terminal, Color(0xFF9AA4B2)),
+    BUILD("Build", "Build", Icons.Outlined.Build, Color(0xFF9AA4B2)),
+    OTHER("Tool", "Tool", Icons.Outlined.Build, Color(0xFF9AA4B2))
+}
+
+private val GENERIC_THOUGHT_LABELS = setOf(
+    "Thinking", "Understanding request", "Continuing", "Thought"
+)
+
+internal fun buildAgentRunEntries(steps: List<AgentStepRecord>): List<AgentRunEntry> {
+    val visible = steps.filterNot { it.type == AgentStepRecord.TYPE_ROUTING }
+    val entries = mutableListOf<AgentRunEntry>()
+    var index = 0
+    while (index < visible.size) {
+        val step = visible[index]
+        if (isThought(step)) {
+            // Generic loop bookkeeping without a body is noise after the run.
+            val canShow = step.detail?.isNotBlank() == true ||
+                step.label !in GENERIC_THOUGHT_LABELS
+            if (canShow) {
+                val text = step.detail?.trim()
+                    ?.takeIf { it.isNotBlank() }
+                    ?: step.label.takeIf { it !in GENERIC_THOUGHT_LABELS }.orEmpty()
+                if (text.isNotBlank()) {
+                    entries += AgentRunEntry.Thought(step.stepId, text)
+                }
+            }
+            index++
+            continue
+        }
+
+        val kind = kindOf(step)
+        val calls = mutableListOf<AgentToolCall>()
+        while (index < visible.size && !isThought(visible[index])) {
+            val callStep = visible[index]
+            if (kindOf(callStep) != kind) break
+            calls += AgentToolCall(
+                step = callStep,
+                title = displayTitle(callStep),
+                path = actionPath(callStep)
+            )
+            index++
+        }
+        entries += AgentRunEntry.Tools(
+            AgentToolGroup(
+                key = "${kind.name}-${calls.first().step.stepId}",
+                kind = kind,
+                calls = calls
+            )
+        )
+    }
+    return entries
+}
+
+private fun isThought(step: AgentStepRecord): Boolean =
+    step.type == AgentStepRecord.TYPE_THINKING ||
+        step.type == AgentStepRecord.TYPE_INTERMEDIATE
+
+private fun kindOf(step: AgentStepRecord): AgentToolKind {
+    val tool = step.toolId.orEmpty()
+    return when {
+        tool.startsWith("web.search") || tool.startsWith("browser.") -> AgentToolKind.SEARCH
+        tool == "web.read" || tool == "fs.read" || tool == "fs.readfile" -> AgentToolKind.READ
+        tool == "fs.listdir" || tool == "fs.list" -> AgentToolKind.LIST
+        tool == "fs.search" || tool == "fs.glob" || tool == "fs.find" -> AgentToolKind.FIND
+        tool in setOf("fs.writefile", "fs.mkdir", "fs.rename", "fs.move", "fs.copy", "code.edit", "code.patch") ->
+            AgentToolKind.EDIT
+        tool.startsWith("terminal.") -> AgentToolKind.COMMAND
+        tool == "code.build" || tool == "code.test" -> AgentToolKind.BUILD
+        else -> when (step.type) {
+            AgentStepRecord.TYPE_WEB_SEARCH -> AgentToolKind.SEARCH
+            AgentStepRecord.TYPE_FILE_READ -> AgentToolKind.READ
+            AgentStepRecord.TYPE_FILE_EDIT -> AgentToolKind.EDIT
+            AgentStepRecord.TYPE_COMMAND -> AgentToolKind.COMMAND
+            AgentStepRecord.TYPE_BUILD_TEST -> AgentToolKind.BUILD
+            // Legacy activity rows have no toolId: classify by their public
+            // title so old runs still get the right icon/group.
+            else -> {
+                val label = step.label.lowercase()
+                when {
+                    "search" in label || "find" in label -> AgentToolKind.SEARCH
+                    "list" in label -> AgentToolKind.LIST
+                    "read" in label -> AgentToolKind.READ
+                    "edit" in label || "write" in label -> AgentToolKind.EDIT
+                    "run" in label || "terminal" in label -> AgentToolKind.COMMAND
+                    "build" in label || "test" in label -> AgentToolKind.BUILD
+                    else -> AgentToolKind.OTHER
+                }
+            }
+        }
+    }
+}
+
+private fun displayTitle(step: AgentStepRecord): String =
+    step.label.substringBefore(": ").ifBlank { "Tool" }
+
+private fun actionPath(step: AgentStepRecord): String? {
+    val detail = step.actionDetail?.trim()
+    if (!detail.isNullOrBlank()) return detail
+    val fromLabel = step.label.substringAfter(": ", "").trim()
+    return fromLabel.takeIf { it.isNotBlank() }
 }
