@@ -30,7 +30,7 @@ class LocalModelRepositoryBehaviorTest {
         assertNotNull("test fixture missing", stream)
         val source = tmp.newFile("behavior-${System.nanoTime()}.gguf")
         source.writeBytes(stream!!.use { it.readBytes() })
-        repo.importFile(source, "tinyllama-behavior.Q4_K_M.gguf").getOrThrow().id
+        return repo.importFile(source, "tinyllama-behavior.Q4_K_M.gguf").getOrThrow().id
     }
 
     @Test
