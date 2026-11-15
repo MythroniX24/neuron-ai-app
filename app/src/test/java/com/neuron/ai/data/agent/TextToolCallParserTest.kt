@@ -126,7 +126,10 @@ class TextToolCallParserTest {
         val args = kotlinx.serialization.json.Json.parseToJsonElement(
             recovered[0].call.argumentsJson
         ).jsonObject
-        assertEquals("echo \"Neuron test OK\"", args["command"]?.toString()?.trim('"'))
+        assertEquals(
+            "echo \"Neuron test OK\"",
+            (args["command"] as kotlinx.serialization.json.JsonPrimitive).content
+        )
 
         val cleaned = TextToolCallParser.stripToolMarkup(text)
         assertFalse(cleaned.contains("<tool_call>"))
