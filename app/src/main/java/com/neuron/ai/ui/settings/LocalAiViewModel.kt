@@ -373,6 +373,14 @@ class LocalAiViewModel(
 
     private var searchJob: kotlinx.coroutines.Job? = null
 
+    /** Runs the current query immediately, bypassing the typing debounce. */
+    fun submitSearch() {
+        val query = _state.value.searchQuery.trim()
+        if (query.isBlank()) return
+        searchJob?.cancel()
+        searchJob = viewModelScope.launch { runSearch(query) }
+    }
+
     private suspend fun runSearch(query: String) {
         _state.value = _state.value.copy(searching = true)
         val results = try {

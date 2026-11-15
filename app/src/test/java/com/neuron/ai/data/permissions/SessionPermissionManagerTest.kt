@@ -32,9 +32,18 @@ class SessionPermissionManagerTest {
     }
 
     @Test
+    fun `network access is on by default so web search needs no prompt`() = runTest {
+        val manager = SessionPermissionManager()
+
+        assertTrue(manager.isGranted(Capability.NETWORK))
+        assertTrue(manager.request(Capability.NETWORK, "search the web", "web.search"))
+        assertTrue(manager.pendingRequests.first().isEmpty())
+    }
+
+    @Test
     fun `deny resolves the request as false without granting`() = runTest {
         val manager = SessionPermissionManager()
-        val decision = async { manager.request(Capability.NETWORK, "call web", "web.tool") }
+        val decision = async { manager.request(Capability.FILESYSTEM_READ, "read a file", "fs.read") }
 
         withTimeout(2_000) {
             while (manager.pendingRequests.first().isEmpty()) kotlinx.coroutines.delay(10)
@@ -42,7 +51,7 @@ class SessionPermissionManagerTest {
         manager.deny(manager.pendingRequests.first().single().id)
 
         assertFalse(decision.await())
-        assertFalse(manager.isGranted(Capability.NETWORK))
+        assertFalse(manager.isGranted(Capability.FILESYSTEM_READ))
         assertTrue(manager.pendingRequests.first().isEmpty())
     }
 

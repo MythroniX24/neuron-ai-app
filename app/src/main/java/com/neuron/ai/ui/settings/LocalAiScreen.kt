@@ -22,6 +22,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -42,13 +44,13 @@ import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
@@ -66,6 +68,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -102,7 +108,6 @@ fun LocalAiScreen(
 
     var pane by remember { mutableStateOf(ModelsPane.LIST) }
     var detailTarget by remember { mutableStateOf<ModelDetailTarget?>(null) }
-    var showAddSheet by remember { mutableStateOf(false) }
     var showDownloadSettings by remember { mutableStateOf(false) }
     var deleteTarget by remember { mutableStateOf<LocalModelRecord?>(null) }
 
@@ -138,7 +143,10 @@ fun LocalAiScreen(
             onOpenDetail = openDetail,
             onOpenSettings = { onOpenModelSettings(it.id) },
             onDelete = { deleteTarget = it },
-            onAdd = { showAddSheet = true },
+            onAdd = {
+                viewModel.onSearchQueryChange("")
+                pane = ModelsPane.SEARCH
+            },
             onOpenDownloadSettings = { showDownloadSettings = true },
             onClearImportNotice = viewModel::clearImportNotice,
             onClearBenchmarkNotice = viewModel::clearBenchmarkNotice
@@ -148,6 +156,8 @@ fun LocalAiScreen(
             state = state,
             onBack = { pane = ModelsPane.LIST },
             onQueryChange = viewModel::onSearchQueryChange,
+            onSubmitSearch = viewModel::submitSearch,
+            onImportLocal = { importPicker.launch(arrayOf("*/*")) },
             onOpenDetail = { repoId, displayName -> openDetail(repoId, displayName, true) }
         )
 
@@ -168,21 +178,6 @@ fun LocalAiScreen(
                 )
             }
         }
-    }
-
-    if (showAddSheet) {
-        AddModelSheet(
-            onDismiss = { showAddSheet = false },
-            onHuggingFace = {
-                showAddSheet = false
-                viewModel.onSearchQueryChange("")
-                pane = ModelsPane.SEARCH
-            },
-            onLocalFile = {
-                showAddSheet = false
-                importPicker.launch(arrayOf("*/*"))
-            }
-        )
     }
 
     if (showDownloadSettings) {
@@ -515,8 +510,17 @@ private fun ModelsSearch(
     state: LocalAiUiState,
     onBack: () -> Unit,
     onQueryChange: (String) -> Unit,
+    onSubmitSearch: () -> Unit,
+    onImportLocal: () -> Unit,
     onOpenDetail: (String, String) -> Unit
 ) {
+    val focusRequester = remember { FocusRequester() }
+    val focusManager = LocalFocusManager.current
+    val submit: () -> Unit = {
+        onSubmitSearch()
+        focusManager.clearFocus()
+    }
+
     Column(
         Modifier
             .fillMaxSize()
@@ -524,16 +528,59 @@ private fun ModelsSearch(
             .imePadding()
     ) {
         TopAppBar(
-            title = { Text("Models", style = MaterialTheme.typography.titleMedium) },
+            title = { Text("Search models", style = MaterialTheme.typography.titleMedium) },
             navigationIcon = {
                 IconButton(onClick = onBack) {
                     Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Back")
+                }
+            },
+            actions = {
+                IconButton(onClick = onImportLocal) {
+                    Icon(Icons.Outlined.Description, contentDescription = "Import a local GGUF file")
                 }
             },
             colors = TopAppBarDefaults.topAppBarColors(
                 containerColor = MaterialTheme.colorScheme.background
             )
         )
+
+        // Search lives at the TOP: tap +, type, then press the search button.
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = Spacing.lg, vertical = Spacing.sm),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
+        ) {
+            OutlinedTextField(
+                value = state.searchQuery,
+                onValueChange = onQueryChange,
+                modifier = Modifier
+                    .weight(1f)
+                    .focusRequester(focusRequester),
+                placeholder = { Text("Search GGUF models") },
+                singleLine = true,
+                shape = RoundedCornerShape(28.dp),
+                leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null) },
+                trailingIcon = {
+                    if (state.searchQuery.isNotEmpty()) {
+                        IconButton(onClick = { onQueryChange("") }) {
+                            Icon(Icons.Outlined.Close, contentDescription = "Clear")
+                        }
+                    }
+                },
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                keyboardActions = KeyboardActions(onSearch = { submit() })
+            )
+            FilledTonalButton(
+                onClick = submit,
+                enabled = state.searchQuery.isNotBlank() && !state.searching
+            ) {
+                Icon(Icons.Outlined.Search, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(Spacing.xs))
+                Text("Search")
+            }
+        }
 
         LazyColumn(
             modifier = Modifier.weight(1f),
@@ -592,27 +639,12 @@ private fun ModelsSearch(
                 )
             }
         }
+    }
 
-        Surface(color = MaterialTheme.colorScheme.background) {
-            OutlinedTextField(
-                value = state.searchQuery,
-                onValueChange = onQueryChange,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = Spacing.lg, vertical = Spacing.sm),
-                placeholder = { Text("Search models") },
-                singleLine = true,
-                shape = RoundedCornerShape(28.dp),
-                leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null) },
-                trailingIcon = {
-                    if (state.searchQuery.isNotEmpty()) {
-                        IconButton(onClick = { onQueryChange("") }) {
-                            Icon(Icons.Outlined.Close, contentDescription = "Clear")
-                        }
-                    }
-                }
-            )
-        }
+    LaunchedEffect(Unit) {
+        // Focus after the screen is laid out so the keyboard is ready to type.
+        kotlinx.coroutines.delay(150)
+        runCatching { focusRequester.requestFocus() }
     }
 }
 
@@ -878,86 +910,8 @@ private fun GgufFileRow(
 }
 
 // ---------------------------------------------------------------------------
-// Add model sheet + global download settings
+// Global download settings
 // ---------------------------------------------------------------------------
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun AddModelSheet(
-    onDismiss: () -> Unit,
-    onHuggingFace: () -> Unit,
-    onLocalFile: () -> Unit
-) {
-    ModalBottomSheet(onDismissRequest = onDismiss) {
-        Column(
-            Modifier
-                .fillMaxWidth()
-                .padding(horizontal = Spacing.lg)
-                .padding(bottom = Spacing.xl)
-        ) {
-            Text("Add a model", style = MaterialTheme.typography.titleMedium)
-            Spacer(Modifier.height(Spacing.sm))
-            AddSheetAction(
-                icon = Icons.Outlined.Search,
-                title = "Add from Hugging Face",
-                subtitle = "Search GGUF repositories",
-                onClick = onHuggingFace
-            )
-            AddSheetAction(
-                icon = Icons.Outlined.Description,
-                title = "Add Local Model",
-                subtitle = "Import a .gguf file from this device",
-                onClick = onLocalFile
-            )
-            Spacer(Modifier.height(Spacing.md))
-            IconButton(
-                onClick = onDismiss,
-                modifier = Modifier.align(Alignment.CenterHorizontally)
-            ) {
-                Icon(Icons.Outlined.Close, contentDescription = "Close")
-            }
-        }
-    }
-}
-
-@Composable
-private fun AddSheetAction(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    title: String,
-    subtitle: String,
-    onClick: () -> Unit
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(vertical = Spacing.sm),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Surface(
-            shape = CircleShape,
-            color = MaterialTheme.colorScheme.primaryContainer,
-            modifier = Modifier.size(46.dp)
-        ) {
-            Box(contentAlignment = Alignment.Center) {
-                Icon(
-                    icon,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary
-                )
-            }
-        }
-        Spacer(Modifier.width(Spacing.md))
-        Column {
-            Text(title, style = MaterialTheme.typography.titleSmall)
-            Text(
-                subtitle,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-    }
-}
 
 @Composable
 private fun DownloadSettingsDialog(

@@ -27,7 +27,14 @@ import java.util.UUID
 class SessionPermissionManager : PermissionManager {
 
     private val mutex = Mutex()
-    private val _granted = MutableStateFlow(emptySet<Capability>())
+    /**
+     * Network access is ON by default: the SAFE web.search/web.read tools are
+     * what make answers current, and asking on every chat turn trained users
+     * to dismiss the dialog without reading it. Browser CONTROL is separate
+     * (Capability.BROWSER) and still prompts; destructive tools never get a
+     * remembered grant.
+     */
+    private val _granted = MutableStateFlow(setOf(Capability.NETWORK))
     override val granted: Flow<Set<Capability>> = _granted.asStateFlow()
 
     private val _pending = MutableStateFlow(emptyList<PermissionRequest>())
@@ -166,7 +173,9 @@ class SessionPermissionManager : PermissionManager {
         capability in _granted.value
 
     override suspend fun resetDecisions() = mutex.withLock {
-        _granted.value = emptySet()
+        // Back to the product default, not to "nothing works": web search
+        // stays available after a permission reset.
+        _granted.value = setOf(Capability.NETWORK)
         deniedKeys.value = emptySet()
         _decisions.value = emptyList()
         Unit

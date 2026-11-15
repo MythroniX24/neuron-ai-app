@@ -51,13 +51,13 @@ class SessionPermissionScopeTest {
     @Test
     fun `always deny auto-rejects future requests`() = runTest {
         val manager = SessionPermissionManager()
-        val decision = async { manager.request(Capability.NETWORK, "web", "tool") }
+        val decision = async { manager.request(Capability.FILESYSTEM_READ, "read", "tool") }
         val request = awaitPending(manager)
 
         manager.decide(request.id, granted = false, scope = DecisionScope.ALWAYS)
 
         assertFalse(decision.await())
-        assertFalse(manager.request(Capability.NETWORK, "again", "tool"))
+        assertFalse(manager.request(Capability.FILESYSTEM_READ, "again", "tool"))
         assertEquals(1, manager.decisions.first().size)
     }
 
@@ -78,7 +78,7 @@ class SessionPermissionScopeTest {
     }
 
     @Test
-    fun `resetDecisions clears everything`() = runTest {
+    fun `resetDecisions clears remembered grants but keeps web search on`() = runTest {
         val manager = SessionPermissionManager()
         val decision = async { manager.request(Capability.TERMINAL, "cmd", "tool") }
         val request = awaitPending(manager)
@@ -87,6 +87,7 @@ class SessionPermissionScopeTest {
         manager.resetDecisions()
 
         assertFalse(manager.isGranted(Capability.TERMINAL))
+        assertTrue(manager.isGranted(Capability.NETWORK))
         assertTrue(manager.decisions.first().isEmpty())
     }
 }
