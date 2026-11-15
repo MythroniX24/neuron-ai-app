@@ -45,8 +45,11 @@ enum class ResponseSpacing(
     val previewGap get() = (3f * blockGapScale).dp
 
     companion object {
+        fun fromNameOrNull(name: String?): ResponseSpacing? =
+            entries.firstOrNull { it.name.equals(name?.trim(), ignoreCase = true) }
+
         fun fromNameOrDefault(name: String?): ResponseSpacing =
-            entries.firstOrNull { it.name == name } ?: COMFORTABLE
+            fromNameOrNull(name) ?: COMFORTABLE
     }
 }
 
@@ -58,9 +61,6 @@ interface SettingsRepository {
     val lastModelSelection: Flow<Pair<String, String>?>
     suspend fun setLastModelSelection(providerId: String, modelId: String)
 
-    /** User's preferred line spacing for assistant replies. */
-    val responseSpacing: Flow<ResponseSpacing>
-    suspend fun setResponseSpacing(spacing: ResponseSpacing)
 }
 
 private val Context.neuronDataStore by preferencesDataStore(name = "neuron_settings")
@@ -94,17 +94,10 @@ class SettingsRepositoryImpl(
         }
     }
 
-    override val responseSpacing: Flow<ResponseSpacing> = dataStore.data
-        .map { prefs -> ResponseSpacing.fromNameOrDefault(prefs[KEY_RESPONSE_SPACING]) }
-
-    override suspend fun setResponseSpacing(spacing: ResponseSpacing) {
-        dataStore.edit { prefs -> prefs[KEY_RESPONSE_SPACING] = spacing.name }
-    }
 
     private companion object {
         val KEY_THEME_MODE = stringPreferencesKey("theme_mode")
         val KEY_LAST_PROVIDER = stringPreferencesKey("last_provider_id")
         val KEY_LAST_MODEL = stringPreferencesKey("last_model_id")
-        val KEY_RESPONSE_SPACING = stringPreferencesKey("response_spacing")
     }
 }

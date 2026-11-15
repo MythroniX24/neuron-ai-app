@@ -93,6 +93,13 @@ sealed class AgentEvent {
         val content: com.neuron.ai.core.conversation.RichRecommendationSet
     ) : AgentEvent()
 
+    /**
+     * The model chose how much breathing room its reply needs. Emitted only
+     * after the ui.reply_spacing tool validated the choice; the ViewModel
+     * applies it live and persists it on the assistant message.
+     */
+    data class ReplySpacing(val spacing: String) : AgentEvent()
+
     data class TextDelta(val text: String) : AgentEvent()
 
     /**

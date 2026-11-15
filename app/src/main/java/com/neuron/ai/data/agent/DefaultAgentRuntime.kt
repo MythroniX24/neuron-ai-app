@@ -69,7 +69,8 @@ class DefaultAgentRuntime(
                                 it.copy(state = AgentRun.State.FAILED, error = event.message, finishedAtEpochMs = System.currentTimeMillis())
                             }
                         is AgentEvent.IntermediateMessage, is AgentEvent.RichContent,
-                        is AgentEvent.TextDelta, is AgentEvent.TextBuffer, is AgentEvent.Finished -> Unit
+                        is AgentEvent.ReplySpacing, is AgentEvent.TextDelta,
+                        is AgentEvent.TextBuffer, is AgentEvent.Finished -> Unit
                     }
                 }
                 update(runId) {

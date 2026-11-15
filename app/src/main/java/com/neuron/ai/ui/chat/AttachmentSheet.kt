@@ -48,16 +48,16 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.neuron.ai.core.settings.ResponseSpacing
 import com.neuron.ai.ui.components.entrancePop
 import com.neuron.ai.ui.components.pressScale
 import com.neuron.ai.ui.theme.Spacing
 
 /**
  * Redesigned composer "+" panel: a single, grouped control surface for the
- * conversation. Built from three sections only — attach, tools, readability —
- * plus workspace, so every option is visible in one scroll instead of being
+ * conversation. Built from two sections only — attach and tools — plus
+ * workspace, so every option is visible in one scroll instead of being
  * hidden behind nested actions. Browser access defaults ON and says so.
+ * Reply spacing is AI-controlled, so it is deliberately not a user control.
  */
 @Composable
 fun AttachmentSheet(
@@ -69,8 +69,6 @@ fun AttachmentSheet(
     onToggleTerminal: (Boolean) -> Unit,
     browserEnabled: Boolean,
     onToggleBrowser: (Boolean) -> Unit,
-    responseSpacing: ResponseSpacing,
-    onResponseSpacingChange: (ResponseSpacing) -> Unit,
     workspaces: List<com.neuron.ai.core.workspace.Workspace>,
     activeWorkspaceId: String?,
     onAttachWorkspace: (String) -> Unit,
@@ -174,37 +172,6 @@ fun AttachmentSheet(
                 modifier = Modifier
                     .padding(horizontal = Spacing.lg, vertical = Spacing.xs)
                     .entrancePop(delayMs = 150)
-            )
-
-            Spacer(Modifier.height(Spacing.lg))
-            SectionLabel("Answer spacing")
-            Text(
-                text = "Choose how much space every reply gets between its lines.",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = Spacing.lg)
-            )
-            Spacer(Modifier.height(Spacing.sm))
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = Spacing.lg),
-                horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
-            ) {
-                ResponseSpacing.entries.forEach { option ->
-                    SpacingOption(
-                        option = option,
-                        selected = option == responseSpacing,
-                        modifier = Modifier.weight(1f),
-                        onClick = { onResponseSpacingChange(option) }
-                    )
-                }
-            }
-            Text(
-                text = "Applies instantly to every AI answer and is saved for future chats.",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = Spacing.lg, vertical = Spacing.xs)
             )
 
             Spacer(Modifier.height(Spacing.lg))
@@ -503,58 +470,6 @@ private fun ToolToggleRow(
             }
             // The whole row is the tap target; the switch only mirrors state.
             Switch(checked = enabled, onCheckedChange = null)
-        }
-    }
-}
-
-@Composable
-private fun SpacingOption(
-    option: ResponseSpacing,
-    selected: Boolean,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    val interaction = remember { MutableInteractionSource() }
-    val color by animateColorAsState(
-        targetValue = if (selected) MaterialTheme.colorScheme.primaryContainer
-        else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
-        animationSpec = tween(180),
-        label = "spacingOption"
-    )
-    Surface(
-        onClick = onClick,
-        interactionSource = interaction,
-        shape = RoundedCornerShape(14.dp),
-        color = color,
-        border = androidx.compose.foundation.BorderStroke(
-            1.dp,
-            if (selected) MaterialTheme.colorScheme.primary
-            else MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)
-        ),
-        modifier = modifier.pressScale(interaction, pressedScale = 0.95f)
-    ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            modifier = Modifier.padding(vertical = Spacing.sm, horizontal = 4.dp)
-        ) {
-            // Tiny line preview: the actual gap changes with the option.
-            Column(verticalArrangement = Arrangement.spacedBy(option.previewGap)) {
-                repeat(3) {
-                    Box(
-                        Modifier
-                            .width(22.dp)
-                            .height(2.dp)
-                            .clip(RoundedCornerShape(1.dp))
-                            .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f))
-                    )
-                }
-            }
-            Spacer(Modifier.height(Spacing.xs))
-            Text(
-                text = option.label,
-                style = MaterialTheme.typography.labelSmall,
-                maxLines = 1
-            )
         }
     }
 }

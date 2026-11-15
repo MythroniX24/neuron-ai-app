@@ -227,6 +227,8 @@ class AppContainer(context: Context) {
             // Universal rich recommendation cards: available in every chat,
             // independent of terminal/browser/workspace capabilities.
             toolRegistry.register(com.neuron.ai.data.tool.RichItemsTool())
+            // The model owns reply readability, not a global user preference.
+            toolRegistry.register(com.neuron.ai.data.tool.ReplySpacingTool())
             memoryTools.forEach { toolRegistry.register(it) }
         }
     }

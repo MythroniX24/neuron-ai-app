@@ -79,7 +79,9 @@ data class MessageMetadata(
     /** Steps of the agent turn that produced this assistant message. */
     val agentSteps: List<AgentStepRecord> = emptyList(),
     /** Structured recommendation cards produced by a UI tool call. */
-    val richRecommendations: List<RichRecommendationSet> = emptyList()
+    val richRecommendations: List<RichRecommendationSet> = emptyList(),
+    /** AI-selected line spacing for this reply (ResponseSpacing name). */
+    val replySpacing: String? = null
 )
 
 /** A chat conversation. */

@@ -20,6 +20,14 @@ class ResponseSpacingTest {
     }
 
     @Test
+    fun `fromNameOrNull accepts case and whitespace but rejects unknown values`() {
+        assertEquals(ResponseSpacing.RELAXED, ResponseSpacing.fromNameOrNull(" relaxed "))
+        assertEquals(ResponseSpacing.AIRY, ResponseSpacing.fromNameOrNull("AIRY"))
+        assertEquals(null, ResponseSpacing.fromNameOrNull("wide"))
+        assertEquals(null, ResponseSpacing.fromNameOrNull(null))
+    }
+
+    @Test
     fun `unknown legacy value falls back instead of crashing`() {
         assertEquals(
             ResponseSpacing.COMFORTABLE,

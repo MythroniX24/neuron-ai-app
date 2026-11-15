@@ -15,6 +15,7 @@ import com.neuron.ai.core.provider.StreamEvent
 import com.neuron.ai.core.provider.ToolSpec
 import com.neuron.ai.data.permissions.SessionPermissionManager
 import com.neuron.ai.data.tool.InMemoryToolRegistry
+import com.neuron.ai.data.tool.ReplySpacingTool
 import com.neuron.ai.data.tool.RichItemsTool
 import com.neuron.ai.data.tool.SafeTools
 import kotlinx.coroutines.cancelAndJoin
@@ -98,6 +99,7 @@ class AgentToolLoopIntegrationTest {
         registry.register(SafeTools.Calculator())
         registry.register(SafeTools.CurrentTime())
         registry.register(RichItemsTool())
+        registry.register(ReplySpacingTool())
         val executor = DefaultToolExecutor(registry, permissions, logger = null, maxRetries = 0)
         val agent = ToolUsingAgent(
             provider = provider,
@@ -171,6 +173,29 @@ class AgentToolLoopIntegrationTest {
         // The tool result tells the model the cards are already visible.
         val toolRow = provider.requests[1].filter { it.role == ChatMessage.Role.TOOL }.single()
         assertTrue(toolRow.content.contains("Rendered 2 recommendation card"))
+    }
+
+    @Test
+    fun `reply spacing tool emits the model's readability choice`() = runTest {
+        val provider = ScriptedProvider()
+        provider.script.add(
+            toolRequestEvent("ui.reply_spacing", """{"spacing":"relaxed"}""")
+        )
+        provider.script.add(StreamEvent.Delta("A clean, well-spaced answer."))
+
+        val (agent, _) = buildAgent(provider)
+        val events = withTimeout(5_000) {
+            collect(agent, AgentGoal(instruction = "explain this", conversationId = "c1"))
+        }
+
+        assertEquals(
+            "RELAXED",
+            events.filterIsInstance<AgentEvent.ReplySpacing>().single().spacing
+        )
+        assertEquals(
+            "A clean, well-spaced answer.",
+            events.filterIsInstance<AgentEvent.Finished>().single().summary
+        )
     }
 
     @Test

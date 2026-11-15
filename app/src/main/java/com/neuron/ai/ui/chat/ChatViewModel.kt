@@ -13,6 +13,7 @@ import com.neuron.ai.core.conversation.MessageMetadata
 import com.neuron.ai.core.coroutines.DispatcherProvider
 import com.neuron.ai.core.error.NeuronError
 import com.neuron.ai.core.log.Logger
+import com.neuron.ai.core.settings.ResponseSpacing
 import com.neuron.ai.core.settings.SettingsRepository
 import com.neuron.ai.core.provider.AIProvider
 import com.neuron.ai.core.provider.ChatMessage
@@ -165,6 +166,10 @@ class ChatViewModel(
         MutableStateFlow<List<com.neuron.ai.core.conversation.RichRecommendationSet>>(emptyList())
     val liveRichRecommendations: StateFlow<List<com.neuron.ai.core.conversation.RichRecommendationSet>> =
         _liveRichRecommendations.asStateFlow()
+
+    /** AI-chosen readability for the reply currently streaming. */
+    private val _liveReplySpacing = MutableStateFlow(ResponseSpacing.COMFORTABLE)
+    val liveReplySpacing: StateFlow<ResponseSpacing> = _liveReplySpacing.asStateFlow()
 
     /** Wall-clock time of the ACTIVE turn; the timer label reads this. */
     private val _turnElapsedMs = MutableStateFlow(0L)
@@ -970,6 +975,7 @@ class ChatViewModel(
         _activity.value = emptyList()
         _timeline.value = emptyList()
         _liveRichRecommendations.value = emptyList()
+        _liveReplySpacing.value = ResponseSpacing.COMFORTABLE
         // The routing resolution is the FIRST timeline row: which model runs,
         // with what capabilities, and what was degraded (incl. live thermal
         // throttle). It persists with the answer, so the transcript explains
@@ -989,6 +995,7 @@ class ChatViewModel(
         var finishedSteps: List<AgentStepRecord> = emptyList()
         var finishedRich =
             emptyList<com.neuron.ai.core.conversation.RichRecommendationSet>()
+        var finishedSpacing = ResponseSpacing.COMFORTABLE
 
         val agent = agentFactory(
             provider,
@@ -1082,6 +1089,11 @@ class ChatViewModel(
                                 } + event.content)
                         }
 
+                        is AgentEvent.ReplySpacing -> {
+                            ResponseSpacing.fromNameOrNull(event.spacing)
+                                ?.let { _liveReplySpacing.value = it }
+                        }
+
                         is AgentEvent.TextDelta -> {
                             assistantBuffer.append(event.text)
                             _generation.value = GenerationState.Streaming(assistantBuffer.toString())
@@ -1141,6 +1153,7 @@ class ChatViewModel(
                                 assistantBuffer = StringBuilder(summary)
                             }
                             finishedRich = _liveRichRecommendations.value
+                            finishedSpacing = _liveReplySpacing.value
                             _liveRichRecommendations.value = emptyList()
                             _generation.value = GenerationState.Streaming(assistantBuffer.toString())
                             // Snapshot before clearing — the assistant message
@@ -1191,7 +1204,8 @@ class ChatViewModel(
                                 generationMs = System.currentTimeMillis() - started,
                                 agentSteps = finishedSteps.ifEmpty { cancelStepsSnapshot() },
                                 richRecommendations = _liveRichRecommendations.value
-                                    .ifEmpty { finishedRich }
+                                    .ifEmpty { finishedRich },
+                                replySpacing = _liveReplySpacing.value.name
                             )
                         )
                     }
@@ -1199,6 +1213,7 @@ class ChatViewModel(
                 _generation.value = GenerationState.Idle
                 _activity.value = emptyList()
                 _liveRichRecommendations.value = emptyList()
+                _liveReplySpacing.value = ResponseSpacing.COMFORTABLE
             }
             throw cancelled
         }
@@ -1224,7 +1239,8 @@ class ChatViewModel(
                     modelId = modelId,
                     generationMs = elapsed,
                     agentSteps = finishedSteps.ifEmpty { persistableSteps() },
-                    richRecommendations = finishedRich
+                    richRecommendations = finishedRich,
+                    replySpacing = finishedSpacing.name
                 )
             )
         } else {
@@ -1236,6 +1252,7 @@ class ChatViewModel(
 
         _activity.value = emptyList()
         _liveRichRecommendations.value = emptyList()
+        _liveReplySpacing.value = ResponseSpacing.COMFORTABLE
         // Keep the finished timeline visible until the next turn begins.
         if (_generation.value is GenerationState.Streaming) {
             _generation.value = GenerationState.Idle

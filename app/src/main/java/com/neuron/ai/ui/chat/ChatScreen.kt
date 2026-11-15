@@ -155,13 +155,11 @@ fun ChatScreen(
     val generation by viewModel.generationState.collectAsStateWithLifecycle()
     val liveRun by viewModel.liveAgentRun.collectAsStateWithLifecycle()
     val liveRichRecommendations by viewModel.liveRichRecommendations.collectAsStateWithLifecycle()
+    val liveReplySpacing by viewModel.liveReplySpacing.collectAsStateWithLifecycle()
     val draftAttachments by viewModel.draftAttachments.collectAsStateWithLifecycle()
     val attachmentNotice by viewModel.attachmentNotice.collectAsStateWithLifecycle()
     val queuedMessage by viewModel.queuedMessage.collectAsStateWithLifecycle()
     val conversation by viewModel.conversation.collectAsStateWithLifecycle()
-    val responseSpacing by container.settingsRepository.responseSpacing
-        .collectAsStateWithLifecycle(initialValue = ResponseSpacing.COMFORTABLE)
-
     // TOOL rows are agent plumbing, not chat messages. Their output is shown
     // inside the new timeline rows; rendering them here produced the old
     // standalone "Ran command / Web search" cards beside the new UI.
@@ -357,7 +355,6 @@ fun ChatScreen(
                 ) {
                     MessageRow(
                         message = message,
-                        responseSpacing = responseSpacing,
                         onRetryFromHere = { viewModel.retryFrom(message.id) },
                         onEditAndResend = { viewModel.editAndResend(message.id, message.content) },
                         fullResultResolver = { callId ->
@@ -376,7 +373,7 @@ fun ChatScreen(
                     LiveAgentTurn(
                         run = liveRun,
                         buffer = gen.buffer,
-                        responseSpacing = responseSpacing,
+                        replySpacing = liveReplySpacing,
                         richRecommendations = liveRichRecommendations
                     )
                 }
@@ -578,10 +575,6 @@ fun ChatScreen(
             onToggleTerminal = { viewModel.setTerminalEnabled(it) },
             browserEnabled = browserEnabled,
             onToggleBrowser = { viewModel.setBrowserEnabled(it) },
-            responseSpacing = responseSpacing,
-            onResponseSpacingChange = { spacing ->
-                screenScope.launch { container.settingsRepository.setResponseSpacing(spacing) }
-            },
             workspaces = workspaces,
             activeWorkspaceId = activeWorkspaceId,
             onAttachWorkspace = { viewModel.attachWorkspace(it) },
@@ -974,7 +967,6 @@ private fun MessageAttachmentTile(attachment: Attachment) {
 @Composable
 private fun MessageRow(
     message: Message,
-    responseSpacing: ResponseSpacing,
     onRetryFromHere: (() -> Unit)? = null,
     onEditAndResend: (() -> Unit)? = null,
     fullResultResolver: (String) -> String? = { null }
@@ -1102,20 +1094,21 @@ private fun MessageRow(
                     )
                 }
             }
+            val replySpacing = ResponseSpacing.fromNameOrDefault(message.metadata?.replySpacing)
             Box(
                 Modifier.combinedClickable(
                     onClick = {},
                     onLongClick = { showMenu = true }
                 )
             ) {
-                MarkdownText(markdown = message.content, spacing = responseSpacing)
+                MarkdownText(markdown = message.content, spacing = replySpacing)
             }
             message.metadata?.richRecommendations
                 ?.takeIf { it.isNotEmpty() }
                 ?.let { sets ->
                     RichRecommendationSection(
                         recommendations = sets,
-                        responseSpacing = responseSpacing,
+                        responseSpacing = replySpacing,
                         modifier = Modifier.padding(top = Spacing.md)
                     )
                 }
@@ -1134,7 +1127,7 @@ private fun MessageRow(
 private fun LiveAgentTurn(
     run: AgentRunState?,
     buffer: String,
-    responseSpacing: ResponseSpacing,
+    replySpacing: ResponseSpacing,
     richRecommendations: List<com.neuron.ai.core.conversation.RichRecommendationSet> = emptyList()
 ) {
     var expanded by remember { mutableStateOf(true) }
@@ -1155,11 +1148,11 @@ private fun LiveAgentTurn(
                 modifier = Modifier.padding(bottom = Spacing.xs)
             )
         }
-        StreamingBubble(buffer.ifEmpty { "…" }, responseSpacing)
+        StreamingBubble(buffer.ifEmpty { "…" }, replySpacing)
         if (richRecommendations.isNotEmpty()) {
             RichRecommendationSection(
                 recommendations = richRecommendations,
-                responseSpacing = responseSpacing,
+                responseSpacing = replySpacing,
                 modifier = Modifier.padding(top = Spacing.md)
             )
         }
@@ -1167,7 +1160,7 @@ private fun LiveAgentTurn(
 }
 
 @Composable
-private fun StreamingBubble(text: String, responseSpacing: ResponseSpacing) {
+private fun StreamingBubble(text: String, replySpacing: ResponseSpacing) {
     Column(
         Modifier
             .fillMaxWidth()
@@ -1182,7 +1175,7 @@ private fun StreamingBubble(text: String, responseSpacing: ResponseSpacing) {
                 SkeletonBar(Modifier.size(width = 120.dp, height = 12.dp))
             }
         } else {
-            MarkdownText(markdown = text, spacing = responseSpacing)
+            MarkdownText(markdown = text, spacing = replySpacing)
             BlinkingCaret()
         }
     }
