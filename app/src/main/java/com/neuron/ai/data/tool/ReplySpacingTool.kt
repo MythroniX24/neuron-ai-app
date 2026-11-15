@@ -4,26 +4,30 @@ import com.neuron.ai.core.agent.RiskLevel
 import com.neuron.ai.core.agent.Tool
 import com.neuron.ai.core.agent.ToolResult
 import com.neuron.ai.core.permissions.Capability
+import com.neuron.ai.core.settings.ReplySpacingProfile
 import com.neuron.ai.core.settings.ResponseSpacing
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
 /**
  * Lets the model control how airy its own reply looks instead of asking the
- * user to tune a global text setting. The chosen spacing is emitted as an
+ * user to tune a global text setting. Paragraphs and lists are independent:
+ * a dense list can stay compact while the explanation around it breathes.
+ * The validated profile is emitted as an
  * [com.neuron.ai.core.agent.AgentEvent.ReplySpacing] event and stored on the
- * assistant message, so each answer keeps the density the model picked.
+ * assistant message.
  */
 class ReplySpacingTool : Tool {
 
     override val id = TOOL_ID
     override val title = "Adjusting reply spacing"
     override val description =
-        "Choose the line spacing for your reply so it reads cleanly. Call this once " +
-            "per answer before the final text: compact for short factual answers, " +
-            "comfortable for normal conversation, relaxed for explanations, airy for " +
-            "long step-by-step guides. Do not mention the tool to the user."
+        "Choose line spacing separately for prose paragraphs and lists so the reply " +
+            "reads cleanly. Call once per answer before the final text: compact for " +
+            "dense lists and short facts, comfortable for normal chat, relaxed for " +
+            "explanations, airy for long walkthroughs. Do not mention this tool to the user."
     override val requiredCapabilities: Set<Capability> = emptySet()
     override val riskLevel = RiskLevel.SAFE
     override val timeoutMs = 10_000L
@@ -32,44 +36,70 @@ class ReplySpacingTool : Tool {
         {
           "type": "object",
           "properties": {
-            "spacing": {
+            "paragraph": {
               "type": "string",
               "enum": ["compact", "comfortable", "relaxed", "airy"],
-              "description": "How much vertical space every line of the reply should have"
+              "description": "Line spacing for normal prose paragraphs and quotes"
             },
-            "reason": {
+            "list": {
               "type": "string",
-              "description": "Optional one-line reason, e.g. long walkthrough"
+              "enum": ["compact", "comfortable", "relaxed", "airy"],
+              "description": "Line spacing inside bullet and numbered lists"
             }
           },
-          "required": ["spacing"]
+          "required": ["paragraph", "list"]
         }
     """.trimIndent()
 
     override suspend fun execute(argumentsJson: String): ToolResult {
-        val spacing = spacingFrom(argumentsJson)
+        val profile = profileFrom(argumentsJson)
             ?: return ToolResult.Failure(
-                "Invalid reply spacing. Use one of: compact, comfortable, relaxed, airy. " +
-                    "Call ui.reply_spacing again with a valid choice."
+                "Invalid reply spacing. Choose compact, comfortable, relaxed or airy " +
+                    "for both paragraph and list. Call ui.reply_spacing again."
             )
         return ToolResult.Success(
-            "Reply spacing set to ${spacing.label}. The UI applies it to every line of " +
-                "this answer. Continue with the final response and do not mention this tool."
+            "Reply spacing set: paragraphs ${profile.paragraph.label.lowercase()}, " +
+                "lists ${profile.list.label.lowercase()}. The UI applies these to the " +
+                "matching blocks. Continue with the final response and do not mention this tool."
         )
     }
 
     companion object {
         const val TOOL_ID = "ui.reply_spacing"
 
-        fun spacingFrom(argumentsJson: String): ResponseSpacing? {
-            val raw = runCatching {
-                Json.parseToJsonElement(argumentsJson).jsonObject["spacing"]
-                    ?.jsonPrimitive?.content
+        /**
+         * Tolerant parser: accepts the new paragraph/list fields, and treats an
+         * old single `spacing` value as the default for both.
+         */
+        fun profileFrom(argumentsJson: String): ReplySpacingProfile? {
+            val obj = runCatching {
+                Json.parseToJsonElement(argumentsJson).jsonObject
             }.getOrNull() ?: return null
-            return when (raw.trim().lowercase()) {
-                "default", "normal", "medium" -> ResponseSpacing.COMFORTABLE
-                else -> ResponseSpacing.fromNameOrNull(raw)
-            }
+            val legacy = nameOf(obj, "spacing")
+            val paragraph = nameOf(obj, "paragraph") ?: legacy
+            val list = nameOf(obj, "list") ?: legacy
+            // An invalid explicit value must fail instead of silently
+            // falling back and hiding the model's mistake.
+            if (obj["paragraph"] != null && nameOf(obj, "paragraph") == null) return null
+            if (obj["list"] != null && nameOf(obj, "list") == null) return null
+            if (obj["spacing"] != null && legacy == null) return null
+            if (paragraph == null && list == null) return null
+            return ReplySpacingProfile.fromNames(
+                paragraph = paragraph,
+                list = list,
+                legacy = legacy
+            )
         }
+
+        private fun nameOf(obj: JsonObject, key: String): String? =
+            runCatching { obj[key]?.jsonPrimitive?.content }.getOrNull()
+                ?.trim()
+                ?.lowercase()
+                ?.let { raw ->
+                    when (raw) {
+                        "default", "normal", "medium" -> ResponseSpacing.COMFORTABLE.name
+                        else -> ResponseSpacing.fromNameOrNull(raw)?.name
+                    }
+                }
     }
 }

@@ -93,10 +93,10 @@ class ToolUsingAgent(
                     "structured JSON instead of writing the list in Markdown. Never invent image " +
                     "or source URLs. Keep the final text to a short intro/closing note. For " +
                     "ordinary questions, answer normally without calling it.\n" +
-                    "READABILITY: call ui.reply_spacing once per answer to choose how much " +
-                    "space every line needs — compact for short facts, comfortable for " +
-                    "normal chat, relaxed for explanations, airy for long walkthroughs. " +
-                    "Never mention or explain the spacing choice to the user."
+                    "READABILITY: call ui.reply_spacing once per answer to choose spacing " +
+                    "separately for paragraphs and lists — compact for dense lists and " +
+                    "short facts, comfortable for normal chat, relaxed for explanations, " +
+                    "airy for long walkthroughs. Never mention or explain the spacing choice."
             } else {
                 "You are Neuron, a helpful on-device AI assistant. Answer the user's " +
                     "message directly, clearly and concisely. Use Markdown when it helps. " +
@@ -496,8 +496,15 @@ class ToolUsingAgent(
                     result is com.neuron.ai.core.agent.ToolResult.Success
                 ) {
                     com.neuron.ai.data.tool.ReplySpacingTool
-                        .spacingFrom(call.argumentsJson)
-                        ?.let { send(AgentEvent.ReplySpacing(it.name)) }
+                        .profileFrom(call.argumentsJson)
+                        ?.let { profile ->
+                            send(
+                                AgentEvent.ReplySpacing(
+                                    paragraph = profile.paragraph.name,
+                                    list = profile.list.name
+                                )
+                            )
+                        }
                 }
 
                 send(

@@ -36,6 +36,21 @@ class ResponseSpacingTest {
     }
 
     @Test
+    fun `profile keeps paragraph and list choices separate`() {
+        val profile = ReplySpacingProfile.fromNames(
+            paragraph = "RELAXED",
+            list = "COMPACT",
+            legacy = "AIRY"
+        )
+        assertEquals(ResponseSpacing.RELAXED, profile.paragraph)
+        assertEquals(ResponseSpacing.COMPACT, profile.list)
+
+        val legacy = ReplySpacingProfile.fromNames(null, null, legacy = "AIRY")
+        assertEquals(ResponseSpacing.AIRY, legacy.paragraph)
+        assertEquals(ResponseSpacing.AIRY, legacy.list)
+    }
+
+    @Test
     fun `options are ordered from tightest to airiest`() {
         val scales = ResponseSpacing.entries.map { it.lineHeightScale }
         assertEquals(scales.sorted(), scales)

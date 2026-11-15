@@ -53,6 +53,31 @@ enum class ResponseSpacing(
     }
 }
 
+/**
+ * AI-selected readability per markdown block kind. Paragraphs and lists get
+ * independent presets so a dense list does not inherit the airy line height
+ * chosen for prose (and vice versa).
+ */
+data class ReplySpacingProfile(
+    val paragraph: ResponseSpacing = ResponseSpacing.COMFORTABLE,
+    val list: ResponseSpacing = ResponseSpacing.COMFORTABLE
+) {
+    companion object {
+        fun fromNames(
+            paragraph: String?,
+            list: String?,
+            legacy: String? = null
+        ): ReplySpacingProfile = ReplySpacingProfile(
+            paragraph = ResponseSpacing.fromNameOrNull(paragraph)
+                ?: ResponseSpacing.fromNameOrNull(legacy)
+                ?: ResponseSpacing.COMFORTABLE,
+            list = ResponseSpacing.fromNameOrNull(list)
+                ?: ResponseSpacing.fromNameOrNull(legacy)
+                ?: ResponseSpacing.COMFORTABLE
+        )
+    }
+}
+
 interface SettingsRepository {
     val themeMode: Flow<ThemeMode>
     suspend fun setThemeMode(mode: ThemeMode)

@@ -94,11 +94,14 @@ sealed class AgentEvent {
     ) : AgentEvent()
 
     /**
-     * The model chose how much breathing room its reply needs. Emitted only
-     * after the ui.reply_spacing tool validated the choice; the ViewModel
+     * The model chose separate breathing room for prose paragraphs and lists.
+     * Emitted only after ui.reply_spacing validated the choice; the ViewModel
      * applies it live and persists it on the assistant message.
      */
-    data class ReplySpacing(val spacing: String) : AgentEvent()
+    data class ReplySpacing(
+        val paragraph: String,
+        val list: String
+    ) : AgentEvent()
 
     data class TextDelta(val text: String) : AgentEvent()
 

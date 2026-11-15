@@ -69,7 +69,8 @@ class MessageCodecTest {
                 )
             ),
             // AI-selected readability must survive the same round-trip.
-            replySpacing = "RELAXED"
+            paragraphSpacing = "RELAXED",
+            listSpacing = "COMPACT"
         )
 
         val decoded = codec.decodeMetadata(codec.encodeMetadata(metadata))

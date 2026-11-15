@@ -80,8 +80,12 @@ data class MessageMetadata(
     val agentSteps: List<AgentStepRecord> = emptyList(),
     /** Structured recommendation cards produced by a UI tool call. */
     val richRecommendations: List<RichRecommendationSet> = emptyList(),
-    /** AI-selected line spacing for this reply (ResponseSpacing name). */
-    val replySpacing: String? = null
+    /** Legacy whole-reply AI spacing, kept for already-stored messages. */
+    val replySpacing: String? = null,
+    /** AI-selected line spacing for prose paragraphs. */
+    val paragraphSpacing: String? = null,
+    /** AI-selected line spacing for lists. */
+    val listSpacing: String? = null
 )
 
 /** A chat conversation. */

@@ -7,6 +7,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -35,6 +36,7 @@ import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.google.accompanist.drawablepainter.rememberDrawablePainter
+import com.neuron.ai.core.settings.ReplySpacingProfile
 import com.neuron.ai.core.settings.ResponseSpacing
 import com.neuron.ai.ui.theme.Radius
 import com.neuron.ai.ui.theme.Spacing
@@ -48,17 +50,25 @@ import com.neuron.ai.ui.theme.Spacing
 fun MarkdownText(
     markdown: String,
     modifier: Modifier = Modifier,
-    /** User-controlled spacing between every line/block of an AI reply. */
-    spacing: ResponseSpacing = ResponseSpacing.COMFORTABLE
+    /** AI-selected spacing, independently for prose and lists. */
+    spacing: ReplySpacingProfile = ReplySpacingProfile()
 ) {
     val blocks = remember(markdown) { MarkdownParser.parse(markdown) }
-    Column(
-        modifier = modifier,
-        verticalArrangement = Arrangement.spacedBy(Spacing.sm * spacing.blockGapScale)
-    ) {
-        blocks.forEach { block -> BlockView(block, spacing) }
+    Column(modifier = modifier) {
+        blocks.forEachIndexed { index, block ->
+            BlockView(block, spacing)
+            if (index != blocks.lastIndex) {
+                Spacer(Modifier.height(Spacing.sm * blockSpacing(block, spacing).blockGapScale))
+            }
+        }
     }
 }
+
+/** Lists and prose can choose different density for their surrounding gap. */
+private fun blockSpacing(
+    block: MdBlock,
+    spacing: ReplySpacingProfile
+): ResponseSpacing = if (block is MdBlock.ListBlock) spacing.list else spacing.paragraph
 
 /** Scales a design-system style's existing line height, never its font size. */
 private fun TextStyle.withResponseSpacing(spacing: ResponseSpacing): TextStyle {
@@ -71,21 +81,23 @@ private fun TextStyle.withResponseSpacing(spacing: ResponseSpacing): TextStyle {
 }
 
 @Composable
-private fun BlockView(block: MdBlock, spacing: ResponseSpacing) {
+private fun BlockView(block: MdBlock, spacing: ReplySpacingProfile) {
+    val paragraph = spacing.paragraph
+    val list = spacing.list
     when (block) {
         is MdBlock.Heading -> Text(
             text = InlineMarkdown.toAnnotatedString(block.text),
             style = when (block.level) {
-                1 -> MaterialTheme.typography.headlineSmall
-                2 -> MaterialTheme.typography.titleLarge
-                else -> MaterialTheme.typography.titleMedium
+                1 -> MaterialTheme.typography.headlineSmall.withResponseSpacing(paragraph)
+                2 -> MaterialTheme.typography.titleLarge.withResponseSpacing(paragraph)
+                else -> MaterialTheme.typography.titleMedium.withResponseSpacing(paragraph)
             },
             fontWeight = FontWeight.SemiBold
         )
 
         is MdBlock.Paragraph -> Text(
             text = InlineMarkdown.toAnnotatedString(block.text),
-            style = MaterialTheme.typography.bodyLarge.withResponseSpacing(spacing)
+            style = MaterialTheme.typography.bodyLarge.withResponseSpacing(paragraph)
         )
 
         is MdBlock.CodeBlock -> CodeBlockView(block)
@@ -102,7 +114,7 @@ private fun BlockView(block: MdBlock, spacing: ResponseSpacing) {
             ) {}
             Text(
                 text = InlineMarkdown.toAnnotatedString(block.text),
-                style = MaterialTheme.typography.bodyLarge.withResponseSpacing(spacing),
+                style = MaterialTheme.typography.bodyLarge.withResponseSpacing(paragraph),
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
@@ -116,18 +128,18 @@ private fun BlockView(block: MdBlock, spacing: ResponseSpacing) {
         ) {}
 
         is MdBlock.ListBlock -> Column(
-            verticalArrangement = Arrangement.spacedBy(Spacing.xs * spacing.blockGapScale)
+            verticalArrangement = Arrangement.spacedBy(Spacing.xs * list.blockGapScale)
         ) {
             block.items.forEachIndexed { index, item ->
                 Row {
                     Text(
                         text = if (block.ordered) "${index + 1}." else "•",
-                        style = MaterialTheme.typography.bodyLarge.withResponseSpacing(spacing),
+                        style = MaterialTheme.typography.bodyLarge.withResponseSpacing(list),
                         modifier = Modifier.padding(end = Spacing.sm)
                     )
                     Text(
                         text = InlineMarkdown.toAnnotatedString(item),
-                        style = MaterialTheme.typography.bodyLarge.withResponseSpacing(spacing)
+                        style = MaterialTheme.typography.bodyLarge.withResponseSpacing(list)
                     )
                 }
             }

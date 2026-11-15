@@ -179,7 +179,10 @@ class AgentToolLoopIntegrationTest {
     fun `reply spacing tool emits the model's readability choice`() = runTest {
         val provider = ScriptedProvider()
         provider.script.add(
-            toolRequestEvent("ui.reply_spacing", """{"spacing":"relaxed"}""")
+            toolRequestEvent(
+                "ui.reply_spacing",
+                """{"paragraph":"relaxed","list":"compact"}"""
+            )
         )
         provider.script.add(StreamEvent.Delta("A clean, well-spaced answer."))
 
@@ -188,10 +191,9 @@ class AgentToolLoopIntegrationTest {
             collect(agent, AgentGoal(instruction = "explain this", conversationId = "c1"))
         }
 
-        assertEquals(
-            "RELAXED",
-            events.filterIsInstance<AgentEvent.ReplySpacing>().single().spacing
-        )
+        val spacing = events.filterIsInstance<AgentEvent.ReplySpacing>().single()
+        assertEquals("RELAXED", spacing.paragraph)
+        assertEquals("COMPACT", spacing.list)
         assertEquals(
             "A clean, well-spaced answer.",
             events.filterIsInstance<AgentEvent.Finished>().single().summary

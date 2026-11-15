@@ -109,7 +109,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.neuron.ai.core.conversation.Message
-import com.neuron.ai.core.settings.ResponseSpacing
+import com.neuron.ai.core.settings.ReplySpacingProfile
 import com.neuron.ai.di.AppContainer
 import com.neuron.ai.ui.components.ChatComposer
 import com.neuron.ai.ui.markdown.MarkdownText
@@ -1094,7 +1094,11 @@ private fun MessageRow(
                     )
                 }
             }
-            val replySpacing = ResponseSpacing.fromNameOrDefault(message.metadata?.replySpacing)
+            val replySpacing = ReplySpacingProfile.fromNames(
+                paragraph = message.metadata?.paragraphSpacing,
+                list = message.metadata?.listSpacing,
+                legacy = message.metadata?.replySpacing
+            )
             Box(
                 Modifier.combinedClickable(
                     onClick = {},
@@ -1108,7 +1112,7 @@ private fun MessageRow(
                 ?.let { sets ->
                     RichRecommendationSection(
                         recommendations = sets,
-                        responseSpacing = replySpacing,
+                        responseSpacing = replySpacing.paragraph,
                         modifier = Modifier.padding(top = Spacing.md)
                     )
                 }
@@ -1127,7 +1131,7 @@ private fun MessageRow(
 private fun LiveAgentTurn(
     run: AgentRunState?,
     buffer: String,
-    replySpacing: ResponseSpacing,
+    replySpacing: ReplySpacingProfile,
     richRecommendations: List<com.neuron.ai.core.conversation.RichRecommendationSet> = emptyList()
 ) {
     var expanded by remember { mutableStateOf(true) }
@@ -1152,7 +1156,7 @@ private fun LiveAgentTurn(
         if (richRecommendations.isNotEmpty()) {
             RichRecommendationSection(
                 recommendations = richRecommendations,
-                responseSpacing = replySpacing,
+                responseSpacing = replySpacing.paragraph,
                 modifier = Modifier.padding(top = Spacing.md)
             )
         }
@@ -1160,7 +1164,7 @@ private fun LiveAgentTurn(
 }
 
 @Composable
-private fun StreamingBubble(text: String, replySpacing: ResponseSpacing) {
+private fun StreamingBubble(text: String, replySpacing: ReplySpacingProfile) {
     Column(
         Modifier
             .fillMaxWidth()
