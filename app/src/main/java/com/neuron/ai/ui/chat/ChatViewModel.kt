@@ -972,6 +972,10 @@ class ChatViewModel(
         startElapsedClock(started)
         var assistantBuffer = StringBuilder()
         var streamError: NeuronError? = null
+        // The live timeline is cleared when Finished arrives (so the live card
+        // disappears immediately). Snapshot it FIRST: the persisted assistant
+        // message must still carry the Thought/tool rows.
+        var finishedSteps: List<AgentStepRecord> = emptyList()
 
         val agent = agentFactory(
             provider,
@@ -1103,6 +1107,9 @@ class ChatViewModel(
                                 assistantBuffer = StringBuilder(event.summary)
                             }
                             _generation.value = GenerationState.Streaming(assistantBuffer.toString())
+                            // Snapshot before clearing — the assistant message
+                            // metadata is written after collection completes.
+                            finishedSteps = persistableSteps()
                             // The answer has arrived: hide the live progress
                             // cards NOW. The (filtered) steps already persist
                             // on the assistant message metadata and render
@@ -1146,7 +1153,7 @@ class ChatViewModel(
                                 providerId = configId,
                                 modelId = modelId,
                                 generationMs = System.currentTimeMillis() - started,
-                                agentSteps = cancelStepsSnapshot()
+                                agentSteps = finishedSteps.ifEmpty { cancelStepsSnapshot() }
                             )
                         )
                     }
@@ -1177,7 +1184,7 @@ class ChatViewModel(
                     providerId = configId,
                     modelId = modelId,
                     generationMs = elapsed,
-                    agentSteps = persistableSteps()
+                    agentSteps = finishedSteps.ifEmpty { persistableSteps() }
                 )
             )
         } else {
