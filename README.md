@@ -68,12 +68,35 @@ schema; no tool logic lives in the UI.
 | Browser | `browser.open`, `browser.read`, `browser.find`, `browser.links`, `browser.click`, `browser.type`, `browser.select` |
 | Terminal & code | `terminal.run`, `code.edit`, `code.patch`, `code.diff`, `code.build`, `code.test` |
 | Memory | `memory.remember`, `memory.recall`, `memory.forget` |
-| Presentation | `ui.rich_items` (native recommendation cards), `ui.reply_spacing` (AI-chosen line spacing for prose and lists) |
+| Presentation | `ui.rich_items` (native recommendation cards), `ui.compare` (native comparison surfaces), `ui.reply_spacing` (AI-chosen line spacing for prose and lists) |
 
 The tool loop alternates freely between reasoning, tool calls and short progress
 notes, with a 24-step budget, per-sub-problem retry limits, and a system prompt
 that forbids repeating an identical failed call or claiming success it did not
 observe.
+
+### Comparison surfaces (any topic)
+
+When you ask "which one is better", the answer is not a Markdown table. The
+model calls `ui.compare` with typed blocks and they render natively, in order,
+interleaved with its prose — for phones, apps, AI models, plans, tools, places,
+anything:
+
+| Block | Renders |
+|---|---|
+| `side_by_side` | two equal cards: image, title, pill label, key facts |
+| `feature_table` | borderless Feature / Option A / Option B table |
+| `score` | two score cards, higher score highlighted, `Winner` pill |
+| `pros_cons` | green Pros card beside a red/crimson Cons card |
+| `priority` | interactive radio choices; picking one shows the tailored recommendation |
+
+Images never come from the model's imagination: each option carries either a
+verified `imageUrl` or an `imageQuery` phrase, which the app resolves to a real
+public image (keyless, cached) in the ViewModel. While an image is loading the
+card shows a shimmer, and a miss leaves a neutral placeholder — the two cards
+stay symmetrical. A half-streamed block is hidden behind a compact skeleton, so
+raw JSON brackets never appear in the chat. Blocks are persisted with the
+message, so history renders identically after a restart.
 
 ### Web search — keyless, on your own connection
 

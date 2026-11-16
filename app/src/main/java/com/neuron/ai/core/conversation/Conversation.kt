@@ -80,6 +80,8 @@ data class MessageMetadata(
     val agentSteps: List<AgentStepRecord> = emptyList(),
     /** Structured recommendation cards produced by a UI tool call. */
     val richRecommendations: List<RichRecommendationSet> = emptyList(),
+    /** Native comparison sections, each anchored where it appeared in the answer. */
+    val comparisonBlocks: List<ComparisonPlacement> = emptyList(),
     /** Legacy whole-reply AI spacing, kept for already-stored messages. */
     val replySpacing: String? = null,
     /** AI-selected line spacing for prose paragraphs. */

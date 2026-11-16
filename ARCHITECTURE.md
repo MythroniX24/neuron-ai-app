@@ -230,7 +230,7 @@ Tools are registered in `AppContainer` — adding a tool never touches the loop.
 | Browser | `browser.open/read/find/links`, `browser.click/type/select` | side-effect tools always ask, even with the toggle ON |
 | Terminal/code | `terminal.run`, `code.edit`, `code.patch`, `code.diff`, `code.build`, `code.test` | terminal toggle = standing consent; catastrophic-command guard stays |
 | Memory | `memory.remember`, `memory.recall`, `memory.forget` | scope fixed by conversation context; secrets rejected |
-| Presentation | `ui.rich_items`, `ui.reply_spacing` | validated JSON → `RichContent` / `ReplySpacing` events, persisted on the assistant message |
+| Presentation | `ui.rich_items`, `ui.compare`, `ui.reply_spacing` | validated JSON → `RichContent` / `ComparisonBlocks` / `ReplySpacing` events, persisted on the assistant message |
 
 ## 6. AI providers
 
@@ -448,6 +448,21 @@ Design rules:
 - Native rich cards (`RichRecommendationSet`): image, year/meta, badge,
   description, key-fact rows, status with tone, source links. Validated by
   `RichItemsParser` before anything renders, persisted with the message.
+- Native comparison surfaces (`ComparisonUiBlock`): `side_by_side`,
+  `feature_table`, `score`, `pros_cons` and an interactive `priority` card.
+  `ComparisonBlocksParser` (pure Kotlin, fully unit-tested) accepts type/key
+  synonyms, caps every list and string, and only lets http(s) image URLs
+  through. Each block is stored as a `ComparisonPlacement(anchor, block)` in
+  `MessageMetadata.comparisonBlocks`, and `ComparisonLayout.segments()` splits
+  the answer at those anchors so text and cards interleave in reading order.
+- Card images: `EntityImageResolver` (implemented by `WikipediaImageResolver`)
+  turns an `imageQuery` phrase into a real public image — keyless, TTL/LRU
+  cached, one bounded request; the ViewModel keeps the resolved map in a
+  `StateFlow` shared by live and persisted messages. `SmartEntityImage`
+  (Coil `SubcomposeAsyncImage`, `ContentScale.Fit`) shows shimmer → image, or a
+  neutral icon when nothing trustworthy was found. A half-streamed fenced
+  block is stripped by `ComparisonBlocksParser.splitPendingStream()` and
+  replaced with a skeleton, so raw JSON never reaches the bubble.
 - Reply spacing: `ResponseSpacing` presets (compact / comfortable / relaxed /
   airy) applied independently to paragraphs and lists, chosen by the model
   through `ui.reply_spacing` and persisted per message (legacy single-value

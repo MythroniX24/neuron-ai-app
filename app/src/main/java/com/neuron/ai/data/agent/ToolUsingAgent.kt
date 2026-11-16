@@ -109,6 +109,14 @@ class ToolUsingAgent(
                     "structured JSON instead of writing the list in Markdown. Never invent image " +
                     "or source URLs. Keep the final text to a short intro/closing note. For " +
                     "ordinary questions, answer normally without calling it.\n" +
+                    "COMPARISONS: When the user compares two things or asks which is better " +
+                    "(phones, apps, AI models, plans, tools, services, places), call ui.compare " +
+                    "with 1-6 typed blocks (side_by_side, feature_table, score, pros_cons, " +
+                    "priority) instead of a Markdown table. Put each block where it belongs in " +
+                    "the answer, use the user's language, and for images give a real https " +
+                    "imageUrl only if a tool returned one — otherwise pass an imageQuery phrase " +
+                    "and the app resolves a real image itself. Never write the JSON as text, and " +
+                    "never repeat the same facts in Markdown after the cards.\n" +
                     "READABILITY: call ui.reply_spacing once per answer to choose spacing " +
                     "separately for paragraphs and lists — compact for dense lists and " +
                     "short facts, comfortable for normal chat, relaxed for explanations, " +
@@ -551,6 +559,15 @@ class ToolUsingAgent(
                     com.neuron.ai.core.conversation.RichItemsParser
                         .parse(call.argumentsJson)
                         ?.let { send(AgentEvent.RichContent(it)) }
+                }
+                // Comparison surfaces render inline with the answer, so the
+                // ViewModel needs the validated blocks and their position.
+                if (call.toolId == com.neuron.ai.core.conversation.ComparisonBlocksParser.TOOL_ID &&
+                    result is com.neuron.ai.core.agent.ToolResult.Success
+                ) {
+                    val blocks = com.neuron.ai.core.conversation.ComparisonBlocksParser
+                        .parse(call.argumentsJson)
+                    if (blocks.isNotEmpty()) send(AgentEvent.ComparisonBlocks(blocks))
                 }
                 // The model picked a readability preset for this answer.
                 if (call.toolId == com.neuron.ai.data.tool.ReplySpacingTool.TOOL_ID &&

@@ -108,6 +108,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.neuron.ai.core.conversation.ComparisonBlocksParser
 import com.neuron.ai.core.conversation.Message
 import com.neuron.ai.core.settings.ReplySpacingProfile
 import com.neuron.ai.di.AppContainer
@@ -155,6 +156,8 @@ fun ChatScreen(
     val generation by viewModel.generationState.collectAsStateWithLifecycle()
     val liveRun by viewModel.liveAgentRun.collectAsStateWithLifecycle()
     val liveRichRecommendations by viewModel.liveRichRecommendations.collectAsStateWithLifecycle()
+    val liveComparisonBlocks by viewModel.liveComparisonBlocks.collectAsStateWithLifecycle()
+    val comparisonImages by viewModel.comparisonImages.collectAsStateWithLifecycle()
     val liveReplySpacing by viewModel.liveReplySpacing.collectAsStateWithLifecycle()
     val draftAttachments by viewModel.draftAttachments.collectAsStateWithLifecycle()
     val attachmentNotice by viewModel.attachmentNotice.collectAsStateWithLifecycle()
@@ -363,7 +366,9 @@ fun ChatScreen(
                             messages.lastOrNull {
                                 it.role == Message.Role.TOOL && it.metadata?.toolCallId == callId
                             }?.content?.take(4_000)
-                        }
+                        },
+                        comparisonImages = comparisonImages,
+                        onImagesNeeded = viewModel::requestComparisonImages
                     )
                 }
             }
@@ -374,7 +379,10 @@ fun ChatScreen(
                         run = liveRun,
                         buffer = gen.buffer,
                         replySpacing = liveReplySpacing,
-                        richRecommendations = liveRichRecommendations
+                        richRecommendations = liveRichRecommendations,
+                        comparisonBlocks = liveComparisonBlocks,
+                        comparisonImages = comparisonImages,
+                        onImagesNeeded = viewModel::requestComparisonImages
                     )
                 }
 
@@ -969,7 +977,9 @@ private fun MessageRow(
     message: Message,
     onRetryFromHere: (() -> Unit)? = null,
     onEditAndResend: (() -> Unit)? = null,
-    fullResultResolver: (String) -> String? = { null }
+    fullResultResolver: (String) -> String? = { null },
+    comparisonImages: Map<String, String> = emptyMap(),
+    onImagesNeeded: (List<String>) -> Unit = {}
 ) {
     val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
     var showMenu by remember { mutableStateOf(false) }
@@ -1105,7 +1115,16 @@ private fun MessageRow(
                     onLongClick = { showMenu = true }
                 )
             ) {
-                MarkdownText(markdown = message.content, spacing = replySpacing)
+                // One answer, read in order: prose, native comparison card,
+                // more prose, next card. Rich recommendation sets still render
+                // as their own section below.
+                ComparisonContent(
+                    markdown = message.content,
+                    placements = message.metadata?.comparisonBlocks.orEmpty(),
+                    spacing = replySpacing,
+                    imageUrls = comparisonImages,
+                    onImagesNeeded = onImagesNeeded
+                )
             }
             message.metadata?.richRecommendations
                 ?.takeIf { it.isNotEmpty() }
@@ -1132,7 +1151,10 @@ private fun LiveAgentTurn(
     run: AgentRunState?,
     buffer: String,
     replySpacing: ReplySpacingProfile,
-    richRecommendations: List<com.neuron.ai.core.conversation.RichRecommendationSet> = emptyList()
+    richRecommendations: List<com.neuron.ai.core.conversation.RichRecommendationSet> = emptyList(),
+    comparisonBlocks: List<com.neuron.ai.core.conversation.ComparisonPlacement> = emptyList(),
+    comparisonImages: Map<String, String> = emptyMap(),
+    onImagesNeeded: (List<String>) -> Unit = {}
 ) {
     var expanded by remember { mutableStateOf(true) }
     Column(Modifier.fillMaxWidth()) {
@@ -1152,7 +1174,30 @@ private fun LiveAgentTurn(
                 modifier = Modifier.padding(bottom = Spacing.xs)
             )
         }
-        StreamingBubble(buffer.ifEmpty { "…" }, replySpacing)
+        // A comparison fence that is still open is hidden, not streamed as
+        // raw JSON: the user sees the prose so far plus a compact skeleton.
+        val streamed = ComparisonBlocksParser.splitPendingStream(buffer)
+        if (comparisonBlocks.isEmpty()) {
+            StreamingBubble(streamed.visible.ifEmpty { "…" }, replySpacing)
+        } else {
+            ComparisonContent(
+                markdown = streamed.visible,
+                placements = comparisonBlocks,
+                spacing = replySpacing,
+                imageUrls = comparisonImages,
+                onImagesNeeded = onImagesNeeded,
+                modifier = Modifier.padding(
+                    start = Spacing.sm,
+                    end = Spacing.sm,
+                    top = Spacing.md
+                )
+            )
+        }
+        if (streamed.hasPendingBlock) {
+            Column(Modifier.padding(horizontal = Spacing.sm, vertical = Spacing.xs)) {
+                ComparisonStreamSkeleton(replySpacing)
+            }
+        }
         if (richRecommendations.isNotEmpty()) {
             RichRecommendationSection(
                 recommendations = richRecommendations,

@@ -167,6 +167,14 @@ class AppContainer(context: Context) {
     /** Bounded page fetcher/extractor used by web tools. */
     val pageFetcher: PageFetcher = HttpPageFetcher(dispatchers)
 
+    /**
+     * Keyless image lookup for comparison cards: a search phrase becomes a
+     * real, public https image URL (cached). Misses fall back to a neutral
+     * placeholder in the UI — no key, no account, no invented URLs.
+     */
+    val comparisonImageResolver: com.neuron.ai.core.web.EntityImageResolver =
+        com.neuron.ai.data.web.WikipediaImageResolver(dispatchers, logger)
+
     /** Real WebView-backed browser sessions, keyed per conversation. */
     val browserManager: BrowserManager = AndroidBrowserManager(context, dispatchers)
 
@@ -227,6 +235,9 @@ class AppContainer(context: Context) {
             // Universal rich recommendation cards: available in every chat,
             // independent of terminal/browser/workspace capabilities.
             toolRegistry.register(com.neuron.ai.data.tool.RichItemsTool())
+            // Native comparison surfaces (side-by-side, table, score, pros/cons,
+            // interactive priorities) — universal, no capability required.
+            toolRegistry.register(com.neuron.ai.data.tool.ComparisonTool())
             // The model owns reply readability separately for prose and lists.
             toolRegistry.register(com.neuron.ai.data.tool.ReplySpacingTool())
             memoryTools.forEach { toolRegistry.register(it) }

@@ -94,6 +94,14 @@ sealed class AgentEvent {
     ) : AgentEvent()
 
     /**
+     * Validated comparison surfaces from a `ui.compare` call. They render
+     * inline with the answer, in the order sent, instead of as Markdown.
+     */
+    data class ComparisonBlocks(
+        val blocks: List<com.neuron.ai.core.conversation.ComparisonUiBlock>
+    ) : AgentEvent()
+
+    /**
      * The model chose separate breathing room for prose paragraphs and lists.
      * Emitted only after ui.reply_spacing validated the choice; the ViewModel
      * applies it live and persists it on the assistant message.

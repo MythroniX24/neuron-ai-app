@@ -118,7 +118,9 @@ class ChatViewModel(
      */
     private val localModels: com.neuron.ai.data.local.LocalModelRepository? = null,
     /** On-device provider; null when local inference is unavailable. */
-    internal val localAiProvider: com.neuron.ai.data.local.LocalAiProvider? = null
+    internal val localAiProvider: com.neuron.ai.data.local.LocalAiProvider? = null,
+    /** Resolves comparison-card images from a search phrase; null in previews/tests. */
+    private val imageResolver: com.neuron.ai.core.web.EntityImageResolver? = null
 ) : ViewModel() {
 
     val messages: StateFlow<List<Message>> =
@@ -166,6 +168,49 @@ class ChatViewModel(
         MutableStateFlow<List<com.neuron.ai.core.conversation.RichRecommendationSet>>(emptyList())
     val liveRichRecommendations: StateFlow<List<com.neuron.ai.core.conversation.RichRecommendationSet>> =
         _liveRichRecommendations.asStateFlow()
+
+    /**
+     * Comparison sections emitted by ui.compare during this turn, each anchored
+     * to the answer text written so far so a reply can interleave prose/cards.
+     */
+    private val _liveComparisonBlocks =
+        MutableStateFlow<List<com.neuron.ai.core.conversation.ComparisonPlacement>>(emptyList())
+    val liveComparisonBlocks:
+        StateFlow<List<com.neuron.ai.core.conversation.ComparisonPlacement>> =
+        _liveComparisonBlocks.asStateFlow()
+
+    /**
+     * Resolved card images, keyed by the model's imageQuery phrase. Shared by
+     * live and persisted messages, so history never shows placeholder art for
+     * something already looked up and the network is hit at most once.
+     */
+    private val _comparisonImages = MutableStateFlow<Map<String, String>>(emptyMap())
+    val comparisonImages: StateFlow<Map<String, String>> = _comparisonImages.asStateFlow()
+    private val requestedImages = java.util.Collections.synchronizedSet(mutableSetOf<String>())
+
+    /**
+     * Asks the image resolver for any phrase still missing a URL. Fire and
+     * forget on the IO dispatcher: a failed lookup simply leaves the neutral
+     * placeholder, it never blocks the answer or retries in a loop.
+     */
+    fun requestComparisonImages(queries: List<String>) {
+        val resolver = imageResolver ?: return
+        val missing = queries
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+            .filter { _comparisonImages.value[it].isNullOrBlank() }
+            .filter { requestedImages.add(it.lowercase()) }
+            .distinct()
+        if (missing.isEmpty()) return
+        viewModelScope.launch(dispatchers.io) {
+            missing.forEach { query ->
+                val url = runCatching { resolver.resolve(query) }.getOrNull()
+                if (!url.isNullOrBlank()) {
+                    _comparisonImages.value = _comparisonImages.value + (query to url)
+                }
+            }
+        }
+    }
 
     /** AI-chosen readability for the reply currently streaming. */
     private val _liveReplySpacing = MutableStateFlow(ReplySpacingProfile())
@@ -975,6 +1020,7 @@ class ChatViewModel(
         _activity.value = emptyList()
         _timeline.value = emptyList()
         _liveRichRecommendations.value = emptyList()
+        _liveComparisonBlocks.value = emptyList()
         _liveReplySpacing.value = ReplySpacingProfile()
         // The routing resolution is the FIRST timeline row: which model runs,
         // with what capabilities, and what was degraded (incl. live thermal
@@ -995,6 +1041,8 @@ class ChatViewModel(
         var finishedSteps: List<AgentStepRecord> = emptyList()
         var finishedRich =
             emptyList<com.neuron.ai.core.conversation.RichRecommendationSet>()
+        var finishedComparisons =
+            emptyList<com.neuron.ai.core.conversation.ComparisonPlacement>()
         var finishedSpacing = ReplySpacingProfile()
 
         val agent = agentFactory(
@@ -1089,6 +1137,25 @@ class ChatViewModel(
                                 } + event.content)
                         }
 
+                        is AgentEvent.ComparisonBlocks -> {
+                            // Anchored where the tool was called: text already
+                            // streamed stays above the cards, later text below.
+                            val anchor = assistantBuffer.length
+                            _liveComparisonBlocks.value = _liveComparisonBlocks.value +
+                                event.blocks.map {
+                                    com.neuron.ai.core.conversation.ComparisonPlacement(
+                                        anchor = anchor,
+                                        block = it
+                                    )
+                                }
+                            requestComparisonImages(
+                                event.blocks.flatMap {
+                                    com.neuron.ai.core.conversation.ComparisonLayout
+                                        .imageQueries(it)
+                                }
+                            )
+                        }
+
                         is AgentEvent.ReplySpacing -> {
                             _liveReplySpacing.value = ReplySpacingProfile.fromNames(
                                 paragraph = event.paragraph,
@@ -1148,6 +1215,23 @@ class ChatViewModel(
                                         summary = visible
                                     }
                             }
+                            // Same fallback for comparisons: a fenced block is
+                            // pulled out of the visible text and rendered as
+                            // native sections at its original position.
+                            if (_liveComparisonBlocks.value.isEmpty()) {
+                                com.neuron.ai.core.conversation.ComparisonBlocksParser
+                                    .extractFenced(summary)
+                                    ?.let { fenced ->
+                                        _liveComparisonBlocks.value = fenced.placements
+                                        summary = fenced.text
+                                        requestComparisonImages(
+                                            fenced.placements.flatMap { placement ->
+                                                com.neuron.ai.core.conversation.ComparisonLayout
+                                                    .imageQueries(placement.block)
+                                            }
+                                        )
+                                    }
+                            }
                             // Never shrink an already-streamed buffer: a
                             // transient empty model turn or a stray Finished
                             // must not erase partial output the user saw.
@@ -1155,8 +1239,10 @@ class ChatViewModel(
                                 assistantBuffer = StringBuilder(summary)
                             }
                             finishedRich = _liveRichRecommendations.value
+                            finishedComparisons = _liveComparisonBlocks.value
                             finishedSpacing = _liveReplySpacing.value
                             _liveRichRecommendations.value = emptyList()
+                            _liveComparisonBlocks.value = emptyList()
                             _generation.value = GenerationState.Streaming(assistantBuffer.toString())
                             // Snapshot before clearing — the assistant message
                             // metadata is written after collection completes.
@@ -1195,7 +1281,10 @@ class ChatViewModel(
                 stopElapsedClock(started)
                 withContext(kotlinx.coroutines.NonCancellable) {
                     taskId?.let { tasks.updateStatus(it, Task.Status.CANCELLED) }
-                    if (assistantBuffer.isNotEmpty() || _liveRichRecommendations.value.isNotEmpty()) {
+                    if (assistantBuffer.isNotEmpty() ||
+                        _liveRichRecommendations.value.isNotEmpty() ||
+                        _liveComparisonBlocks.value.isNotEmpty()
+                    ) {
                         conversations.appendMessage(
                             conversationId,
                             Message.Role.ASSISTANT,
@@ -1207,6 +1296,8 @@ class ChatViewModel(
                                 agentSteps = finishedSteps.ifEmpty { cancelStepsSnapshot() },
                                 richRecommendations = _liveRichRecommendations.value
                                     .ifEmpty { finishedRich },
+                                comparisonBlocks = _liveComparisonBlocks.value
+                                    .ifEmpty { finishedComparisons },
                                 paragraphSpacing = _liveReplySpacing.value.paragraph.name,
                                 listSpacing = _liveReplySpacing.value.list.name
                             )
@@ -1216,6 +1307,7 @@ class ChatViewModel(
                 _generation.value = GenerationState.Idle
                 _activity.value = emptyList()
                 _liveRichRecommendations.value = emptyList()
+                _liveComparisonBlocks.value = emptyList()
                 _liveReplySpacing.value = ReplySpacingProfile()
             }
             throw cancelled
@@ -1232,7 +1324,9 @@ class ChatViewModel(
                 streamError!!,
                 openDiagnostics = openDiagnosticsOnFailure
             )
-        } else if (assistantBuffer.isNotBlank() || finishedRich.isNotEmpty()) {
+        } else if (assistantBuffer.isNotBlank() || finishedRich.isNotEmpty() ||
+            finishedComparisons.isNotEmpty()
+        ) {
             conversations.appendMessage(
                 conversationId,
                 Message.Role.ASSISTANT,
@@ -1243,6 +1337,7 @@ class ChatViewModel(
                     generationMs = elapsed,
                     agentSteps = finishedSteps.ifEmpty { persistableSteps() },
                     richRecommendations = finishedRich,
+                    comparisonBlocks = finishedComparisons,
                     paragraphSpacing = finishedSpacing.paragraph.name,
                     listSpacing = finishedSpacing.list.name
                 )
@@ -1256,6 +1351,7 @@ class ChatViewModel(
 
         _activity.value = emptyList()
         _liveRichRecommendations.value = emptyList()
+        _liveComparisonBlocks.value = emptyList()
         _liveReplySpacing.value = ReplySpacingProfile()
         // Keep the finished timeline visible until the next turn begins.
         if (_generation.value is GenerationState.Streaming) {

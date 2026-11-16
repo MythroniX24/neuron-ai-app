@@ -152,7 +152,8 @@ class ChatViewModelFactory(
             // still returns the legacy result until verified (§14.3).
             orchestrator = container.contextOrchestrator,
             attachmentStore = container.attachmentStore,
-            settings = container.settingsRepository
+            settings = container.settingsRepository,
+            imageResolver = container.comparisonImageResolver
         ) as T
     }
 }
