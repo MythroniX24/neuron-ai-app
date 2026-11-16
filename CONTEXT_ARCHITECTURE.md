@@ -1,77 +1,87 @@
 # Neuron-AI — Context Management Architecture
 
-This document specifies the upgraded `ContextManager` → `ContextOrchestrator` system for Neuron-AI.
-It **extends** the existing architecture (AgentRuntime, Workspace, Memory, Task systems from Milestones
-0–3) — it does not replace any working component. Existing managers are wrapped as context providers,
-not rewritten.
-
----
-
-## 1. Purpose
-
-Instead of sending the full raw conversation to the model on every request, every model call goes
-through a single orchestration point that assembles a right-sized `ActiveContext` object, respecting
-the model's actual context window.
+How Neuron-AI decides **what the model actually sees** on every turn.
 
 Three concepts stay strictly separate:
 
-- **Conversation History** — complete raw chat log, never deleted.
-- **Memory** — intentionally retained, relevance-scoped facts (preferences, decisions, project state).
-- **Active Context** — the dynamic subset actually sent to the model for *this* request.
+- **Conversation history** — the complete raw chat log in Room, never deleted.
+- **Memory** — intentionally retained, scope-isolated facts (preferences,
+  project notes).
+- **Active context** — the dynamic subset assembled for *this* request only.
+
+This document describes both what is **implemented today** (✅) and what the
+remaining pieces of the pipeline are designed to be (🔜). Nothing here replaces
+a working component: the new pipeline wraps existing managers as providers, and
+runs alongside the legacy engine until it has been verified.
 
 ---
 
-## 2. High-Level Flow
+## 1. Two layers, one carrier
+
+```
+ChatViewModel.buildHistory()
+ ├── ChatContextEngine (legacy)        ✅ used for the request today
+ └── ContextOrchestrator (Phase 3)    ✅ built in SHADOW mode (logged, not used)
+        ↓
+   AgentGoal.history  →  ToolUsingAgent  →  provider request
+```
+
+- `AgentGoal.history` is the single carrier into the agent loop. **No second
+  context-building path exists**; the orchestrator replaces the call site, not
+  the loop.
+- The selected model's window comes from `ModelCapabilities` (cloud) or the
+  GGUF-declared `context_length` (on-device), so both paths see one number.
+- `ChatViewModel.USE_ORCHESTRATOR_CONTEXT = false` today. When the shadow log
+  comparison looks right, flipping it returns the orchestrator's messages and
+  the legacy engine becomes the fallback.
+
+## 2. Flow
 
 ```
 UserRequest
     ↓
-ContextOrchestrator                 (single entry point, called by AgentRuntime before every model call)
-
-INTEGRATION POINT (current Neuron-AI code): context is built today by
-ChatViewModel.buildHistory() → ChatContextEngine, passed to AgentGoal.history.
-The orchestrator REPLACES that call site — AgentGoal.history remains the
-carrier into the agent loop. No second context-building path may appear.
+ContextOrchestrator.buildContext(
+    query, conversationId, currentUserId, workspaceId, taskId,
+    contextWindowTokens, excludeCurrentRequest)
     ↓
-[Providers fetch raw candidates in parallel]
+[providers fetch candidates in parallel]
     ↓
-ContextRanker                        (priority + relevance + recency)
+ContextRanker            (hard priority tiers → relevance → recency)
     ↓
-TokenBudgetManager                   (model-aware budget allocation)
+TokenBudgetManager       (model-aware budget, P0–P2 protected)
     ↓
-ContextCompressor / CompactionManager (only if over budget)
+CompactionManager        (only when the ranked fit is over budget)
     ↓
-ActiveContext                        (final, immutable, sent to model)
+ActiveContext → List<ChatMessage>   (+ shadow metrics)
 ```
 
----
+Failure handling is part of the contract: a provider that throws contributes no
+candidates, and an impossible fit (protected tiers alone exceed the budget) falls
+back to the **safe minimal context** — system + current request + last 8 turns.
 
-## 3. Package Structure
+## 3. Packages
 
 ```
 com.neuron.ai.context/
-├── orchestrator/   ContextOrchestrator, ContextBuilder
-├── model/          ActiveContext, ContextItem, ContextPriority, ContextSourceType
-├── providers/       ConversationContextProvider, MemoryContextProvider,
-                      WorkspaceContextProvider, TaskContextProvider,
-                      ToolContextProvider, AttachmentContextProvider
-                      (ConnectorContextProvider is v2 — no connector
-                       subsystem exists in the app yet; excluded from v1)
-├── retrieval/       HybridRetriever, LexicalIndex (SQLite FTS5), Reranker
-├── budget/          TokenBudgetManager, TokenEstimator
-├── compaction/       CompactionManager, StructuredStateBuilder
-├── compression/     ToolResultProcessor
-├── cache/           ContextCacheManager
-└── debug/           ContextDebugSnapshot
+├── model/          ContextItem, ContextPriority, ContextSourceType      ✅
+├── providers/      Conversation / Memory / Task context providers        ✅
+├── ranker/         ContextRanker                                         ✅
+├── budget/         TokenBudgetManager, TokenBudget                       ✅
+├── compaction/     CompactionManager, StructuredState                    ✅
+├── compression/    ToolResultProcessor                                   ✅
+└── orchestrator/   ContextOrchestrator                                   ✅
+
+Planned (not in the codebase yet):
+├── retrieval/      HybridRetriever, LexicalIndex (SQLite FTS5), Reranker  🔜
+├── cache/          ContextCacheManager                                   🔜
+└── providers/      Workspace / Tool / Attachment / Connector providers    🔜
 ```
 
-Each provider wraps an *existing* manager (`WorkspaceManager`, `MemoryManager`, `TaskManager`, etc.)
-rather than duplicating its logic — providers are thin adapters that query the existing system and
-translate results into `ContextItem`s.
+Providers are **thin adapters** over existing managers (`MemoryManager`,
+`TaskManager`, `ConversationRepository`); they translate results into
+`ContextItem`s and never duplicate business logic.
 
----
-
-## 4. Core Models
+## 4. Core models ✅
 
 ```kotlin
 enum class ContextPriority(val level: Int) {
@@ -80,7 +90,8 @@ enum class ContextPriority(val level: Int) {
 }
 
 enum class ContextSourceType {
-    SYSTEM, CONVERSATION, MEMORY, WORKSPACE, TASK, TOOL_RESULT, CONNECTOR, ATTACHMENT
+    SYSTEM, CONVERSATION, MEMORY, WORKSPACE, TASK, TOOL_RESULT,
+    CONNECTOR, ATTACHMENT
 }
 
 data class ContextItem(
@@ -88,335 +99,209 @@ data class ContextItem(
     val sourceType: ContextSourceType,
     val sourceId: String,
     val priority: ContextPriority,
-    val relevanceScore: Float,          // 0f when not applicable (e.g. system context)
-    val tokenEstimate: Int,
-    val timestamp: Long,
-    val workspaceId: String?,
-    val conversationId: String,
-    val taskId: String?,
-    val content: String
-)
-
-data class ActiveContext(
-    val systemContext: List<ContextItem>,
-    val currentRequest: ContextItem,
-    val recentMessages: List<ContextItem>,
-    val relevantHistory: List<ContextItem>,
-    val conversationSummary: ContextItem?,
-    val relevantMemories: List<ContextItem>,
-    val workspaceContext: List<ContextItem>,
-    val taskContext: List<ContextItem>,
-    val toolContext: List<ContextItem>,
-    val connectorContext: List<ContextItem>,
-    val attachmentContext: List<ContextItem>,
-    val tokenUsage: Int,
-    val tokenBudget: Int,
-    val debug: ContextDebugSnapshot
-)
+    val relevanceScore: Float = 0f,   // 0f when not applicable
+    val content: String,              // TOOL rows enter pre-compressed
+    val timestampMs: Long = 0L,
+    val workspaceId: String? = null,
+    val conversationId: String = "",
+    val taskId: String? = null,
+    /** Wire role for chat assembly; null = derived from priority. */
+    val wireRole: ChatMessage.Role? = null,
+    /** TOOL rows must reference the assistant tool-call id on the wire. */
+    val toolCallId: String? = null,
+    /** Images/files of the original message (vision-input parity). */
+    val attachments: List<Attachment> = emptyList()
+) {
+    /** Cheap char-based estimate; the budgeter converts it to tokens. */
+    val tokenEstimate: Int get() = content.length / 4
+}
 ```
 
----
+`ContextPriority` doubles as the tier used by both the ranker and the budget
+manager, which keeps ranking and fitting consistent by construction.
 
-## 5. ContextOrchestrator
+## 5. Orchestrator ✅
 
 ```kotlin
 class ContextOrchestrator(
-    private val providers: List<ContextProvider>,
-    private val ranker: ContextRanker,
-    private val budgetManager: TokenBudgetManager,
-    private val compactionManager: CompactionManager,
-    private val cache: ContextCacheManager
+    private val conversationProvider: ConversationContextProvider,
+    private val memoryProvider: MemoryContextProvider,
+    private val taskProvider: TaskContextProvider,
+    private val messagesProvider: suspend (String) -> List<Message>,
+    private val budgetManager: TokenBudgetManager = TokenBudgetManager(),
+    private val compactionManager: CompactionManager = CompactionManager(),
+    private val minimalRecentCount: Int = 8
 ) {
     suspend fun buildContext(
-        request: UserRequest,
-        model: ModelCapabilities,
+        query: String,
         conversationId: String,
+        currentUserId: String?,
         workspaceId: String?,
-        taskId: String?
-    ): ActiveContext {
-        val budget = budgetManager.computeBudget(model)
-
-        val candidates = providers
-            .map { provider -> async { provider.fetch(request, conversationId, workspaceId, taskId) } }
-            .awaitAll()
-            .flatten()
-
-        val ranked = ranker.rank(candidates, request)
-        val fitted = budgetManager.fitToBudget(ranked, budget)   // P0/P1/P2 always preserved
-
-        val finalItems = if (fitted.overBudget) {
-            compactionManager.compact(fitted, budget)             // summarize P6, drop P7
-        } else {
-            fitted.items
-        }
-
-        return assemble(finalItems, budget)
-    }
-}
-
-interface ContextProvider {
-    suspend fun fetch(
-        request: UserRequest,
-        conversationId: String,
-        workspaceId: String?,
-        taskId: String?
-    ): List<ContextItem>
+        taskId: String?,
+        contextWindowTokens: Int,
+        excludeCurrentRequest: Boolean = false
+    ): BuiltContext
 }
 ```
 
-`ContextRanker` scores each item as `f(priority, relevanceScore, recencyDecay)`, with priority acting
-as a hard tier and relevance/recency breaking ties within a tier.
+`BuiltContext` reports `messages`, `tokenUsage`, `tokenBudgetTotal`,
+`candidateCount`, `keptCount`, `droppedCount`, `usedMinimalFallback`,
+`compacted` and `compactionSummaryIncluded` — exactly the numbers the shadow log
+prints next to the legacy engine's output via `ContextOrchestrator.builtFrom`.
 
----
+The conversation log is read **once** per turn and shared by both paths, so the
+shadow comparison can never diverge because of a race.
 
-## 6. Token Budgeting — Model-Aware, Not Hardcoded
+`excludeCurrentRequest = true` keeps parity with the legacy engine: the current
+user request travels as the agent goal's instruction, so P1 rows are left out of
+the history and the model never sees the request twice.
+
+### Provider mapping ✅
+
+| Source | Priority |
+|---|---|
+| `Message.Role.SYSTEM` | SYSTEM (P0) |
+| current user message (`currentUserId`) | CURRENT_REQUEST (P1) |
+| `Message.Role.TOOL` | TASK_STATE (P2), compressed |
+| everything else | RECENT_CHAT (P3) |
+| persisted error rows (`metadata.isError`) | dropped — noise |
+
+Memory items are ranked MEMORY (P5) and tasks TASK_STATE (P2); both are filtered
+strictly by `workspaceId` / `conversationId` (see §10).
+
+## 6. Token budgeting ✅
 
 ```kotlin
 data class TokenBudget(
-    val total: Int,
-    val reservedOutput: Int,
-    val system: Int,
-    val recent: Int,
-    val history: Int,
-    val memory: Int,
-    val workspace: Int,
-    val tools: Int,
-    val attachments: Int
-)
-
-class TokenBudgetManager(private val estimator: TokenEstimator) {
-    fun computeBudget(model: ModelCapabilities): TokenBudget {
-        val usable = model.contextWindow - model.outputLimit
-        // P0–P2 are reserved unconditionally; remaining space is split across P3–P7
-        // proportionally, weighted by priority level. Never a fixed universal number.
-        TODO("proportional allocation using model.contextWindow / model.outputLimit")
-    }
-
-    fun fitToBudget(ranked: List<ContextItem>, budget: TokenBudget): FitResult {
-        TODO("greedily fill by priority tier, tracking overBudget flag")
-    }
-}
-```
-
-Budget must be recomputed per request using the **currently selected model's** `contextWindow` and
-`outputLimit` — never a constant, since Neuron-AI is provider-agnostic (OpenAI-compatible, Gemini,
-Claude-compatible, OpenRouter, local models).
-
-> **Local models (on-device):** a downloaded GGUF model feeds its GGUF-declared
-> `context_length` into the same budget path via its `LocalModelRecord` — the
-> TokenBudgetManager sees no difference between a local and a cloud window.
-> Local runs are additionally capped to a 4k runtime context by the engine
-> loader (phone RAM discipline; raise per-model once mmap pressure is measured).
-
----
-
-## 7. Retrieval — Kept Lightweight for On-Device / Termux Development
-
-No heavy vector database dependency. Hybrid lexical + metadata retrieval:
-
-- **SQLite FTS5** (built into Android's SQLite — zero extra dependency) indexes conversation messages
-  for keyword search.
-- Ranking combines FTS5 BM25 score + recency decay + source priority.
-- **Future upgrade path (not required for v1):** a small on-device SLM could generate lightweight
-  embeddings for true semantic retrieval, avoiding any third-party embedding model or paid API —
-  pluggable later via the `SemanticIndex` interface without touching the pipeline.
-
-```kotlin
-class HybridRetriever(
-    private val lexicalIndex: LexicalIndex,   // FTS5-backed
-    private val reranker: Reranker
+    val total: Int,                 // selected model's window
+    val reservedOutput: Int,        // min(2048, window / 4)
+    val safetyMarginPercent: Int = 10
 ) {
-    suspend fun retrieve(query: String, conversationId: String, limit: Int): List<ContextItem> {
-        val candidates = lexicalIndex.search(query, conversationId)
-        return reranker.rerank(candidates, query, limit)
-    }
+    val usableForInput: Int get() = ((total - reservedOutput) * 100) / (100 + safetyMarginPercent)
 }
 ```
 
----
+- `computeBudget(window)` clamps the window to a 4 000-token floor so a
+  mis-declared window cannot produce a zero budget.
+- `fitToBudget` fills greedily by tier and returns `Fits`, `OverBudget` (with the
+  dropped items) or `Impossible` when P0–P2 alone do not fit.
+- **Invariants:** P0–P2 are never dropped by fitting or compaction, and the
+  fitted result never exceeds `usableForInput`; a violation logs loudly and the
+  caller falls back to the safe minimal context.
+- Budget is recomputed **per request** from the selected model — never a global
+  constant. Local models feed their GGUF-declared window into the same path; the
+  on-device trimmer (`data/local/ContextTrimmer.kt`) applies the phone-specific
+  cap on top.
 
-## 8. Compaction — Structured State, Not Prose
+## 7. Ranking ✅
 
-`CompactionManager` never deletes raw messages. It produces a `StructuredState` object stored
-alongside the raw log and reused as a single high-priority `ContextItem`:
+`ContextRanker` scores `f(priority tier, relevance, recency)`:
+
+- priority is a **hard tier** — a SYSTEM item always outranks a hugely relevant
+  LOW_VALUE one;
+- within a tier, keyword overlap with the current query lifts relevance;
+- recency is an additive term (items newer than 60 s count as fresh), so two
+  items with no relevance signal still order newest-first;
+- the sort is stable, which keeps prompts and tests deterministic.
+
+## 8. Compaction ✅
+
+`CompactionManager` never deletes raw messages. It produces an **extractive**
+`StructuredState` for an older segment:
 
 ```kotlin
 data class StructuredState(
-    val goal: String,
-    val decisions: List<String>,
-    val constraints: List<String>,
-    val currentTask: String?,
-    val implementationState: List<String>,
-    val unresolved: List<String>,
-    val relevantToolOutcomes: List<String>
+    val goal: String,              // first user message of the segment
+    val decisions: List<String>,   // final assistant answers
+    val toolOutcomes: List<String>,// TOOL rows, compressed
+    val sourceCount: Int
 )
 ```
 
-This is far cheaper to incrementally re-summarize as the conversation grows than a free-text
-paragraph, and preserves exactly the fields listed in the project's compaction requirements
-(objective, decisions, constraints, current task, unresolved issues).
+Extractive by design (v1): every line quotes the conversation, so no model
+round-trip is needed, nothing can be hallucinated, and the distortion check has a
+real guarantee to verify. §14.4 applies: a keyword-overlap test against the raw
+messages is run before the summary is trusted; if overlap is too low the summary
+is **not** included (`compactionSummaryIncluded = false`) and the turn falls back
+to raw eviction. Raw messages stay retrievable regardless.
 
----
+## 9. Tool-result compression ✅
 
-## 9. Tool Result Compression
-
-Tool outputs (e.g. a 20,000-line Gradle build log) are never sent raw, repeatedly, into context.
+`ToolResultProcessor` is the highest-payoff piece: large tool payloads never
+re-enter context raw on every later turn.
 
 ```kotlin
 data class ProcessedToolResult(
-    val command: String,
-    val exitCode: Int,
-    val summary: String,
+    val toolName: String,
+    val callId: String,
+    val summary: String,          // one line: exit=0, error text…
     val relevantLines: List<String>,
-    val fullResultRef: String   // reference to persisted full log
+    val originalChars: Int
 )
 ```
 
-Only `summary` + `relevantLines` enter `ActiveContext`. The full output stays retrievable via a
-`ReadFullToolOutput` tool when the model actually needs it.
+- Applied to every TOOL row by the conversation provider and by the legacy
+  engine alike.
+- Compression threshold: **1 200 chars**. Above it the model sees a
+  `(full output N chars — ask to read the full tool output if needed)` hint; the
+  complete text stays in the persisted TOOL message.
+- Key lines kept: exit codes, `[err]`/error markers, SOURCE/TITLE/URL and paths.
 
----
+## 10. Isolation ✅
 
-## 10. Context Isolation
+- Every `ContextItem` carries `conversationId` and optional `workspaceId` /
+  `taskId`; providers filter strictly by them — no cross-chat leakage.
+- Memory retrieval respects project scope (PROJECT memories are workspace-bound;
+  USER_PREFERENCE is global by definition).
+- Attachments are addressed by id from the current message only.
+- Connector data (Gmail, Drive, Calendar…) has no subsystem in the app yet, so no
+  connector provider ships — by design, not by omission.
 
-- Every `ContextItem` carries `workspaceId`, `conversationId`, `taskId`.
-- Providers must filter strictly by these IDs — no cross-workspace or cross-conversation leakage.
-- Memory retrieval respects workspace/project boundaries.
-- Connector data (Gmail, Drive, Calendar, GitHub, etc.) is fetched on demand per request and never
-  cached as permanent context — see `ConnectorContextProvider`.
+## 11. Shadow observability (partial) ✅ / 🔜
 
----
+Today: every assembled context is compared against the legacy engine and both
+sides are logged (`logger.d("ContextShadow", …)`) in debug builds, with candidate
+/ kept / dropped / token numbers and the minimal-fallback and compaction flags.
 
-## 11. Debug Snapshot (developer-only)
+Planned: a `ContextDebugSnapshot` data class plus a developer panel (token split
+per source, compaction/retrieval counters). The Debug console that ships today
+covers local-engine diagnostics (engine build, memory, model files, llama.cpp
+log, crash reports), not context usage.
 
-```kotlin
-data class ContextDebugSnapshot(
-    val systemTokens: Int,
-    val recentChatTokens: Int,
-    val historyTokens: Int,
-    val memoryTokens: Int,
-    val workspaceTokens: Int,
-    val toolTokens: Int,
-    val attachmentTokens: Int,
-    val reservedOutputTokens: Int,
-    val totalTokens: Int,
-    val compactionTriggered: Boolean,
-    val retrievedMemoryCount: Int,
-    val retrievedHistoryCount: Int,
-    val compressedToolResultCount: Int,
-    val droppedLowPriorityCount: Int
-)
-```
+## 12. Failure handling ✅
 
-v1: logged via the existing Logger on every assembled context (debug builds only);
-UI panel / end-user "context usage" indicator is deferred until the system is verified.
+- Retrieval/provider failure → contribute no items, keep the rest.
+- Repository failure (no messages) → safe minimal context.
+- Compaction failure or rejected summary → raw eviction only.
+- Impossible fit → safe minimal context and a loud log.
+- Token estimation is a conservative character heuristic with an explicit safety
+  margin, so an estimation miss degrades quality instead of overflowing.
 
----
+## 13. Remaining work 🔜
 
-## 12. Failure Handling
+1. **Retrieval.** SQLite FTS5 lexical index over messages (porter + trigram,
+   zero extra dependency), BM25 + recency + source priority, behind a `Reranker`
+   so a future on-device semantic index can be plugged in without touching the
+   orchestrator.
+2. **Cache.** Content-addressed keys `(workspaceId, conversationId, contentHash)`
+   instead of time-based ones, so any data change invalidates exactly the right
+   entry.
+3. **Wider providers.** Workspace, attachment and tool providers on top of the
+   modules that already exist.
+4. **Verification.** Flip `USE_ORCHESTRATOR_CONTEXT` after real multi-step
+   conversations show parity or better against the legacy engine.
+5. **Context usage UI.** Surface the shadow numbers to the user only after the
+   pipeline itself is verified.
 
-All providers/retrieval/compaction steps must degrade gracefully, never crash the chat:
+## 14. Hardening notes
 
-- Retrieval failure → fall back to recent messages + current task context only.
-- Summary failure → fall back to raw recent messages, skip the summary item.
-- Token estimation failure → use a conservative fixed-ratio fallback estimator.
-- Attachment extraction failure → mark attachment as unavailable, continue without it.
-
----
-
-## 13. Suggested Build Order
-
-1. `ContextItem` / `ActiveContext` / `ContextPriority` models
-2. `TokenBudgetManager` + `TokenEstimator`, wired into existing `ModelCapabilities`
-3. Providers — wrap existing Workspace, Memory, Task managers as adapters
-4. `ContextRanker` + budget-fitting logic
-5. `ToolResultProcessor` (highest immediate payoff — addresses today's largest context bloat)
-6. FTS5-backed `HybridRetriever`
-7. `CompactionManager` with `StructuredState`
-8. `ContextDebugSnapshot` UI panel
-
-Each step is independently shippable and testable without touching the others — no big-bang rewrite
-of the existing `ContextManager` is required at any point.
-
----
-
-## 14. Hardening — Fixes for the Known Weaknesses
-
-### 14.1 Semantic recall (FTS5 is keyword-only)
-
-FTS5 alone misses paraphrases ("terminal off by default" vs "AI can't run shell commands"). Fix
-without adding a heavy dependency:
-
-- Switch the FTS5 index to the **porter tokenizer** (stemming) and add a secondary **trigram** FTS5
-  table for fuzzy/typo-tolerant matches — both are built into SQLite, zero extra dependency.
-- Maintain a small **synonym/alias map** (stored via the existing memory system) that the retriever
-  expands the query with before searching — e.g. `"terminal permission"` ↔ `"shell access"`.
-- Keep semantic embeddings as a **pluggable** `SemanticIndex` behind the same `Reranker` interface, so
-  a future on-device embedding index can be swapped in later without touching the orchestrator pipeline.
-
-```kotlin
-interface SemanticIndex {
-    suspend fun search(query: String, conversationId: String, limit: Int): List<ContextItem>
-}
-
-class HybridRetriever(
-    private val lexicalIndex: LexicalIndex,        // FTS5 porter + trigram
-    private val synonymExpander: SynonymExpander,
-    private val semanticIndex: SemanticIndex?,      // null until Continuum is ready
-    private val reranker: Reranker
-) {
-    suspend fun retrieve(query: String, conversationId: String, limit: Int): List<ContextItem> {
-        val expanded = synonymExpander.expand(query)
-        val lexical = lexicalIndex.search(expanded, conversationId)
-        val semantic = semanticIndex?.search(query, conversationId, limit) ?: emptyList()
-        return reranker.rerank(lexical + semantic, query, limit)
-    }
-}
-```
-
-### 14.2 Token estimation accuracy across providers
-
-- `TokenEstimator` becomes an interface: a cheap default heuristic (`chars / 4 * safetyMargin`) plus
-  provider-specific implementations that call a real counting endpoint where one exists (e.g. Anthropic's
-  `count_tokens`, Gemini's `countTokens`).
-- Exact counting is invoked **only near the budget boundary** (inside `fitToBudget`, not per item), so
-  accuracy doesn't cost latency on every request.
-- Every `TokenBudget` carries an explicit `safetyMarginPercent` (default ~10%) so an estimation miss
-  degrades gracefully instead of causing a hard overflow.
-
-```kotlin
-interface TokenEstimator {
-    fun estimate(text: String): Int
-}
-
-class HeuristicTokenEstimator(private val safetyMargin: Float = 1.1f) : TokenEstimator {
-    override fun estimate(text: String): Int = ((text.length / 4) * safetyMargin).toInt()
-}
-
-class ProviderTokenCounter(private val provider: AiProvider) : TokenEstimator {
-    override fun estimate(text: String): Int = provider.countTokens(text)   // only called near budget edge
-}
-```
-
-### 14.3 Extra moving parts → bugs, cache bugs, silent budget miscalculation
-
-- **Invariants, checked and logged loudly** (reuse the existing Phase 0 logging/error abstractions):
-  - P0–P2 items are never dropped by `fitToBudget` or `compact`.
-  - `activeContext.tokenUsage` never exceeds `tokenBudget.total`.
-  - Any violation logs an error and falls back to a safe minimal context (system + current request +
-    last N recent messages) rather than sending something over budget.
-- **Unit tests from day one** for `ContextRanker` and `TokenBudgetManager` using fixed fixture item
-  sets with known token counts/priorities — these are pure functions, cheap to test exhaustively.
-- **Content-addressed cache keys** — `(workspaceId, conversationId, contentHash)` instead of time-based
-  keys, so any underlying data change invalidates the right cache entry automatically.
-- **Shadow mode for rollout**: run `ContextOrchestrator` in parallel with the current context logic,
-  log the two side by side, but keep feeding the model the old context until the new one has been
-  verified against real conversations. Flip over only after that comparison looks correct.
-
-### 14.4 Compaction distortion (summarization is itself a model call)
-
-- Before a `StructuredState` summary is trusted, run a cheap keyword-overlap check against the raw
-  messages it was built from. If overlap is unexpectedly low, fall back to raw recent messages for that
-  turn instead of the summary, and flag the summary for re-generation.
-- Raw messages are always retrievable regardless of what the summary says — the summary is a
-  convenience layer, never the source of truth.
+- **Semantic recall** is keyword-only until FTS5 lands; the synonym map and
+  semantic index stay pluggable so no orchestrator change is needed later.
+- **Token estimation** stays heuristic; provider-specific counters (Anthropic
+  `count_tokens`, Gemini `countTokens`) would only be called near the budget
+  boundary, never per item.
+- **Compaction distortion** is guarded by the keyword-overlap check above;
+  the raw log remains the source of truth.
+- **Deterministic tests.** `ContextRanker`, `TokenBudgetManager`,
+  `CompactionManager`, `ToolResultProcessor` and `ContextOrchestrator` are all
+  covered by the JVM suite (`context/Context*Test.kt`) using fixed fixture sets.

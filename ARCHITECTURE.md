@@ -1,15 +1,17 @@
 # Neuron-AI — Architecture
 
-Neuron-AI is a mobile AI-agent platform built with **Kotlin** and **Jetpack Compose**.
-This document describes the Phase 0 foundation: the architectural decisions, module
-boundaries, and the seams every future feature must plug into.
+Neuron-AI is an Android AI-agent platform built with **Kotlin** and **Jetpack
+Compose**. This document describes the architecture **as implemented** in release
+1.2.5: module boundaries, the agent loop, the tool system, context engineering,
+storage, security, and the on-device inference stack.
 
 ---
 
-## 1. Overall architecture
+## 1. Layering
 
-A single-module app (`:app`) with strict internal layering. Packages are the module
-boundaries; when a layer grows, it graduates to a real Gradle module without API changes.
+A single-module app (`:app`) with strict internal layering. Packages are the
+module boundaries; a layer can graduate to a real Gradle module without API
+changes.
 
 ```
 ┌─────────────────────────────────────────────┐
@@ -18,6 +20,8 @@ boundaries; when a layer grows, it graduates to a real Gradle module without API
 │ di/        AppContainer (manual DI)         │  wiring
 ├─────────────────────────────────────────────┤
 │ data/      Repository implementations       │  data
+├─────────────────────────────────────────────┤
+│ context/   Context pipeline (budget/rank)   │  request assembly
 ├─────────────────────────────────────────────┤
 │ core/      Interfaces + domain models       │  domain (no Android UI deps)
 └─────────────────────────────────────────────┘
@@ -28,437 +32,488 @@ Rules:
 - `core/` never imports Compose, Activity, or any UI type.
 - `ui/` talks to `core/` interfaces, never to concrete implementations.
 - `data/` implements `core/` interfaces; consumers depend on the interface only.
-- All dependencies point downward (`ui → di → data → core`). No cycles.
+- All dependencies point downward (`ui → di → data → context → core`). No cycles.
 
-## 2. Package structure
+## 2. Package map
 
 ```
 com.neuron.ai
-├── NeuronApplication.kt        # owns AppContainer for the process lifetime
-├── MainActivity.kt             # single activity, edge-to-edge, hosts Compose
+├── NeuronApplication.kt          # owns AppContainer for the process lifetime
+├── MainActivity.kt               # single activity, edge-to-edge, hosts Compose
 ├── core/
-│   ├── log/                    # Logger facade + secret redaction
-│   ├── error/                  # NeuronError sealed hierarchy
-│   ├── coroutines/             # DispatcherProvider
-│   ├── security/               # SecureCredentialStore (Keystore-backed)
-│   ├── settings/               # SettingsRepository (DataStore)
-│   ├── provider/               # AIProvider, Model, ChatMessage, StreamEvent
-│   ├── agent/                  # Agent, AgentRuntime, Tool, ToolRegistry
-│   ├── task/                   # Task, TaskManager
-│   ├── permissions/            # Capability, PermissionManager
-│   ├── conversation/           # Conversation, Message, ConversationRepository
-│   ├── workspace/              # Project, Workspace (sandboxed filesystem)
-│   ├── memory/                 # Memory seam
-│   └── integration/            # BrowserSession, TerminalSession seams
+│   ├── agent/                    # Agent, ToolPolicy, AgentGoal, AgentEvent,
+│   │                             #   AgentRun/AgentSession/AgentRuntime, Tool,
+│   │                             #   AgentStepMapper (UI-safe action details)
+│   ├── conversation/             # Conversation, Message, Attachment,
+│   │                             #   AgentStepRecord, MessageMetadata,
+│   │                             #   RichItems(+Parser), ConversationRepository
+│   ├── provider/                 # AIProvider, Model, ChatMessage, StreamEvent,
+│   │                             #   CompletionRequest/Completion
+│   ├── permissions/              # Capability, AccessMode, DecisionScope,
+│   │                             #   PermissionRequest/Decision/Manager
+│   ├── task/                     # Task, TaskManager
+│   ├── memory/                   # MemoryEntry, MemoryType, MemoryStore
+│   ├── workspace/                # Project/Workspace models
+│   ├── web/                      # SearchProvider, PageFetcher, search models
+│   ├── integration/              # BrowserSession, TerminalSession seams
+│   ├── settings/                 # SettingsRepository, ThemeMode,
+│   │                             #   ResponseSpacing, ReplySpacingProfile
+│   ├── security/                 # SecureCredentialStore (+ Keystore factory)
+│   ├── error/                    # NeuronError, CrashRecorder
+│   ├── log/                      # Logger facade + secret redaction
+│   └── coroutines/               # DispatcherProvider
 ├── data/
-│   ├── db/                     # Room entities, DAO, database, codecs
-│   ├── conversation/           # RoomConversationRepository
-│   ├── provider/               # ProviderRepository, OpenAI-compatible provider, wire codec
-│   ├── agent/                  # ToolUsingAgent, DefaultToolExecutor, TextToolCallParser
-│   ├── tool/                   # InMemoryToolRegistry, SafeTools
-│   ├── attachment/             # AttachmentStore (app-private storage)
-│   ├── permissions/            # SessionPermissionManager
-│   ├── task/                   # DefaultTaskManager
-│   ├── web/                    # keyless search engines + orchestrator/cache
-│   ├── workspace/ terminal/    # workspace sandbox + shell sessions
-│   └── local/                  # Local AI: GGUF parser, llama.cpp bridge, HF search, downloads
+│   ├── db/                       # Room entities, DAOs, mappers, codecs,
+│   │                             #   NeuronDatabase (v5), task + memory stores
+│   ├── conversation/             # RoomConversationRepository
+│   ├── provider/                 # ProviderRepository, ProviderPresets,
+│   │                             #   OpenAICompatibleProvider + wire codec,
+│   │                             #   ModelCapabilities
+│   ├── agent/                    # ToolUsingAgent, DefaultToolExecutor,
+│   │                             #   DefaultAgentRuntime, TextToolCallParser
+│   ├── tool/                     # SafeTools, WorkspaceTools, WebTools,
+│   │                             #   BrowserTools, TerminalAndCodingTools,
+│   │                             #   RichItemsTool, ReplySpacingTool,
+│   │                             #   InMemoryToolRegistry
+│   ├── web/                      # DuckDuckGo/Bing/Mojeek adapters,
+│   │                             #   SearchOrchestrator, aggregator, reranker,
+│   │                             #   sanitizer, HttpPageFetcher
+│   ├── browser/                  # AndroidBrowserManager (per-conversation
+│   │                             #   WebView sessions)
+│   ├── memory/                   # MemoryManager, RoomMemoryStore
+│   ├── workspace/                # WorkspaceManagerImpl, WorkspaceContext
+│   ├── terminal/                 # TerminalManager/TerminalSession
+│   ├── task/                     # DefaultTaskManager, TaskRecordStore
+│   ├── permissions/              # SessionPermissionManager
+│   ├── attachment/               # AttachmentStore (app-private files)
+│   └── local/                    # On-device inference (see §13)
+├── context/
+│   ├── model/                    # ContextItem, ContextPriority, ContextSourceType
+│   ├── providers/                # Conversation/Memory/Task context providers
+│   ├── ranker/                   # ContextRanker
+│   ├── budget/                   # TokenBudgetManager, TokenBudget
+│   ├── compaction/               # CompactionManager, StructuredState
+│   ├── compression/              # ToolResultProcessor
+│   └── orchestrator/             # ContextOrchestrator
 ├── di/
-│   └── AppContainer.kt         # explicit manual dependency graph
+│   └── AppContainer.kt           # explicit manual dependency graph
 └── ui/
-    ├── theme/                  # design system: colors, type, shapes, spacing
-    ├── components/             # shared components (composer, cards, states)
-    ├── navigation/             # Routes
-    ├── home/  chat/  settings/ # screens + ViewModels + factories
-    └── NeuronApp.kt            # NavHost shell
+    ├── NeuronApp.kt              # drawer shell + NavHost
+    ├── navigation/Routes.kt      # route constants + builders
+    ├── chat/                     # ChatScreen, ChatViewModel(+Factory),
+    │                             #   AgentTimelineCard, RichRecommendationCard,
+    │                             #   AttachmentSheet, TerminalPanel,
+    │                             #   EmptyChatHero, ChatContextEngine, AiNaming
+    ├── conversations/            # ConversationsScreen + ViewModel
+    ├── drawer/                   # AppDrawer (chat list, new chat, settings)
+    ├── providers/                # ProvidersScreen, ProviderEditScreen
+    ├── settings/                 # Settings, LocalAi, LocalModelSettings,
+    │                             #   DebugConsole screens + ViewModels
+    ├── tasks/                    # TasksScreen + ViewModel
+    ├── permissions/              # PermissionDialogHost
+    ├── markdown/                 # parser, renderer, highlighter, inline Markdown
+    ├── components/               # shared components, DraggablePanel, Motion
+    └── theme/                    # colors, typography, spacing, shapes
 ```
 
 ## 3. UI architecture
 
 - **Single Activity + Compose.** No fragments, no XML layouts.
-- **Navigation:** Navigation-Compose with a central `Routes` object. Screens receive
-  navigation lambdas (`onOpenChat`, `onBack`) and never touch the `NavController`
-  themselves — this keeps screens previewable and testable.
-- **State:** Unidirectional data flow. Screens observe `StateFlow` from ViewModels via
-  `collectAsStateWithLifecycle()` and report events upward through function calls.
-- **ViewModels** are created through explicit `ViewModelProvider.Factory` classes that
-  receive `AppContainer`. No `by viewModels { … }` magic inside screens.
+- **Drawer shell.** `NeuronApp` wraps the whole `NavHost` in a
+  `ModalNavigationDrawer`; the drawer lists conversations (pin/rename/delete),
+  opens a new chat and reaches Settings.
+- **One chat surface.** `Routes.HOME` *is* the chat screen: a fresh conversation
+  id is minted per visit and the conversation is created lazily on first send or
+  capability change, so the composer is identical from the first frame.
+- **Navigation:** Navigation-Compose with a central `Routes` object
+  (`home`, `chat/{conversationId}`, `conversations`, `providers`,
+  `provider-edit`, `settings`, `tasks`, `local-ai`,
+  `local-model-settings/{modelId}`, `debug-console`). Screens receive navigation
+  lambdas and never touch the `NavController` themselves.
+- **State:** unidirectional data flow. Screens observe `StateFlow` from
+  ViewModels with `collectAsStateWithLifecycle()` and report events upward.
+- **ViewModels** are created through explicit `ViewModelProvider.Factory`
+  classes that receive `AppContainer`.
 - **Edge-to-edge** is enabled; screens pad with `systemBarsPadding()`.
+- **Theme:** Material 3, light-first, dark and system modes; the root paints the
+  app background and provides `LocalContentColor` so screens outside a `Surface`
+  stay readable in dark mode.
 
-## 4. State management
+### Chat screen anatomy
 
-| Scope            | Mechanism                                      |
-|------------------|------------------------------------------------|
-| UI state         | `StateFlow` in ViewModels (`HomeUiState`)      |
-| Repository state | `MutableStateFlow` inside data implementations |
-| Preferences      | DataStore (`SettingsRepository`)               |
-| Persistence      | Room (`ConversationRepository` via `RoomConversationRepository`) |
+Composer (`Ask Neuron…`), model chip with the selected provider/model, the `+`
+controls sheet (Camera / Photos / Files, Terminal, Browser, Workspace), the
+inline agent timeline (collapsible run header, per-step tool rows with action
+details and narration), assistant bubbles with Markdown/LaTeX/rich cards and
+per-message actions (copy, retry, regenerate, edit & resend), the queued-message
+bar with undo, an attachment strip, and the draggable terminal panel.
 
-All state is observable through `kotlinx.coroutines.flow.Flow`; nothing caches UI state
-globally. Repository writes run on the IO dispatcher; Room flows keep the UI reactive.
+## 4. Agent runtime and the tool loop
 
-## 5. AI provider architecture
+`core/agent/Agent.kt` defines the contract:
 
-`core/provider/AIProvider.kt` defines the transport-agnostic contract:
+```kotlin
+interface Agent {
+    val id: String
+    val displayName: String
+    fun run(goal: AgentGoal): Flow<AgentEvent>
+}
+```
 
-- `ChatMessage` — role + content; no provider field names leak above this layer.
+- `AgentGoal` carries the instruction, current-message attachments, prior turns
+  (`history`), an optional system-prompt suffix and a `ToolPolicy`
+  (`All` = every registered tool, `Only` = strict intersection).
+- `AgentEvent` is the only channel to the UI: `ActivityStarted` /
+  `ActivityUpdated` (user-meaningful step titles), `PermissionRequested` /
+  `PermissionResolved`, `IntermediateMessage` (mid-loop narration),
+  `RichContent`, `ReplySpacing`, `TextDelta`, `TextBuffer` (replaces the visible
+  buffer after a stream repair), `Finished`, `Failed`.
+- `DefaultAgentRuntime` owns run lifecycles as observable `AgentRun` state
+  machines (`QUEUED → RUNNING → WAITING_FOR_PERMISSION →
+  COMPLETED/FAILED/CANCELLED`). Terminal states are frozen — a late event can
+  never resurrect a run — and runs are cancellable and re-observable from any
+  screen.
+
+### `ToolUsingAgent` — the single agent
+
+- Streams one completion per loop iteration, appends tool calls and results to
+  the working history, and repeats.
+- **Budgets:** `maxSteps = 24` per turn (enough for
+  search → read → edit → build → test → fix), `maxAttemptsPerProblem = 3` per
+  *distinct* failing call (keyed on tool id + normalised args), so one stubborn
+  failure cannot consume another problem's budget.
+- **Reply vs work:** a text-only turn is normally the final answer, but if it
+  merely *announces* a step ("Let me check the profile directly…", trailing `…`
+  or `:`, or a first-person action cue) the loop re-prompts the model to perform
+  it. `maxContinuationNudges = 3` bounds this, and closing offers
+  ("Let me know if…") are never treated as a plan, so ordinary answers still end
+  the turn.
+- **Marker hygiene:** `[used tool: …]` / `[tool result] …` tokens are stripped
+  everywhere (content sharing the line survives), pure tool-log artifacts such
+  as `(Tool executed successfully with no output)` are removed, a marker-only
+  reply is re-requested instead of displayed, and the cleaned text is emitted as
+  `TextBuffer` so the visible bubble is repaired.
+- **Recovery:** one bounded retry for empty completions, a toolless retry when a
+  provider rejects tools, and a bounded restore of tools if that backfires.
+  Plain-text or "function-assignment" tool markup (some local models, e.g. Qwen
+  styles) is recovered by `TextToolCallParser`.
+- **System prompt:** written in sections — tools, loop behaviour, REPLY vs WORK,
+  OUTPUT FORMAT (no internal markers), retry policy, security fences, memory,
+  attachments, rich recommendations, readability. A toolless goal (plain chat,
+  small on-device model) gets a short prompt instead, so no context is wasted on
+  tools that do not exist.
+
+### Execution and permissions
+
+`DefaultToolExecutor` wraps every call:
+
+- permission gate per declared `Capability` (denial is terminal, never retried),
+- `RiskLevel`-aware prompts (SAFE / ELEVATED / DESTRUCTIVE),
+- per-tool timeout with a 60 s hard ceiling and structured `ToolResult.TimedOut`,
+- one bounded retry (400 ms × attempt) for transient failures only,
+- `ToolResult` values (`Success`/`Failure`/`TimedOut`/`Denied`) instead of
+  exceptions, so the loop always has data to reason about.
+
+## 5. Tools
+
+`core/agent/Tool.kt`: `id`, `title`, `description`, `requiredCapabilities`,
+`parametersSchemaJson`, optional output schema, `riskLevel`, `timeoutMs`.
+`ToolRegistry` is observable; `InMemoryToolRegistry` is the implementation.
+Tools are registered in `AppContainer` — adding a tool never touches the loop.
+
+| Area | Tools | Notes |
+|---|---|---|
+| Basics | `time.now`, `math.evaluate`, `text.stats` | calculator is a recursive-descent evaluator (no `javax.script`) |
+| Files | `fs.read`, `fs.search` | confined to `filesDir/workspace` |
+| Workspace | `fs.list`, `fs.readfile`, `fs.writefile`, `fs.mkdir`, `fs.rename`, `fs.move`, `fs.copy`, `fs.delete`, `fs.searchfiles`, `fs.metadata` | canonical-path checks; delete carries `FILESYSTEM_DELETE` and always re-prompts |
+| Web | `web.search`, `web.read` | keyless engines, fenced untrusted output |
+| Browser | `browser.open/read/find/links`, `browser.click/type/select` | side-effect tools always ask, even with the toggle ON |
+| Terminal/code | `terminal.run`, `code.edit`, `code.patch`, `code.diff`, `code.build`, `code.test` | terminal toggle = standing consent; catastrophic-command guard stays |
+| Memory | `memory.remember`, `memory.recall`, `memory.forget` | scope fixed by conversation context; secrets rejected |
+| Presentation | `ui.rich_items`, `ui.reply_spacing` | validated JSON → `RichContent` / `ReplySpacing` events, persisted on the assistant message |
+
+## 6. AI providers
+
+`core/provider/AIProvider.kt` is transport-agnostic:
+
+- `ChatMessage` — role, content, attachments, tool calls (no provider field
+  names leak above this layer).
 - `Model` — id, display name, tool support, context window.
-- `CompletionRequest` → `Completion` (one-shot) or `Flow<StreamEvent>` (streaming).
-- `StreamEvent` — `Delta`, `ToolCallRequested`, `Failed`, `Completed`.
-- `ProviderConfig` — user-configured endpoint. **Only a `credentialKey` reference is
-  stored**; the secret itself lives in `SecureCredentialStore`.
+- `CompletionRequest` → `Completion` (one-shot) or `Flow<StreamEvent>`
+  (`Delta`, `ToolCallRequested`, `Failed`, `Completed`).
+- `ProviderConfig` — user endpoint; **only a `credentialKey` reference is
+  stored**, the secret lives in `SecureCredentialStore`.
 
-Phase 1 adds an `OpenAICompatibleProvider` implementation plus a `ProviderRegistry`.
-No provider logic is hard-coded anywhere in the UI.
+Implementations:
 
-## 6. Agent architecture
+- `OpenAICompatibleProvider` (OkHttp + SSE streaming, tool-call wire format,
+  vision data-URLs), with `OpenAIWireCodec` handling the wire details and tool
+  sequence repair for long conversations.
+- `LocalAiProvider` — on-device inference behind the same interface (§13).
+- `ProviderRepository` owns user configs, connection testing, model discovery
+  and per-conversation model binding; presets cover OpenAI, Gemini
+  (OpenAI-compatible), Groq, xAI, OpenRouter, Ollama and Custom.
+- `ModelCapabilities` estimates TEXT / VISION / TOOL_CALLING from model ids plus
+  the provider's config flags and rejects unsupported input *before* a request.
 
-`core/agent/Agent.kt`:
+## 7. Context engineering
 
-- `Agent.run(goal): Flow<AgentEvent>` — agents are cold flows of events.
-- `AgentEvent` covers visible activity (`ActivityStarted`/`ActivityUpdated` with
-  `AgentActivity` step titles like "✓ Searching web"), `TextDelta`, `Finished`, `Failed`.
-- Agents must expose only user-meaningful steps — never chain-of-thought.
-- `AgentRuntime` owns run lifecycles (`start`, `cancel`, `activityOf`); Phase 2 makes
-  it concurrent and background-capable.
+Two layers coexist:
 
-## 7. Tool system
+**1) `ChatContextEngine` (in use).** Builds the model request from prioritised
+sources under a character budget derived from the selected model's window:
+current request → recent turns (last 24, tool rows compressed) → memory block →
+tool results. It drops the trailing non-user rows and persisted error rows so
+providers never see dangling tool results, and never sends whole workspaces or
+unbounded history.
 
-- `Tool` — pure contract: `id`, `title`, `description`,
-  `requiredCapabilities`, `parametersSchemaJson`.
-- `ToolExecutor` — executes tools and **enforces permissions**; returns `ToolResult`
-  (`Success`/`Failure`) as values, not exceptions.
-- `ToolRegistry` — observable registration; Phase 0 ships an in-memory implementation.
+**2) `ContextOrchestrator` (shadow mode).** One assembly point: providers fetch
+candidates in parallel → `ContextRanker` orders them (hard priority tiers;
+keyword relevance and recency as tie-breaks) → `TokenBudgetManager` fits them to
+the model's window (P0–P2 never dropped, 10 % safety margin, reserved output
+tokens) → `CompactionManager` produces an extractive `StructuredState` if still
+over budget → `ToolResultProcessor` keeps TOOL rows compressed (threshold
+1 200 chars). Every provider call is failure-tolerant; an impossible fit falls
+back to a safe minimal context (system + request + last 8 turns).
+`ChatViewModel`.`buildHistory()` runs it alongside the legacy engine, logs both
+side by side, and only returns the orchestrator's messages when
+`USE_ORCHESTRATOR_CONTEXT` is enabled — default is shadow-only.
 
-## 8. Task system
+See [CONTEXT_ARCHITECTURE.md](CONTEXT_ARCHITECTURE.md) for the full spec and the
+implemented-vs-planned breakdown.
 
-`core/task/Task.kt` fixes the model now: a `Task` is user-visible work that may outlive
-a chat turn (`QUEUED → RUNNING → PAUSED → DONE/FAILED/CANCELLED`). `TaskManager` is the
-seam; real background execution arrives in Phase 2 within Android's constraints
-(foreground services / WorkManager).
+## 8. Web search pipeline
 
-## 9. Permission system
+- `core/web` defines `SearchProvider`, `PageFetcher` and the query/result models.
+- `data/web` ships three keyless adapters (DuckDuckGo HTML, Bing HTML, Mojeek);
+  `SearchOrchestrator` fans out in parallel, retries, trips a per-provider
+  circuit breaker on failures, caches results (10 min TTL, 64 entries), and
+  hands candidates to `ResultAggregator` + `SearchReranker` for dedup and
+  ordering.
+- `HttpPageFetcher` reads at most 512 KB per page, unwraps redirects and
+  extracts readable text.
+- `WebContentSanitizer` wraps page content in
+  `<<<UNTRUSTED_WEB_DATA>>> … <<<END_UNTRUSTED_WEB_DATA>>>` and neutralises
+  fence-spoofing inside the payload; the system prompt states that fenced
+  content is data, never instructions. Sources are returned as `[n]` and stored
+  as TOOL messages so citations stay with the answer.
 
-`core/permissions/PermissionManager.kt`:
+## 9. Browser integration
 
-- `Capability` — FILESYSTEM_READ/WRITE, NETWORK, BROWSER, TERMINAL, NOTIFICATIONS.
-- Tools declare required capabilities; the manager gates execution and surfaces
-  `PermissionRequest` objects for user decisions. Android system permissions map onto
-  the same mechanism, so the UI has one consistent permission experience.
+`AndroidBrowserManager` keeps one real embedded WebView session per
+conversation; `WebViewBrowserSession` implements the `BrowserSession` seam
+(open, read text, find, links, click, type, select). The JS bridge only extracts
+text/links — page scripts cannot call tools or mutate app state. The per-chat
+Browser toggle (ON by default) enables read-only tools; side-effect tools always
+raise an explicit permission request on top. Sessions are closed when the chat's
+`ChatViewModel` is cleared, so no engine leaks between chats.
 
-## 10. Storage
+## 10. Memory
 
-| Concern            | Technology                            | Phase |
-|--------------------|---------------------------------------|-------|
-| Settings           | Preferences DataStore                 | 0     |
-| Secrets            | EncryptedSharedPreferences (Keystore) | 0     |
-| Conversations      | Room (`NeuronDatabase`, v1)           | 1     |
-| Attachments        | App-private files + metadata in Room  | 1     |
-| Provider configs   | JSON file in app-private storage      | 1     |
-| Projects/workspace | Room + sandboxed root                 | 2     |
+`RoomMemoryStore` (Room table) + `MemoryManager` behind the `MemoryStore`
+interface. Types: USER_PREFERENCE (global), PROJECT (per workspace),
+TASK/CONVERSATION reserved. Only explicit `memory.remember` writes persist —
+nothing is captured automatically. `MemorySecretFilter` rejects API keys, tokens,
+passwords and JWTs. The master switch lives in Settings; entries can be
+inspected, deleted individually or cleared.
 
-## 11. Security
+## 11. Workspace, terminal and coding
 
-- **Secrets:** `SecureCredentialStore` wraps Android Keystore (AES256-GCM master key).
-  If initialization fails, the factory degrades to a **non-persisting in-memory store**
-  and logs a warning — it never falls back to plain-text persistence. API keys are
-  written to it the moment a provider is saved, and are read only into a request's
-  `Authorization` header.
-- **Redaction:** every log line passes through `redactSecrets()`, which masks values of
-  keys matching `key|token|secret|password|credential|authorization`.
-- **Logs:** all logging goes through the `Logger` facade — no direct `Log.*` calls.
-- **Backups:** `allowBackup` is on; when secrets become persistent in Phase 1, switch to
-  backup-excluding rules for the encrypted prefs file.
-- **Workspace sandbox:** `SafeTools.FileRead`/`FileSearch` confine all access to the
-  `filesDir/workspace` root; canonical-path checks reject `../` and absolute escapes
-  (covered by unit tests).
-- **Attachments:** imported files are copied into app-private storage; shared-storage
-  URIs are never passed to tools or providers directly.
+**Workspace.** `WorkspaceManagerImpl` owns roots under
+`filesDir/workspaces/<id>`. `WorkspaceContext` performs every operation with
+canonical-path validation (rejects `../`, absolute escapes and symlink
+escapes out of the root). Reads run concurrently; every mutation
+(`writeText`, `mkdirs`, `rename`, `move`, `copy`, `delete`) serialises behind a
+per-workspace `Mutex`, so concurrent agent tasks cannot interleave writes.
 
-## 12. Browser integration
+**Terminal.** `TerminalManager` runs real `/system/bin/sh -c` processes with
+streamed stdout/stderr, exit codes, working directory, per-command timeout
+(120 s default, exit 124) and cooperative cancellation (SIGKILL → exit 130).
+Drain readers are daemon threads and execution settles with a bounded join, so
+an orphaned child (e.g. `sleep` left by `sh -c`) can never hang `execute()`.
+The user panel and the AI share the same session per conversation.
 
-`core/integration/BrowserSession.kt` is the headless-browser seam (navigate, read page
-text, act on elements, snapshot visual state). Phase 2 implements it over an embedded
-engine behind this interface — callers never import WebView types.
+**Coding tools.** `code.edit` (exact-unique replacement), `code.patch`
+(anchor validation against the *current* file — a changed target fails loudly),
+`code.diff`, and `code.build` / `code.test` through `BuildDetector`
+(Gradle, Maven, npm, make, cargo, pip).
 
-## 13. Terminal integration
+**Isolation.** Sessions, tasks and tool results are keyed by conversation id;
+two chats sharing a workspace share files only, never session state.
 
-`core/integration/TerminalSession.kt` — start/stop a session, stream combined output,
-execute commands, observe exit codes. The Phase 2 implementation will define its exact
-execution sandbox; the contract is intentionally transport-neutral.
+## 12. Tasks, permissions, storage
 
-## 14. Project / workspace system
+**Tasks.** `DefaultTaskManager` runs supervised coroutines and persists every
+transition through `TaskRecordStore` into Room. Stale RUNNING/QUEUED rows are
+recovered as FAILED on restart; live activity, step progress and
+waiting-for-permission state are mirrored from the chat turn.
 
-`core/workspace/ProjectWorkspace.kt`: a `Project` is a named root plus context.
-`Workspace` is the only filesystem surface agents can touch, with directory listing,
-read, write, delete, and change observation — all confined to the project root.
+**Permissions.** Capabilities: `FILESYSTEM_READ`, `FILESYSTEM_WRITE`,
+`FILESYSTEM_DELETE`, `EXECUTE`, `NETWORK`, `BROWSER`, `TERMINAL`,
+`NOTIFICATIONS`, `MEMORY`. `SessionPermissionManager` records decisions with
+scope `ONCE / SESSION / WORKSPACE / ALWAYS`, keeps an inspectable decision log,
+re-prompts unconditionally for DESTRUCTIVE work and exposes revocation.
 
-## 15. Future scalability
+**Storage.**
 
-Deliberate decisions that keep the codebase open:
+| Concern | Technology |
+|---|---|
+| Settings | Preferences DataStore (`theme_mode`, last provider/model) |
+| Secrets | `EncryptedSharedPreferences` backed by the Android Keystore |
+| Conversations & messages | Room `NeuronDatabase` **v5** — `conversations`, `messages`, `tasks`, `memory` (migrations 1→5) |
+| Provider configs | JSON in app-private storage (keys excluded) |
+| Attachments | app-private files + metadata columns |
+| Workspaces | `filesDir/workspaces/<id>` |
+| Local models | `filesDir/local-models/` |
+| Local perf / routing | `filesDir/local-perf.json`, `filesDir/local-routing-rules.json` |
 
-1. **Manual DI (`AppContainer`)** — explicit, inspectable, zero reflection. If the
-   graph grows, migrate to Hilt without changing consumer call sites.
-2. **Package-to-module graduation** — `core/provider`, `core/agent`, etc. can each
-   become a Gradle module; boundaries are already enforced by convention.
-3. **Reactive seams everywhere** — flows at every layer make background agents and
-   streaming UI incremental additions, not rewrites.
-4. **One error model** — `NeuronError` gives every future subsystem a consistent,
-   user-presentable failure story.
-5. **No fake functionality** — Phase 0 deliberately ships no mock AI replies; the chat
-   UI works against the real repository seam so Phase 1 only adds a provider.
+## 13. Local AI (on-device inference)
 
-## Phase 1 implementation status
-
-- **Provider system:** `OpenAICompatibleProvider` (OkHttp + SSE streaming, tool-calling
-  wire format, vision data-URLs) behind the `AIProvider` seam; `ProviderRepository`
-  owns user configs, connection testing, and per-conversation model binding.
-- **Agent runtime:** `ToolUsingAgent` implements the streaming tool loop with a
-  `ToolPolicy`-resolved allowlist (`All` = every registered tool, `Only` = strict
-  intersection), a step budget, and user-facing activity events only.
-- **Tools:** time, calculator (recursive-descent evaluator — no `javax.script`), text
-  stats, workspace file read/search. New tools register without touching the loop.
-- **Permissions:** `SessionPermissionManager` surfaces allow/deny decisions to the UI;
-  grants last for the session and can be revoked.
-- **Tasks:** `DefaultTaskManager` runs supervised coroutines with cancel/retry and
-  NonCancellable status transitions.
-- **Storage:** Room v1 for conversations and messages; attachments in app-private
-  storage with metadata blobs; provider configs persisted as JSON (keys excluded).
-- **Rendering:** hand-rolled Markdown (headings, lists, quotes, tables, code blocks
-  with copy + basic highlighting) and LaTeX via `ru.noties:jlatexmath-android`.
-
-## Phase 2 — Milestone 1 implementation status (Advanced Agent Core)
-
-- **Agent runs:** `DefaultAgentRuntime` owns run lifecycles as observable
-  `AgentRun` state machines (QUEUED → RUNNING → WAITING_FOR_PERMISSION →
-  COMPLETED/FAILED/CANCELLED). Terminal states are frozen — late events cannot
-  resurrect a run. Sessions are cancellable and re-observable from any screen.
-- **Tool executor:** risk-aware permission scoping (SAFE/ELEVATED/DESTRUCTIVE),
-  per-tool timeout budget with a hard ceiling, bounded retry for transient
-  failures, and structured `ToolResult` values — including `TimedOut`.
-  `TimeoutCancellationException` is disambiguated from outer cancellation so
-  tool budgets never mask real cancellation.
-- **Permissions:** `SessionPermissionManager` supports ONCE / SESSION /
-  WORKSPACE / ALWAYS decisions with an inspectable decision log. DESTRUCTIVE
-  work (and anything carrying FILESYSTEM_DELETE) always re-prompts — grants are
-  never remembered for destructive operations.
-- **Tasks:** `DefaultTaskManager` persists every transition to Room (v2
-  `tasks` table) via `TaskRecordStore`; stale RUNNING/QUEUED rows are recovered
-  as FAILED on app restart. Tasks report live activity, step progress and
-  WAITING_FOR_PERMISSION state, mirrored from the chat's agent turns.
-- **Context management:** `buildChatContext` caps history (last 30 turns,
-  oldest→newest), drops trailing non-user rows and TOOL/error rows so
-  providers never receive dangling tool results. (Milestone 3 supersedes
-  this with `ChatContextEngine` — see below; the legacy function remains as
-  a test-compatibility wrapper.)
-- **UI:** permission dialogs offer Allow/Deny once, for session, or always;
-  the Tasks screen shows status, activity, progress, retry for failures and
-  stop for active work; agent activity shows ✓/✗/⟳ step states without
-  exposing chain-of-thought.
-
-## Phase 2 — Milestone 2 implementation status (Workspace · Terminal · Coding)
-
-**Product rule: there is ONE chat.** Coding, terminal and filesystem are
-capabilities of the same `AgentRuntime` inside the normal conversation — no
-coding chat, no terminal chat, no separate runtimes.
-
-- **Workspace system:** `WorkspaceManager` owns workspaces rooted under
-  `filesDir/workspaces/<id>` — app-private by construction, so the device
-  filesystem is never wholesale-exposed. `WorkspaceContext` performs every
-  file operation with canonical-path validation; `../` traversal and
-  absolute escapes are rejected. Conversations bind at most one workspace
-  (`Conversation.workspaceId`); workspaces are context, not conversations.
-- **Filesystem tools:** list/read/write/mkdir/rename/move/copy/delete/
-  search/metadata — each validates arguments, resolves the workspace,
-  canonicalizes the path, enforces the boundary, then executes. Search caps
-  scanned files, skips binary/large files, supports extension filters.
-  Destructive ops carry `FILESYSTEM_DELETE` and always re-prompt.
-- **Terminal infrastructure:** `TerminalManager`/`TerminalSession` run real
-  `/system/bin/sh -c` processes with streaming stdout/stderr, exit codes,
-  working directory, per-command timeouts (exit 124) and cooperative
-  cancellation (SIGKILL → exit 130). The user panel and AI tools share the
-  SAME session per conversation — one infrastructure, no duplicate stack.
-  Process kill semantics: `sh -c "sleep 30"` leaves the orphaned `sleep`
-  holding the output pipes open, so drain readers are daemon threads and
-  execution settles with a bounded join — an orphaned child can never hang
-  `execute()`; trailing output after a kill may be truncated.
-- **Terminal capability:** OFF by default per conversation
-  (`Conversation.terminalEnabled`). Toggled via + → Terminal. The toggle IS
-  the user's standing consent: with Terminal ON, AI commands run directly
-  (catastrophic-command guard still applies) — no repeated prompt. With
-  Terminal OFF, `terminal.run`/`code.build`/`code.test` raise a real
-  permission dialog; only an explicit grant executes. The agent can never
-  silently enable it or silently run a command.
-- **Terminal panel:** draggable bottom sheet over the chat (half-screen
-  default, drag to expand/dismiss), monospace output with stdout/stderr
-  distinction, history, clear, copy, stop, keyboard-aware input. It is a
-  panel, not a chat — closing it never touches the conversation.
-- **Coding tools:** `code.edit` (exact-unique replacement), `code.patch`
-  (conflict detection: rejects when the file changed since the agent read
-  it — no blind overwrites), `code.diff`, `code.build`/`code.test` via
-  `BuildDetector` (gradle/maven/npm/make/cargo/pip). All loop through the
-  normal chat's agent with step budgets preventing infinite iterations.
-- **Isolation:** terminal sessions, tasks and tool results are keyed by
-  conversation id; two chats sharing a workspace share files only — never
-  session state.
-
-## Milestone 3 — Advanced Agent Platform
-
-All capabilities below are TOOLS of the one normal chat's AgentRuntime — no
-Browser Chat, no Web Search Chat, no Memory Chat.
-
-- **Web search:** `core/web/SearchProvider` abstraction with a real
-  DuckDuckGo HTML adapter (`data/web/DuckDuckGoSearchProvider`) — no paid API,
-  no self-hosted backend; queries leave the user's own device. Bounded reads
-  (≤400 KB markup), redirect unwrapping, URL deduplication, graceful failure
-  on CAPTCHA/block pages. `web.search` runs the pipeline: dedup → rank →
-  select → open top pages (via `HttpPageFetcher`) → cross-check. Sources are
-  returned with the result as `[n]` indices and persisted as TOOL messages —
-  citations always stay attached to the response that used them.
-- **Browser agent:** `core/integration/BrowserSession` over a REAL embedded
-  WebView (`data/browser/WebViewBrowserSession`). Tools: `browser.open`,
-  `browser.read`, `browser.find`, `browser.links`, and side-effect tools
-  `browser.click` / `browser.type` / `browser.select`. Read-only tools need
-  the per-conversation Browser toggle (+ → Browser, OFF by default);
-  side-effect tools ALWAYS raise an explicit permission request on top — the
-  agent can never act on an external site silently.
-- **Prompt-injection defense:** every page-derived string is wrapped in
-  `<<<UNTRUSTED_WEB_DATA>>>` fences and the system prompt instructs the model
-  to treat fenced content as data, never instructions. The JS bridge only
-  extracts text/links; page scripts can never call tools or alter state.
-- **Multimodal:** `ModelCapabilities` estimates TEXT/VISION/TOOL_CALLING from
-  model-id patterns plus the provider's config flags. `validateInput`
-  rejects image attachments for non-vision models BEFORE the request — with
-  a model-selection hint — so unsupported input is never sent blindly.
-- **Memory:** `core/memory/MemoryStore` (Room table + DataStore master
-  switch) with types USER_PREFERENCE (global), PROJECT (per workspace),
-  TASK/CONVERSATION (reserved). Only explicit `memory.remember` writes
-  persist — nothing is stored automatically. `MemorySecretFilter` rejects
-  API keys, tokens, passwords and JWTs outright (no masking). Memory tools
-  fix the scope from the conversation context — the model can never choose
-  or read another scope. Settings → Memory offers inspect/delete/clear-all
-  and the enable switch.
-- **Context engine:** `ChatContextEngine` builds model input under priority
-  (current request → recent turns → compressed tool results → memory block)
-  with a character budget that trims oldest-first and a tail guard. Tool
-  rows are COMPRESSED (key lines: exit=, [err], SOURCE, TITLE/URL), not
-  dropped. Relevant memory is injected as a capped system block.
-- **Task concurrency (sec 22):** workspace READS run fully concurrent;
-  every WRITE/mutation (`writeText`, `mkdirs`, `rename`, `move`, `copy`,
-  `delete`) serializes behind a per-workspace `Mutex` in `WorkspaceContext` —
-  concurrent agent tasks can never interleave mutating steps on one project.
-  On top of that, `ApplyPatch` validates anchors against the CURRENT file and
-  fails loudly on a changed target (no silent overwrite).
-- **Session hygiene:** each chat's WebView browser session is closed when its
-  `ChatViewModel` is cleared — no engine or session leaks across chats.
-
-## Local AI — on-device inference (data/local)
-
-Local models are **just another AIProvider** — no parallel inference path anywhere.
+Local models are **just another `AIProvider`** — there is no parallel inference
+path. The same agent loop, tool executor, context assembly and budgets apply;
+the GGUF's declared context length drives the window exactly like a cloud
+context window.
 
 ```
 data/local/
 ├── GgufReader.kt             # bounded GGUF header/metadata parser (magic, arch,
-│                             #   quantization, context length) — format-not-extension checks
-├── LocalEngineLoader.kt      # Kotlin side of the JNI bridge; single-active load/unload,
-│                             #   streaming generation, tokens/sec benchmark
-├── LocalModelRecord.kt       # persisted record + LocalLoadState lifecycle
-├── LocalModelRepository.kt   # isolated models dir, import validation, ticks,
-│                             #   load orchestration, storage, delete, benchmark
+│                             #   quantisation, context length) — format, not extension
+├── LocalEngineLoader.kt      # JNI side: single-active load, streaming generation,
+│                             #   tokens/sec benchmark, runtime backend discovery
+├── LocalModelRecord.kt       # persisted record + load-state lifecycle
+├── LocalModelRepository.kt   # models dir, import validation, ticks, orchestration
 ├── HfHubClient.kt            # free HF Hub API: GGUF search + repo files (size, sha256)
-├── ModelDownloadManager.kt   # progress, pause/resume (HTTP Range), Wi-Fi-only gate,
-│                             #   sha256 verification, restart survival
+├── ModelDownloadManager.kt   # progress, pause/resume (Range), Wi-Fi gate, sha256,
+│                             #   restart survival
+├── ModelTransferService.kt   # foreground service so downloads survive leaving the screen
 ├── RecommendedModels.kt      # curated catalog with min-RAM guidance + device fit
-├── LocalModelRouter.kt       # capability-aware routing: what a GGUF may do, and
-│                             #   whether this turn can be served by it at all
+├── LocalModelRouter.kt       # capability-aware routing per turn
+├── LocalRoutingRules.kt      # per-model "use for text/tools/vision" rules
 ├── LocalThrottlePolicy.kt    # pure thermal/battery policy → threads, GPU, tokens
 ├── DeviceHealthMonitor.kt    # thermal status/headroom + battery + power-save watcher
-├── PromptPrefix.kt           # pure KV prefix-reuse decision (what can be skipped)
-├── CpuTopology.kt            # pure big/little core classification + thread math
-├── VisionProjector.kt        # pure mmproj discovery (which projector belongs to a model)
-├── LocalRoutingRules.kt      # pure per-model routing rules (text/tools/vision)
-└── LocalAiProvider.kt        # the AIProvider implementation (capability-honest)
+├── PromptPrefix.kt           # pure KV prefix-reuse decision
+├── CpuTopology.kt            # pure big/little classification + thread math
+├── LoadMemoryBudget.kt       # RAM-fit estimate before a load
+├── ContextTrimmer.kt         # on-device window trimming
+├── ChatTemplateRenderer.kt   # GGUF chat template → prompt text
+├── LocalPromptOptions.kt     # per-model prompt options
+├── VisionProjector.kt        # mmproj discovery (which projector belongs to a model)
+└── LocalAiProvider.kt        # the AIProvider implementation
 ```
 
 Design rules:
 
-- **Same pipeline as cloud**: local models flow through the same agent loop,
-  tool execution, ContextOrchestrator and TokenBudgetManager; the GGUF-declared
-  context length drives the budget exactly like a cloud context window.
-- **Capability-honest (milestone 6)**: capabilities are read from the GGUF's
-  OWN metadata — the chat template decides tool support (`tokenizer.chat_template`
-  is scanned for a tools block), the architecture decides vision, the declared
-  context length is capped for phones. Milestone 9 tightens vision further: an
-  architecture that declares a vision tower is NOT vision until its mmproj
-  projector file is actually present beside the GGUF (`VisionProjector`), and
-  only then are images routed on-device — through mtmd's real image encoder.
-  `LocalModelRouter` turns that into a
-  routing decision per turn: unsupported input (an image on a text-only GGUF)
-  is REFUSED with an actionable reason, everything else is degraded visibly.
-  The resolution — model, window, degradations, live throttle — is emitted as
-  the first live timeline row and persists with the answer. Plain-text tool
-  markup is still recovered by the existing TextToolCallParser.
-- **Single-active engine**: the previous model is fully unloaded before a new
-  one loads — enforced in BOTH Kotlin and native code.
-- **mmap weights**: llama.cpp maps the model file; weight data is never
-  executed — tensors only.
-- **Workspace isolation**: all model files live in `filesDir/local-models/`;
-  imports validate the GGUF magic + header, never just the extension.
-- **Integrity**: downloads verify sha256 against the Hub's LFS oid before a
-  model becomes usable; mismatches delete the file.
-- Native build: `app/src/main/cpp` pins a llama.cpp commit and builds via CMake;
-  if the fetch fails at build time the bridge compiles to a stub and the app
-  reports local inference as unavailable (cloud features unaffected).
-- **Performance (milestone 5)**: Release -O3 native builds with
-  `GGML_CPU_ALL_VARIANTS` (one optimized kernel set per ISA level — armv8.0,
-  dotprod, i8mm, SVE — plus Arm KleidiAI; the best match for the device's
-  HWCAP is dlopen'd at load time) and `GGML_BACKEND_DL` runtime backend
-  discovery from the app's native library dir. Vulkan GPU offload is a
-  runtime-loaded backend with flash attention + Q8_0 KV cache; devices
-  without a driver simply never register it. Every GPU load retries once on
-  CPU, so a driver/OOM failure degrades to slower — never to broken.
-- **Performance prefs**: GPU on/off + CPU threads (0 = Auto) persist in
-  `filesDir/local-perf.json`; changing either reloads the active model so the
-  next token is generated under the new setting.
-- **Thermal/battery discipline (milestone 7)**: `DeviceHealthMonitor` watches
-  thermal status (API 29+), thermal headroom (API 30+), battery and power-save
-  mode and publishes one snapshot; the PURE `LocalThrottlePolicy` turns it
-  into the load we will actually run (threads, GPU veto, token ceiling) plus a
-  one-line reason shown in Settings ("Device status") and in the chat
-  timeline. Missing platform support degrades to "no throttling", never to a
-  broken feature. The throttle applies at the NEXT load on purpose —
-  reloading mid-generation would abort an answer the user is reading.
-- **Prompt-prefix reuse (milestone 8)**: the KV cache already holds most of
-  the conversation when a new turn arrives, so the bridge keeps a shadow copy
-  of the tokens in sequence 0, trims to the shared prefix with
-  `llama_memory_seq_rm`, and decodes only the new tail. The reuse length is
-  recomputed natively and can only be LOWERED by the caller — a stale cache
-  costs time, never correctness. Image turns bypass this entirely (the cache
-  holds embeddings, not comparable ids) and clear the shadow copy.
-- **Big-core threading (milestone 8)**: `CpuTopology` reads per-core peak
-  frequencies from sysfs (`cpu_capacity` fallback) and threads only the fast
-  cluster — the efficiency cores are 2-4x slower per clock and starve the big
-  ones. The milestone-7 thermal cap still wins over both auto and explicit
-  thread counts.
-- **Per-model routing rules (milestone 9)**: the user can mark which of their
-  GGUFs serves which kind of turn ("Text", "Tools", "Vision"). `LocalRoutingRules`
-  picks the first matching rule whose model is enabled AND capable (a Vision
-  rule is ignored unless a projector exists), and falls back to the capability
-  pick when no rule matches — so a photo never lands on a text-only model.
-  Rules persist in `filesDir/local-routing-rules.json`.
-- **Vision (milestone 9)**: llama.cpp's `mtmd` library is built for arm64
-  (`LLAMA_BUILD_MTMD`); the JNI bridge loads an mmproj file next to the model,
-  and image turns go through `mtmd_tokenize` + `mtmd_helper_eval_chunks` so
-  the picture becomes real embeddings. A projector that fails to load degrades
-  to a text-only model instead of breaking it.
+- **Capability-honest:** the chat template decides tool support, the
+  architecture decides vision, the declared context length is capped for phones.
+  Vision is only claimed when an mmproj projector is actually present next to the
+  GGUF; the image then goes through llama.cpp's `mtmd` encoder. Unsupported input
+  is refused with an actionable reason; everything else is degraded visibly.
+  The resolution (model, window, degradations, live throttle) is emitted as the
+  first timeline row and persisted with the answer.
+- **Single-active engine:** the previous model is fully unloaded before a new one
+  loads, enforced in Kotlin and native code.
+- **mmap weights:** llama.cpp maps the model file; weight bytes are never
+  executed.
+- **Integrity:** downloads verify sha256 against the Hub's LFS oid; mismatches
+  delete the file. Imports validate GGUF magic and header.
+- **Native build:** `app/src/main/cpp` pins a llama.cpp commit and builds via
+  CMake with `-O3` and `GGML_CPU_ALL_VARIANTS` (one optimised kernel set per ISA
+  level — armv8.0, dotprod, i8mm, SVE — plus KleidiAI; the best match is
+  dlopen'd at load) and runtime backend discovery. Vulkan is a runtime-loaded
+  backend (arm64, flash attention + Q8_0 KV cache); every GPU load retries once
+  on CPU, so failures degrade to slower, never to broken. If the fetch fails at
+  build time the bridge compiles to a stub and local inference reports itself
+  unavailable.
+- **Thermal/battery:** `DeviceHealthMonitor` publishes one snapshot; the pure
+  `LocalThrottlePolicy` turns it into the load actually used (threads, GPU veto,
+  token ceiling) with a one-line reason in Settings and in the chat timeline.
+  The throttle applies at the next load on purpose — reloading mid-generation
+  would abort an answer being read.
+- **Prompt-prefix reuse:** the bridge keeps a shadow copy of the tokens in
+  sequence 0, trims to the shared prefix with `llama_memory_seq_rm`, and decodes
+  only the new tail. Image turns bypass reuse and clear the shadow copy.
+- **Big-core threading:** `CpuTopology` reads per-core peak frequencies and
+  threads the fast cluster; the thermal cap still wins.
+- **Per-model settings:** custom instructions, routing rules, context window and
+  answer-length overrides, GPU/thread choice, load/unload, benchmark, delete.
+- **Debug console:** engine build info, device memory, model files, llama.cpp's
+  log, and `CrashRecorder` (last-resort capture for native crashes that Kotlin
+  cannot catch).
 
-## Key technical decisions
+## 14. Rendering
 
-| Decision                          | Reasoning                                                        |
-|-----------------------------------|------------------------------------------------------------------|
-| Kotlin 2.0 + Compose (BOM)        | Modern declarative UI; no XML surface area to maintain           |
-| minSdk 26                         | Adaptive icons + java.time without desugaring; covers ~97% devices |
-| Material 3, light-first           | Product default is light; dark is first-class but secondary      |
-| DataStore over SharedPreferences  | Coroutine-friendly, transactional,Flow-based                     |
-| EncryptedSharedPreferences        | Keystore-backed secret storage with graceful degradation         |
-| Manual DI                         | Transparency now; trivial Hilt migration later                   |
-| Values-not-exceptions tool results| Agent loops must handle failure as data                          |
+- Hand-rolled Markdown parser + renderer: headings, lists, quotes, tables,
+  links, code blocks with copy and basic syntax highlighting.
+- LaTeX via `ru.noties:jlatexmath-android` with graceful fallback.
+- Native rich cards (`RichRecommendationSet`): image, year/meta, badge,
+  description, key-fact rows, status with tone, source links. Validated by
+  `RichItemsParser` before anything renders, persisted with the message.
+- Reply spacing: `ResponseSpacing` presets (compact / comfortable / relaxed /
+  airy) applied independently to paragraphs and lists, chosen by the model
+  through `ui.reply_spacing` and persisted per message (legacy single-value
+  spacing is still read for old rows).
+
+## 15. Security and privacy
+
+- **Secrets:** `SecureCredentialStore` wraps the Android Keystore
+  (AES256-GCM master key); failure degrades to a non-persisting in-memory store,
+  never to plain text. Keys are read only into a request's `Authorization`
+  header.
+- **Redaction:** every log line passes through `redactSecrets()`, masking values
+  of `key|token|secret|password|credential|authorization`. All logging goes
+  through the `Logger` facade.
+- **Sandbox:** workspace and file tools cannot escape their roots; attachments
+  are copied into app-private storage, shared-storage URIs are never handed to
+  tools or providers.
+- **Prompt injection:** all page-derived text is fenced and declared as data;
+  the browser bridge cannot call tools.
+- **Consent:** destructive operations always re-prompt; side-effect browser
+  actions always ask; the terminal toggle is explicit standing consent that the
+  agent cannot flip itself.
+- **Backups:** `allowBackup` is on; encrypted prefs are the only secret store and
+  contain no exportable key material.
+
+## 16. Testing
+
+A JVM suite of 400+ tests (`./gradlew testDebugUnitTest`), organised by package:
+
+- `data/provider` — wire codec, streaming, tool-sequence repair, model
+  capabilities, long conversations
+- `data/agent` — tool loop integration (including continuation-after-reply and
+  marker cleanup), tool executor timeouts/retries, plain-text tool-call parsing
+- `data/tool` — safe tools, workspace tools, browser tools, patch guards, rich
+  items, reply spacing, arithmetic evaluator
+- `data/web` — keyless engines, search pipeline, page extraction/ranking
+- `data/workspace` — sandbox boundaries and concurrency
+- `data/terminal` — session lifecycle, timeouts, cancellation
+- `data/task`, `data/permissions`, `data/memory` — state machines and scopes
+- `data/local` — GGUF parser, hub client, downloads, routing rules, throttling,
+  prefix reuse, topology, memory budget, template rendering, recommended models
+- `context/*` — budget, ranking, compaction, providers, orchestrator
+- `ui/chat` — context engine and context assembly
+
+## 17. Key decisions
+
+| Decision | Reasoning |
+|---|---|
+| Kotlin + Compose, single module | Modern declarative UI; package-level boundaries are enough for this size |
+| minSdk 26 | Adaptive icons + `java.time` without desugaring; covers ~97 % of devices |
+| Material 3, light-first | Product default is light; dark is first-class but secondary |
+| Manual DI (`AppContainer`) | Explicit, inspectable, zero reflection; Hilt migration stays trivial |
+| Values-not-exceptions tool results | Agent loops must reason about failure as data |
+| One chat, capabilities as tools | No duplicate runtimes; the user never chooses a "mode" |
+| Keyless search engines | No paid API, no backend; queries leave the user's own device |
+| App-private workspaces only | Never expose the device filesystem wholesale |
+| Local model = just another provider | One agent loop, one context pipeline, one budget path |
+| Extractors and policies kept pure | `LocalThrottlePolicy`, `CpuTopology`, `PromptPrefix`, `WebContentSanitizer` are unit-testable without Android |
+| AI-owned reply presentation | Spacing and rich cards are chosen by the model through validated tools, not global settings |
+
+## 18. Phase status
+
+| Phase | Contents | Status |
+|---|---|---|
+| 0 — Foundation | Layering, design system, abstractions, shell | ✅ |
+| 1 — Core | Providers, streaming chat, Markdown + LaTeX, Room, agent loop, permissions, tasks | ✅ |
+| 2 — Advanced agent | Workspace, terminal, coding tools, browser, web search, memory, context engine | ✅ |
+| Local AI | GGUF import/Hub, downloads, GPU/CPU variants, vision via mmproj, thermal policy, prefix reuse, routing rules, instructions | ✅ |
+| Next | Retrieval (FTS) wired into the orchestrator, cache/debug UI, speculative decoding | 🔜 |
