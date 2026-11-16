@@ -762,6 +762,76 @@ class AgentToolLoopIntegrationTest {
         assertTrue(finished.summary.contains("Elon Musk is the richest person"))
     }
 
+    // ---- A reply is not automatically the end of the turn ------------------
+
+    @Test
+    fun `reply that announces a step continues until the work is done`() = runTest {
+        val provider = ScriptedProvider()
+        provider.script.add(toolRequestEvent("math.evaluate", "{\"expression\":\"6*7\"}"))
+        // The reported bug: the model REPLIES about what it is going to do
+        // next and previously that promise ended the whole run.
+        provider.script.add(
+            StreamEvent.Delta("Let me verify that with a second calculation.")
+        )
+        provider.script.add(toolRequestEvent("math.evaluate", "{\"expression\":\"42+0\"}"))
+        // The closing offer is an answer, not a plan — it must END the run.
+        provider.script.add(
+            StreamEvent.Delta(
+                "The answer is 42.\n\nLet me know if you want the steps broken down."
+            )
+        )
+
+        val (agent, _) = buildAgent(provider)
+        val events = withTimeout(5_000) {
+            collect(agent, AgentGoal(instruction = "what is 6*7?", conversationId = "c1"))
+        }
+
+        // The promised step really ran: four model turns, two tool rows.
+        assertEquals(4, provider.requests.size)
+        assertEquals(2, provider.requests[3].count { it.role == ChatMessage.Role.TOOL })
+        // The promise stays visible as progress narration, never as the answer.
+        assertEquals(
+            "Let me verify that with a second calculation.",
+            events.filterIsInstance<AgentEvent.IntermediateMessage>().single().text
+        )
+        // …and only the real answer finishes the turn.
+        assertEquals(
+            "The answer is 42.\n\nLet me know if you want the steps broken down.",
+            events.filterIsInstance<AgentEvent.Finished>().single().summary
+        )
+    }
+
+    @Test
+    fun `marker echo is replaced in the visible bubble and never ends the turn`() = runTest {
+        val provider = ScriptedProvider()
+        provider.script.add(toolRequestEvent("math.evaluate", "{\"expression\":\"6*7\"}"))
+        // The exact junk bubble from the bug report: only internal tool-log
+        // markers, so nothing useful was ever shown to the user.
+        provider.script.add(
+            StreamEvent.Delta(
+                "[used tool: Reading file]\n" +
+                    "[tool result] (Tool executed successfully with no output)"
+            )
+        )
+        // After the nudge the model answers for real.
+        provider.script.add(StreamEvent.Delta("The answer is 42."))
+
+        val (agent, _) = buildAgent(provider)
+        val events = withTimeout(5_000) {
+            collect(agent, AgentGoal(instruction = "what is 6*7?", conversationId = "c1"))
+        }
+
+        assertEquals(3, provider.requests.size)
+        // The streamed buffer is REPLACED, so the markers can never stay on
+        // screen (the UI only ever grows an already-streamed buffer).
+        assertEquals("", events.filterIsInstance<AgentEvent.TextBuffer>().last().text)
+        val finished = events.filterIsInstance<AgentEvent.Finished>().single()
+        assertEquals("The answer is 42.", finished.summary)
+        assertFalse(finished.summary.contains("[used tool:"))
+        assertFalse(finished.summary.contains("[tool result]"))
+        assertTrue(events.filterIsInstance<AgentEvent.Failed>().isEmpty())
+    }
+
     @Test
     fun `marker-only answer retries once and surfaces the good retry`() = runTest {
         val provider = ScriptedProvider()

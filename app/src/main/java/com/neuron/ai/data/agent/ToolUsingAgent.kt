@@ -49,7 +49,15 @@ class ToolUsingAgent(
      * Required retry behavior): retries on one failing call must not consume
      * the budget of an unrelated later failure in the same run.
      */
-    private val maxAttemptsPerProblem: Int = 3
+    private val maxAttemptsPerProblem: Int = 3,
+    /**
+     * Bounded budget for restarting work after a text-only reply. A reply
+     * that promises a next step ("Let me check the Forbes profile…") is sent
+     * back to the model so it actually performs it; after this many nudges
+     * the reply is accepted as the final answer, so a model that only ever
+     * promises can never loop forever.
+     */
+    private val maxContinuationNudges: Int = 3
 ) : Agent {
 
     override val id: String = "agent.tool-using"
@@ -74,6 +82,14 @@ class ToolUsingAgent(
                     "LOOP: alternate freely between thinking, calling tools, and short progress " +
                     "notes (a sentence or two alongside tool calls is narration, not the final " +
                     "answer) — take as many steps as the task needs.\n" +
+                    "REPLY vs WORK: replying does NOT end your turn — you may keep working after " +
+                    "a reply, and only you decide when to stop. Never end a message with a " +
+                    "promise of work (\"Let me check…\", \"Searching now…\"): call that tool in " +
+                    "the SAME turn. A reply that announces a step without running it is sent " +
+                    "back to you to finish, so announce only what you are doing right now.\n" +
+                    "OUTPUT FORMAT: never write internal tool-log markers (\"[used tool: …]\", " +
+                    "\"[tool result] …\") in a reply — they are internal records, not content. " +
+                    "Describe results in your own words; if a tool returned nothing, say so.\n" +
                     "RETRY POLICY: when a tool fails, use the actual error to change your approach — " +
                     "never repeat an identical failed call; after repeated failures, say clearly " +
                     "what you tried and why it failed (never claim success).\n" +
@@ -129,6 +145,14 @@ class ToolUsingAgent(
         var lastToolFailure: LastFailure? = null
         /** Whether the LAST executed turn carried tool calls (vs pure text). */
         var lastTurnHadToolCalls = false
+        /**
+         * Bounded budget for turning a text-only REPLY back into work. A
+         * reply is not automatically the end of the turn: when it announces
+         * a step that never ran ("Let me check the Forbes profile…") the
+         * loop continues so the model actually performs it. Bounded so a
+         * model that only ever promises can still end the run.
+         */
+        var continuationNudges = 0
         // Survives across turns so an exhausted budget can still surface the
         // last model output instead of a bare failure.
         var lastAssistantText = ""
@@ -398,15 +422,30 @@ class ToolUsingAgent(
                 // those are timeline artifacts, never part of the answer.
                 // The markers are stripped WHEREVER they appear, so real
                 // content sharing the line ("[tool result] SOURCES: …")
-                // survives; the old whole-line filter ate it. An answer made
-                // of ONLY markers gets one silent retry, then an honest
-                // failure — never the raw marker-junk bubble.
-                val finalText = stripNarrationEcho(assistantText.toString())
+                // survives; the old whole-line filter ate it.
+                val rawAnswer = assistantText.toString()
+                val finalText = stripNarrationEcho(rawAnswer)
+
+                // The visible buffer still holds the RAW streamed text. The UI
+                // only ever grows its buffer, so without this replacement the
+                // user keeps seeing the marker junk even though the answer was
+                // cleaned (the exact "[used tool: Reading file]" bubble bug).
+                if (finalText != rawAnswer) {
+                    send(AgentEvent.TextBuffer(finalText))
+                }
+
+                // An answer made of ONLY tool-log artifacts is not an answer:
+                // hand it back to the model with an explanation instead of
+                // showing the junk or failing straight away.
                 if (finalText.isBlank()) {
-                    if (!retriedEmptyTurn) {
-                        retriedEmptyTurn = true
-                        logger?.w("Agent", "Final answer was only echoed markers — retrying once")
+                    if (continuationNudges < maxContinuationNudges) {
+                        continuationNudges++
                         step--
+                        logger?.w(
+                            "Agent",
+                            "Reply contained only internal tool-log markers — asking for a real answer"
+                        )
+                        history += ChatMessage(ChatMessage.Role.USER, toolLogNote)
                         continue@loop
                     }
                     send(
@@ -417,6 +456,28 @@ class ToolUsingAgent(
                     )
                     return@channelFlow
                 }
+
+                // A reply is NOT automatically the end of the turn: when it
+                // announces work that has not happened yet, the loop keeps
+                // going and makes the model do it. The model still decides
+                // when to stop — an answer that promises nothing further (or
+                // that it repeats after the nudge budget) ends the run.
+                if (toolsConfigured && toolsAvailable &&
+                    continuationNudges < maxContinuationNudges &&
+                    announcesMoreWork(finalText)
+                ) {
+                    continuationNudges++
+                    step--
+                    logger?.w("Agent", "Reply announced further work — continuing the loop")
+                    // Keep the reply visible as progress in the timeline…
+                    send(AgentEvent.IntermediateMessage(finalText))
+                    // …and make it part of the context so the model can build
+                    // on what it just told the user instead of repeating it.
+                    history += ChatMessage(ChatMessage.Role.ASSISTANT, finalText)
+                    history += ChatMessage(ChatMessage.Role.USER, continueNote)
+                    continue@loop
+                }
+
                 send(AgentEvent.Finished(finalText))
                 return@channelFlow
             }
@@ -627,9 +688,75 @@ class ToolUsingAgent(
      */
     private val narrationMarkerRegex = Regex("\\[used tool:[^\\]]*]|\\[tool result]")
 
+    /**
+     * Lines that are nothing but a tool-log artifact — e.g. the fabricated
+     * "(Tool executed successfully with no output)" a model copies from the
+     * internal record, or a bare "[no output]". They are never part of an
+     * answer; a reply made only of them counts as empty.
+     */
+    private val toolLogArtifactRegex = Regex(
+        "(?im)^\\s*[\\(\\[]\\s*(?:tool|tools)[^)\\]]*[\\)\\]]\\s*$|" +
+            "^\\s*\\([^)]*\\bno output\\b[^)]*\\)\\s*$"
+    )
+
     private fun stripNarrationEcho(text: String): String =
-        narrationMarkerRegex.replace(text, "")
-            .trim()
+        toolLogArtifactRegex.replace(
+            narrationMarkerRegex.replace(text, ""),
+            ""
+        ).trim()
+
+    /**
+     * True when a text-only reply ANNOUNCES work that has not run yet
+     * ("Let me check the Forbes profile directly for the current figure.").
+     * Such a reply is a promise, not an answer, so the turn must continue
+     * and the model must do the step — the reported bug where the agent
+     * stopped right after saying it was going to look something up.
+     *
+     * Deliberately conservative: only the LAST non-blank line is inspected,
+     * cues must start that line, and closing offers ("Let me know if…") are
+     * never a continuation signal — so ordinary answers still end the turn.
+     */
+    private fun announcesMoreWork(text: String): Boolean {
+        val lastLine = text.lineSequence()
+            .map { it.trim().trim('-', '*', '#', '>', '_', ' ') }
+            .lastOrNull { it.isNotBlank() }
+            ?: return false
+        if (closingOfferRegex.containsMatchIn(lastLine)) return false
+        // A trailing "…" / ":" sets up work that never arrived.
+        if (lastLine.endsWith(":") || lastLine.endsWith("…") || lastLine.endsWith("...")) return true
+        return actionCueRegex.containsMatchIn(lastLine)
+    }
+
+    /** "Let me know if you need anything else" etc. — a closing, not a plan. */
+    private val closingOfferRegex = Regex(
+        "(?i)\\b(let me know|feel free|anything else|hope this helps|let me know if)\\b"
+    )
+
+    /**
+     * First-person cues that the message is describing work in progress or
+     * about to start. Anchored at line start to keep false positives out of
+     * ordinary final answers.
+     */
+    private val actionCueRegex = Regex(
+        "(?i)^(let me(?! know)|let's|i'll|i will|i'm going to|i am going to|i need to|" +
+            "i should|now i|next,|next i|checking|searching|fetching|reading the|reading it|" +
+            "opening|running|looking up|pulling|compiling|one moment|hold on|" +
+            "give me (?:a|one) (?:moment|second|sec))"
+    )
+
+    /** Nudge sent when the reply only echoed internal tool-log markers. */
+    private val toolLogNote =
+        "SYSTEM NOTE: your previous message contained ONLY internal tool-log markers " +
+            "(\"[used tool: …]\" / \"[tool result] …\"). Those are internal records, never shown " +
+            "to the user, and they are not an answer. Reply with the actual answer, or call a " +
+            "tool to continue the work."
+
+    /** Nudge sent when the reply promised a step that never ran. */
+    private val continueNote =
+        "SYSTEM NOTE: you said you were about to do something, but no tool call arrived, so " +
+            "nothing ran. Do it NOW by calling the matching tool in this same turn. If the task " +
+            "is genuinely finished, give the final answer without promising further steps. " +
+            "Never write internal markers such as \"[used tool: …]\" or \"[tool result]\"."
     private fun normalizeForCompare(json: String): String =
         json.replace(Regex("\\s+"), "").trim()
 
