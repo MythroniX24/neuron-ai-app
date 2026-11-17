@@ -59,21 +59,39 @@ enum class ResponseSpacing(
  * chosen for prose (and vice versa).
  */
 data class ReplySpacingProfile(
+    /** Line spacing for prose paragraphs, quotes and headings. */
     val paragraph: ResponseSpacing = ResponseSpacing.COMFORTABLE,
-    val list: ResponseSpacing = ResponseSpacing.COMFORTABLE
+    /** Line spacing inside bullet and numbered lists. */
+    val list: ResponseSpacing = ResponseSpacing.COMFORTABLE,
+    /**
+     * Air BETWEEN blocks (paragraph gaps). Independent of line spacing: the
+     * user can keep lines tight and paragraphs airy, or the reverse.
+     */
+    val gap: ResponseSpacing = ResponseSpacing.COMFORTABLE
 ) {
     companion object {
+        /**
+         * Reads what the message stored, falling back per field to the user's
+         * own setting ([defaultLine] / [defaultGap]) — never collapsing the
+         * line-spacing choice and the paragraph-gap choice into one value.
+         */
         fun fromNames(
             paragraph: String?,
             list: String?,
-            legacy: String? = null
+            legacy: String? = null,
+            gap: String? = null,
+            defaultLine: ResponseSpacing = ResponseSpacing.COMFORTABLE,
+            defaultGap: ResponseSpacing = ResponseSpacing.COMFORTABLE
         ): ReplySpacingProfile = ReplySpacingProfile(
             paragraph = ResponseSpacing.fromNameOrNull(paragraph)
                 ?: ResponseSpacing.fromNameOrNull(legacy)
-                ?: ResponseSpacing.COMFORTABLE,
+                ?: defaultLine,
             list = ResponseSpacing.fromNameOrNull(list)
                 ?: ResponseSpacing.fromNameOrNull(legacy)
-                ?: ResponseSpacing.COMFORTABLE
+                ?: defaultLine,
+            // Legacy replies only ever stored one value: it seeds line
+            // spacing, while the paragraph gap follows the user's own choice.
+            gap = ResponseSpacing.fromNameOrNull(gap) ?: defaultGap
         )
     }
 }
@@ -85,6 +103,14 @@ interface SettingsRepository {
     /** Last model the user picked — survives restarts and pre-fills new chats. */
     val lastModelSelection: Flow<Pair<String, String>?>
     suspend fun setLastModelSelection(providerId: String, modelId: String)
+
+    /** Default LINE spacing for every reply (the AI can still override it). */
+    val replyLineSpacing: Flow<ResponseSpacing>
+    suspend fun setReplyLineSpacing(option: ResponseSpacing)
+
+    /** Default space BETWEEN paragraphs and blocks, independent of line spacing. */
+    val replyParagraphSpacing: Flow<ResponseSpacing>
+    suspend fun setReplyParagraphSpacing(option: ResponseSpacing)
 
 }
 
@@ -119,10 +145,26 @@ class SettingsRepositoryImpl(
         }
     }
 
+    override val replyLineSpacing: Flow<ResponseSpacing> = dataStore.data
+        .map { prefs -> ResponseSpacing.fromNameOrDefault(prefs[KEY_REPLY_LINE_SPACING]) }
+
+    override suspend fun setReplyLineSpacing(option: ResponseSpacing) {
+        dataStore.edit { prefs -> prefs[KEY_REPLY_LINE_SPACING] = option.name }
+    }
+
+    override val replyParagraphSpacing: Flow<ResponseSpacing> = dataStore.data
+        .map { prefs -> ResponseSpacing.fromNameOrDefault(prefs[KEY_REPLY_PARAGRAPH_SPACING]) }
+
+    override suspend fun setReplyParagraphSpacing(option: ResponseSpacing) {
+        dataStore.edit { prefs -> prefs[KEY_REPLY_PARAGRAPH_SPACING] = option.name }
+    }
+
 
     private companion object {
         val KEY_THEME_MODE = stringPreferencesKey("theme_mode")
         val KEY_LAST_PROVIDER = stringPreferencesKey("last_provider_id")
         val KEY_LAST_MODEL = stringPreferencesKey("last_model_id")
+        val KEY_REPLY_LINE_SPACING = stringPreferencesKey("reply_line_spacing")
+        val KEY_REPLY_PARAGRAPH_SPACING = stringPreferencesKey("reply_paragraph_spacing")
     }
 }

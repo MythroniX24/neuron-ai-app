@@ -51,6 +51,59 @@ class ResponseSpacingTest {
     }
 
     @Test
+    fun `line spacing and paragraph gap are independent`() {
+        val profile = ReplySpacingProfile.fromNames(
+            paragraph = "COMPACT",
+            list = "COMPACT",
+            gap = "AIRY"
+        )
+        assertEquals(ResponseSpacing.COMPACT, profile.paragraph)
+        assertEquals(ResponseSpacing.COMPACT, profile.list)
+        assertEquals(ResponseSpacing.AIRY, profile.gap)
+    }
+
+    @Test
+    fun `missing fields fall back to the user defaults separately`() {
+        val profile = ReplySpacingProfile.fromNames(
+            paragraph = null,
+            list = null,
+            gap = null,
+            defaultLine = ResponseSpacing.RELAXED,
+            defaultGap = ResponseSpacing.COMPACT
+        )
+        assertEquals(ResponseSpacing.RELAXED, profile.paragraph)
+        assertEquals(ResponseSpacing.RELAXED, profile.list)
+        assertEquals(ResponseSpacing.COMPACT, profile.gap)
+    }
+
+    @Test
+    fun `a stored value wins over the user default`() {
+        val profile = ReplySpacingProfile.fromNames(
+            paragraph = "AIRY",
+            list = "COMPACT",
+            gap = "RELAXED",
+            defaultLine = ResponseSpacing.COMPACT,
+            defaultGap = ResponseSpacing.COMFORTABLE
+        )
+        assertEquals(ResponseSpacing.AIRY, profile.paragraph)
+        assertEquals(ResponseSpacing.COMPACT, profile.list)
+        assertEquals(ResponseSpacing.RELAXED, profile.gap)
+    }
+
+    @Test
+    fun `legacy spacing seeds line spacing but not the paragraph gap`() {
+        val profile = ReplySpacingProfile.fromNames(
+            paragraph = null,
+            list = null,
+            legacy = "AIRY",
+            defaultGap = ResponseSpacing.COMPACT
+        )
+        assertEquals(ResponseSpacing.AIRY, profile.paragraph)
+        assertEquals(ResponseSpacing.AIRY, profile.list)
+        assertEquals(ResponseSpacing.COMPACT, profile.gap)
+    }
+
+    @Test
     fun `options are ordered from tightest to airiest`() {
         val scales = ResponseSpacing.entries.map { it.lineHeightScale }
         assertEquals(scales.sorted(), scales)

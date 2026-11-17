@@ -158,6 +158,7 @@ fun ChatScreen(
     val liveRichRecommendations by viewModel.liveRichRecommendations.collectAsStateWithLifecycle()
     val liveComparisonBlocks by viewModel.liveComparisonBlocks.collectAsStateWithLifecycle()
     val comparisonImages by viewModel.comparisonImages.collectAsStateWithLifecycle()
+    val missingImages by viewModel.missingImages.collectAsStateWithLifecycle()
     val liveReplySpacing by viewModel.liveReplySpacing.collectAsStateWithLifecycle()
     val draftAttachments by viewModel.draftAttachments.collectAsStateWithLifecycle()
     val attachmentNotice by viewModel.attachmentNotice.collectAsStateWithLifecycle()
@@ -368,6 +369,7 @@ fun ChatScreen(
                             }?.content?.take(4_000)
                         },
                         comparisonImages = comparisonImages,
+                        missingImages = missingImages,
                         onImagesNeeded = viewModel::requestComparisonImages
                     )
                 }
@@ -382,6 +384,7 @@ fun ChatScreen(
                         richRecommendations = liveRichRecommendations,
                         comparisonBlocks = liveComparisonBlocks,
                         comparisonImages = comparisonImages,
+                        missingImages = missingImages,
                         onImagesNeeded = viewModel::requestComparisonImages
                     )
                 }
@@ -979,6 +982,7 @@ private fun MessageRow(
     onEditAndResend: (() -> Unit)? = null,
     fullResultResolver: (String) -> String? = { null },
     comparisonImages: Map<String, String> = emptyMap(),
+    missingImages: Set<String> = emptySet(),
     onImagesNeeded: (List<String>) -> Unit = {}
 ) {
     val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
@@ -1107,7 +1111,8 @@ private fun MessageRow(
             val replySpacing = ReplySpacingProfile.fromNames(
                 paragraph = message.metadata?.paragraphSpacing,
                 list = message.metadata?.listSpacing,
-                legacy = message.metadata?.replySpacing
+                legacy = message.metadata?.replySpacing,
+                gap = message.metadata?.blockGapSpacing
             )
             Box(
                 Modifier.combinedClickable(
@@ -1123,6 +1128,7 @@ private fun MessageRow(
                     placements = message.metadata?.comparisonBlocks.orEmpty(),
                     spacing = replySpacing,
                     imageUrls = comparisonImages,
+                    missingQueries = missingImages,
                     onImagesNeeded = onImagesNeeded
                 )
             }
@@ -1132,6 +1138,9 @@ private fun MessageRow(
                     RichRecommendationSection(
                         recommendations = sets,
                         responseSpacing = replySpacing.paragraph,
+                        imageUrls = comparisonImages,
+                        missingQueries = missingImages,
+                        onImagesNeeded = onImagesNeeded,
                         modifier = Modifier.padding(top = Spacing.md)
                     )
                 }
@@ -1154,6 +1163,7 @@ private fun LiveAgentTurn(
     richRecommendations: List<com.neuron.ai.core.conversation.RichRecommendationSet> = emptyList(),
     comparisonBlocks: List<com.neuron.ai.core.conversation.ComparisonPlacement> = emptyList(),
     comparisonImages: Map<String, String> = emptyMap(),
+    missingImages: Set<String> = emptySet(),
     onImagesNeeded: (List<String>) -> Unit = {}
 ) {
     var expanded by remember { mutableStateOf(true) }
@@ -1185,6 +1195,7 @@ private fun LiveAgentTurn(
                 placements = comparisonBlocks,
                 spacing = replySpacing,
                 imageUrls = comparisonImages,
+                missingQueries = missingImages,
                 onImagesNeeded = onImagesNeeded,
                 modifier = Modifier.padding(
                     start = Spacing.sm,
@@ -1202,6 +1213,9 @@ private fun LiveAgentTurn(
             RichRecommendationSection(
                 recommendations = richRecommendations,
                 responseSpacing = replySpacing.paragraph,
+                imageUrls = comparisonImages,
+                missingQueries = missingImages,
+                onImagesNeeded = onImagesNeeded,
                 modifier = Modifier.padding(top = Spacing.md)
             )
         }

@@ -73,6 +73,7 @@ fun DebugConsoleScreen(
     val viewModel: DebugConsoleViewModel =
         viewModel(factory = DebugConsoleViewModelFactory(container))
     val snapshot by viewModel.snapshot.collectAsStateWithLifecycle()
+    val health by viewModel.health.collectAsStateWithLifecycle()
     val clipboard = LocalClipboardManager.current
     val scope = rememberCoroutineScope()
     var busy by remember { mutableStateOf(false) }
@@ -214,6 +215,93 @@ fun DebugConsoleScreen(
             KeyValue("Models on disk", data.modelsOnDisk)
             KeyValue("Storage used", data.storageUsed)
 
+            // ---- Google connectors: why a connect attempt fails ----------------
+            SectionTitle("Google connectors")
+            data.connector?.let { connector ->
+                KeyValue("Configured", yesNo(connector.configured))
+                KeyValue("Web client", connector.webClientId)
+                KeyValue("Backend", connector.backendUrl)
+                KeyValue("Signing SHA-1", connector.signingSha1 ?: "unavailable")
+                KeyValue("Accounts", connector.accounts.size.toString())
+                connector.accounts.forEach { account ->
+                    Text(
+                        text = "• ${account.email ?: account.id} — " +
+                            account.services.joinToString(", ") { it.label }
+                                .ifBlank { "no service scope" },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+                connector.lastSignInError?.let { error ->
+                    Text(
+                        text = "Last sign-in error: $error",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
+                Text(
+                    text = "Google matches the Android OAuth client by package name + " +
+                        "signing certificate. Code 10 (DEVELOPER_ERROR) means the SHA-1 " +
+                        "above is not registered for this package — a CI-built debug APK " +
+                        "has a different key from a local build.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                OutlinedButton(
+                    onClick = { viewModel.probeBackend() },
+                    modifier = Modifier.padding(top = Spacing.xs)
+                ) { Text("Test connector backend") }
+                health?.let { result ->
+                    KeyValue(
+                        "Backend probe",
+                        (if (result.ok) "OK" else "FAILED") +
+                            " ${result.status} in ${result.latencyMs}ms"
+                    )
+                    Text(
+                        text = result.detail.take(300),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (result.ok) MaterialTheme.colorScheme.onSurfaceVariant
+                        else MaterialTheme.colorScheme.error
+                    )
+                }
+            } ?: Text(
+                text = "Connector diagnostics unavailable in this build.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            // ---- Card images: why a picture shows the placeholder -------------
+            SectionTitle("Card images")
+            data.imageStats?.let { stats ->
+                KeyValue("Lookups", stats.lookups.toString())
+                KeyValue("Resolved", stats.resolved.toString())
+                KeyValue("No image found", stats.misses.toString())
+                KeyValue("Lookup failed", stats.failures.toString())
+                Text(
+                    text = "A phrase resolves through progressively simpler variants; " +
+                        "\"no image found\" is a real empty result, \"lookup failed\" is " +
+                        "a network/HTTP problem.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            } ?: Text(
+                text = "Image resolver unavailable in this build.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            // ---- Reply layout: which spacing is actually in effect ------------
+            SectionTitle("Reply layout")
+            KeyValue("Line spacing", data.lineSpacing.label)
+            KeyValue("Paragraph spacing", data.paragraphSpacing.label)
+            Text(
+                text = "Line spacing scales the height of each line; paragraph spacing " +
+                    "scales the gap between blocks. They are stored separately and the " +
+                    "AI can choose per answer.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
             SectionTitle("Model files")
             if (data.modelFiles.isEmpty()) {
                 Text(
@@ -239,6 +327,23 @@ fun DebugConsoleScreen(
                     }
                 }
             }
+
+            SectionTitle("Diagnostics log")
+            Text(
+                text = if (data.diagnosticEntries.isEmpty()) {
+                    "(empty — no connector or image activity yet)"
+                } else {
+                    data.diagnosticEntries.takeLast(60).joinToString("\n") { it.asLine() }
+                },
+                style = MaterialTheme.typography.bodySmall.copy(
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 11.sp
+                ),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier
+                    .horizontalScroll(rememberScrollState())
+                    .padding(bottom = Spacing.sm)
+            )
 
             SectionTitle("llama.cpp log")
             Text(

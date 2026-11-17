@@ -3,6 +3,7 @@ package com.neuron.ai.ui.settings
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.neuron.ai.core.coroutines.DispatcherProvider
+import com.neuron.ai.core.settings.ResponseSpacing
 import com.neuron.ai.core.settings.SettingsRepository
 import com.neuron.ai.core.settings.ThemeMode
 import com.neuron.ai.data.memory.MemoryManager
@@ -33,6 +34,22 @@ class SettingsViewModel(
                 initialValue = emptyList()
             )
 
+    /** Default line spacing for AI replies, persisted across restarts. */
+    val replyLineSpacing: StateFlow<ResponseSpacing> = settings.replyLineSpacing
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = ResponseSpacing.COMFORTABLE
+        )
+
+    /** Default gap between paragraphs, independent of line spacing. */
+    val replyParagraphSpacing: StateFlow<ResponseSpacing> = settings.replyParagraphSpacing
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = ResponseSpacing.COMFORTABLE
+        )
+
     /** Master switch for the whole memory system. */
     val memoryEnabled: StateFlow<Boolean> =
         (memoryManager?.enabled ?: kotlinx.coroutines.flow.flowOf(false))
@@ -46,6 +63,14 @@ class SettingsViewModel(
         viewModelScope.launch(dispatchers.io) {
             settings.setThemeMode(mode)
         }
+    }
+
+    fun setReplyLineSpacing(option: ResponseSpacing) {
+        viewModelScope.launch(dispatchers.io) { settings.setReplyLineSpacing(option) }
+    }
+
+    fun setReplyParagraphSpacing(option: ResponseSpacing) {
+        viewModelScope.launch(dispatchers.io) { settings.setReplyParagraphSpacing(option) }
     }
 
     fun setMemoryEnabled(enabled: Boolean) {

@@ -131,8 +131,28 @@ class AppContainer(context: Context) {
     // Every Google REST call runs on the connector Worker. The device holds
     // only an opaque backend session token; the Google refresh token is
     // encrypted on the backend and never reaches the app.
+    /**
+     * In-app diagnostics feed (Google connect, card images, backend calls).
+     * Settings → Debug console renders it; nothing here is ever sent anywhere.
+     */
+    val diagnostics: com.neuron.ai.core.diagnostics.DiagnosticsLog by lazy {
+        com.neuron.ai.core.diagnostics.DiagnosticsLog()
+    }
+
+    /**
+     * Facts about the installed APK — notably the signing SHA-1 the Android
+     * OAuth client has to contain. A CI debug APK and a local debug build do
+     * not share one, which is the usual cause of Google's DEVELOPER_ERROR.
+     */
+    val buildInfo: com.neuron.ai.data.diagnostics.BuildInfo by lazy {
+        com.neuron.ai.data.diagnostics.BuildDiagnostics.read(context)
+    }
+
     val googleBackendClient: com.neuron.ai.data.google.GoogleBackendClient by lazy {
-        com.neuron.ai.data.google.GoogleBackendClient(dispatchers)
+        com.neuron.ai.data.google.GoogleBackendClient(
+            dispatchers = dispatchers,
+            diagnostics = diagnostics
+        )
     }
 
     val googleConnectorRepository: GoogleConnectorRepository by lazy {
@@ -146,7 +166,17 @@ class AppContainer(context: Context) {
 
     /** Google consent helper: returns a server auth code, never a token. */
     val googleSignInHelper: com.neuron.ai.data.google.GoogleSignInHelper by lazy {
-        com.neuron.ai.data.google.GoogleSignInHelper(context)
+        com.neuron.ai.data.google.GoogleSignInHelper(context, diagnostics)
+    }
+
+    /** Read-only connector diagnostics shared by Connected apps and Debug console. */
+    val googleConnectorDiagnostics: com.neuron.ai.data.google.GoogleConnectorDiagnostics by lazy {
+        com.neuron.ai.data.google.GoogleConnectorDiagnostics(
+            helper = googleSignInHelper,
+            backend = googleBackendClient,
+            repository = googleConnectorRepository,
+            build = buildInfo
+        )
     }
 
     val googleTools: List<com.neuron.ai.core.agent.Tool> by lazy {
@@ -200,8 +230,12 @@ class AppContainer(context: Context) {
      * real, public https image URL (cached). Misses fall back to a neutral
      * placeholder in the UI — no key, no account, no invented URLs.
      */
-    val comparisonImageResolver: com.neuron.ai.core.web.EntityImageResolver =
-        com.neuron.ai.data.web.WikipediaImageResolver(dispatchers, logger)
+    val comparisonImageResolver: com.neuron.ai.data.web.WikipediaImageResolver =
+        com.neuron.ai.data.web.WikipediaImageResolver(
+            dispatchers = dispatchers,
+            logger = logger,
+            diagnostics = diagnostics
+        )
 
     /** Real WebView-backed browser sessions, keyed per conversation. */
     val browserManager: BrowserManager = AndroidBrowserManager(context, dispatchers)

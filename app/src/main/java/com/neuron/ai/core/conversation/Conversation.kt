@@ -87,7 +87,9 @@ data class MessageMetadata(
     /** AI-selected line spacing for prose paragraphs. */
     val paragraphSpacing: String? = null,
     /** AI-selected line spacing for lists. */
-    val listSpacing: String? = null
+    val listSpacing: String? = null,
+    /** Selected space between paragraph blocks, independent of line spacing. */
+    val blockGapSpacing: String? = null
 )
 
 /** A chat conversation. */

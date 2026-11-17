@@ -15,6 +15,7 @@ import com.neuron.ai.core.error.NeuronError
 import com.neuron.ai.core.log.Logger
 import com.neuron.ai.core.settings.ReplySpacingProfile
 import com.neuron.ai.core.settings.SettingsRepository
+import com.neuron.ai.core.web.ImageQuery
 import com.neuron.ai.core.provider.AIProvider
 import com.neuron.ai.core.provider.ChatMessage
 import com.neuron.ai.core.provider.Model
@@ -189,6 +190,14 @@ class ChatViewModel(
     private val requestedImages = java.util.Collections.synchronizedSet(mutableSetOf<String>())
 
     /**
+     * Normalized phrases the resolver finished without a picture. The cards use
+     * this to stop shimmering forever and show the neutral tile instead — a
+     * permanent shimmer was the "image is not rendering" the user saw.
+     */
+    private val _missingImages = MutableStateFlow<Set<String>>(emptySet())
+    val missingImages: StateFlow<Set<String>> = _missingImages.asStateFlow()
+
+    /**
      * Asks the image resolver for any phrase still missing a URL. Fire and
      * forget on the IO dispatcher: a failed lookup simply leaves the neutral
      * placeholder, it never blocks the answer or retries in a loop.
@@ -207,6 +216,8 @@ class ChatViewModel(
                 val url = runCatching { resolver.resolve(query) }.getOrNull()
                 if (!url.isNullOrBlank()) {
                     _comparisonImages.value = _comparisonImages.value + (query to url)
+                } else {
+                    _missingImages.value = _missingImages.value + ImageQuery.key(query)
                 }
             }
         }
@@ -215,6 +226,27 @@ class ChatViewModel(
     /** AI-chosen readability for the reply currently streaming. */
     private val _liveReplySpacing = MutableStateFlow(ReplySpacingProfile())
     val liveReplySpacing: StateFlow<ReplySpacingProfile> = _liveReplySpacing.asStateFlow()
+
+    /**
+     * The user's own reply-layout choice, used whenever the AI does not pick
+     * one. Line spacing and paragraph spacing are tracked separately so a
+     * message never inherits one where the other was set.
+     */
+    private var userSpacing = ReplySpacingProfile()
+
+    init {
+        val settingsRef = settings
+        if (settingsRef != null) {
+            viewModelScope.launch {
+                kotlinx.coroutines.flow.combine(
+                    settingsRef.replyLineSpacing,
+                    settingsRef.replyParagraphSpacing
+                ) { line, gap -> line to gap }.collect { (line, gap) ->
+                    userSpacing = ReplySpacingProfile(paragraph = line, list = line, gap = gap)
+                }
+            }
+        }
+    }
 
     /** Wall-clock time of the ACTIVE turn; the timer label reads this. */
     private val _turnElapsedMs = MutableStateFlow(0L)
@@ -1021,7 +1053,7 @@ class ChatViewModel(
         _timeline.value = emptyList()
         _liveRichRecommendations.value = emptyList()
         _liveComparisonBlocks.value = emptyList()
-        _liveReplySpacing.value = ReplySpacingProfile()
+        _liveReplySpacing.value = userSpacing
         // The routing resolution is the FIRST timeline row: which model runs,
         // with what capabilities, and what was degraded (incl. live thermal
         // throttle). It persists with the answer, so the transcript explains
@@ -1157,9 +1189,14 @@ class ChatViewModel(
                         }
 
                         is AgentEvent.ReplySpacing -> {
+                            // The AI picks line spacing; the paragraph gap stays
+                            // the user's own setting unless the reply stored one.
                             _liveReplySpacing.value = ReplySpacingProfile.fromNames(
                                 paragraph = event.paragraph,
-                                list = event.list
+                                list = event.list,
+                                gap = userSpacing.gap.name,
+                                defaultLine = userSpacing.paragraph,
+                                defaultGap = userSpacing.gap
                             )
                         }
 
@@ -1299,7 +1336,8 @@ class ChatViewModel(
                                 comparisonBlocks = _liveComparisonBlocks.value
                                     .ifEmpty { finishedComparisons },
                                 paragraphSpacing = _liveReplySpacing.value.paragraph.name,
-                                listSpacing = _liveReplySpacing.value.list.name
+                                listSpacing = _liveReplySpacing.value.list.name,
+                                blockGapSpacing = _liveReplySpacing.value.gap.name
                             )
                         )
                     }
@@ -1308,7 +1346,7 @@ class ChatViewModel(
                 _activity.value = emptyList()
                 _liveRichRecommendations.value = emptyList()
                 _liveComparisonBlocks.value = emptyList()
-                _liveReplySpacing.value = ReplySpacingProfile()
+                _liveReplySpacing.value = userSpacing
             }
             throw cancelled
         }
@@ -1339,7 +1377,8 @@ class ChatViewModel(
                     richRecommendations = finishedRich,
                     comparisonBlocks = finishedComparisons,
                     paragraphSpacing = finishedSpacing.paragraph.name,
-                    listSpacing = finishedSpacing.list.name
+                    listSpacing = finishedSpacing.list.name,
+                    blockGapSpacing = finishedSpacing.gap.name
                 )
             )
         } else {
@@ -1352,7 +1391,7 @@ class ChatViewModel(
         _activity.value = emptyList()
         _liveRichRecommendations.value = emptyList()
         _liveComparisonBlocks.value = emptyList()
-        _liveReplySpacing.value = ReplySpacingProfile()
+        _liveReplySpacing.value = userSpacing
         // Keep the finished timeline visible until the next turn begins.
         if (_generation.value is GenerationState.Streaming) {
             _generation.value = GenerationState.Idle

@@ -457,17 +457,38 @@ Design rules:
   `MessageMetadata.comparisonBlocks`, and `ComparisonLayout.segments()` splits
   the answer at those anchors so text and cards interleave in reading order.
 - Card images: `EntityImageResolver` (implemented by `WikipediaImageResolver`)
-  turns an `imageQuery` phrase into a real public image — keyless, TTL/LRU
-  cached, one bounded request; the ViewModel keeps the resolved map in a
-  `StateFlow` shared by live and persisted messages. `SmartEntityImage`
-  (Coil `SubcomposeAsyncImage`, `ContentScale.Fit`) shows shimmer → image, or a
-  neutral icon when nothing trustworthy was found. A half-streamed fenced
-  block is stripped by `ComparisonBlocksParser.splitPendingStream()` and
+  turns a phrase into a real public image — keyless, TTL/LRU cached, bounded
+  requests. `ImageQuery.variants()` tries the full phrase first and then
+  progressively simpler ones (parentheticals/years, descriptive tails, generic
+  category words removed, first words only), because a model phrase like
+  "Motorola mid-range smartphone (2024)" matches no encyclopedia article.
+  Comparison cards look up both `imageQuery` and the option title; rich cards
+  look up the item title. The ViewModel keeps the resolved map **and** the
+  normalized misses in `StateFlow`s shared by live and persisted messages, so
+  `SmartEntityImage` (Coil `SubcomposeAsyncImage`) shows shimmer only while a
+  lookup is actually in flight and then settles on a neutral tile — a
+  permanent shimmer used to read as "the image never renders". The resolver
+  keeps success/miss/failure counters for the Debug console. A half-streamed
+  fenced block is stripped by `ComparisonBlocksParser.splitPendingStream()` and
   replaced with a skeleton, so raw JSON never reaches the bubble.
 - Reply spacing: `ResponseSpacing` presets (compact / comfortable / relaxed /
-  airy) applied independently to paragraphs and lists, chosen by the model
-  through `ui.reply_spacing` and persisted per message (legacy single-value
-  spacing is still read for old rows).
+  airy). Line spacing and paragraph gap are **separate** values:
+  `ReplySpacingProfile(paragraph, list, gap)` scales line height for prose and
+  lists while `gap` scales only the space between blocks. The user sets both
+  defaults in Settings → Reply layout (persisted in DataStore); the model can
+  still override line spacing through `ui.reply_spacing`, and every message
+  stores the effective values in metadata. Line heights are applied with
+  `LineHeightStyle(trim = None)` so the extra leading is visible on the first
+  and last line as well.
+- Connectors UI: `ConnectedAppsScreen` is built per service (Gmail, Drive,
+  Docs, Sheets) — each card has its own brand icon, its own connect button and
+  the accounts that can use it, several accounts per service, and
+  confirmation before a disconnect. `GoogleService.requestScopes()` asks only
+  for that service plus whatever the install already holds. A diagnostics card
+  shows the installed APK's signing SHA-1 (the Android OAuth client must match
+  it), the web client and backend in use, the last Google status code and a
+  live backend probe; the same facts appear in the Debug console together with
+  the in-app `DiagnosticsLog` feed and image counters.
 
 ## 15. Security and privacy
 

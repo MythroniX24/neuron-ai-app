@@ -33,6 +33,17 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # Google Sign-In matches the Android OAuth client on package name + the
+      # APK's signing certificate. A fresh runner generates a fresh debug
+      # keystore, so every CI debug APK used to have a different SHA-1 and
+      # consent failed with DEVELOPER_ERROR (10). Caching one keystore keeps
+      # the fingerprint stable so it can be registered once in Google Cloud.
+      - name: Restore stable debug keystore
+        uses: actions/cache@v4
+        with:
+          path: ~/.android/debug.keystore
+          key: android-debug-keystore-v1
+
       # Vulkan GPU backend (milestone 5): ggml compiles its SPIR-V shaders
       # with glslc at build time. Ubuntu 24.04's shaderc-glslc 2023.8 lacks
       # the GL_EXT_integer_dot_product extension probe target, so we vendor
@@ -67,6 +78,28 @@ jobs:
 
       - name: Build debug APK
         run: ./gradlew assembleDebug --stacktrace
+
+      # The SHA-1 to paste into the Android OAuth client for com.neuron.ai.
+      - name: Report debug signing fingerprint
+        run: |
+          KEYSTORE="$HOME/.android/debug.keystore"
+          if [ ! -f "$KEYSTORE" ]; then
+            echo "No debug keystore found; skipping fingerprint."
+            exit 0
+          fi
+          SHA1=$(keytool -list -v -keystore "$KEYSTORE" -storepass android \
+            -alias androiddebugkey | awk -F': ' '/SHA1:/{print $2; exit}')
+          SHA256=$(keytool -list -v -keystore "$KEYSTORE" -storepass android \
+            -alias androiddebugkey | awk -F': ' '/SHA256:/{print $2; exit}')
+          echo "Debug APK SHA-1: $SHA1"
+          {
+            echo "### Debug APK signing fingerprint"
+            echo '```'
+            echo "SHA-1:   $SHA1"
+            echo "SHA-256: $SHA256"
+            echo '```'
+            echo "Register the SHA-1 in the Android OAuth client for com.neuron.ai, or Google Sign-In will answer DEVELOPER_ERROR (10)."
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload debug APK artifact
         uses: actions/upload-artifact@v4

@@ -62,6 +62,7 @@ import com.neuron.ai.core.conversation.FeatureRow
 import com.neuron.ai.core.conversation.PriorityOption
 import com.neuron.ai.core.conversation.ScoreOption
 import com.neuron.ai.core.settings.ReplySpacingProfile
+import com.neuron.ai.core.web.ImageQuery
 import com.neuron.ai.ui.markdown.MarkdownText
 import com.neuron.ai.ui.theme.LocalAppDarkMode
 import com.neuron.ai.ui.theme.Spacing
@@ -79,6 +80,7 @@ fun ComparisonContent(
     placements: List<ComparisonPlacement>,
     spacing: ReplySpacingProfile,
     imageUrls: Map<String, String> = emptyMap(),
+    missingQueries: Set<String> = emptySet(),
     onImagesNeeded: (List<String>) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
@@ -87,7 +89,7 @@ fun ComparisonContent(
     }
     Column(
         modifier = modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(Spacing.md)
+        verticalArrangement = Arrangement.spacedBy(Spacing.md * spacing.gap.blockGapScale)
     ) {
         segments.forEach { segment ->
             when (segment) {
@@ -95,6 +97,7 @@ fun ComparisonContent(
                 is ComparisonSegment.Block -> ComparisonBlockWidget(
                     block = segment.block,
                     imageUrls = imageUrls,
+                    missingQueries = missingQueries,
                     onImagesNeeded = onImagesNeeded
                 )
             }
@@ -107,15 +110,24 @@ fun ComparisonContent(
 fun ComparisonBlockWidget(
     block: ComparisonUiBlock,
     imageUrls: Map<String, String> = emptyMap(),
+    missingQueries: Set<String> = emptySet(),
     onImagesNeeded: (List<String>) -> Unit = {}
 ) {
-    val queries = remember(block) { ComparisonLayout.imageQueries(block) }
-    LaunchedEffect(queries, imageUrls) {
-        val missing = queries.filter { imageUrls[it].isNullOrBlank() }
-        if (missing.isNotEmpty()) onImagesNeeded(missing)
+    // The model's phrase first, then the entity title as a simpler fallback;
+    // asking for both is what turns a generic phrase into a real picture.
+    val pairs = remember(block) { block.imageLookupPairs() }
+    LaunchedEffect(pairs, imageUrls, missingQueries) {
+        val needed = pairs
+            .flatMap { (query, title) -> listOfNotNull(query, title) }
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+            .filter { imageUrls[it].isNullOrBlank() }
+            .filter { ImageQuery.key(it) !in missingQueries }
+            .distinct()
+        if (needed.isNotEmpty()) onImagesNeeded(needed)
     }
     when (block) {
-        is ComparisonUiBlock.SideBySide -> SideBySideWidget(block, imageUrls)
+        is ComparisonUiBlock.SideBySide -> SideBySideWidget(block, imageUrls, missingQueries)
         is ComparisonUiBlock.FeatureTable -> FeatureTableWidget(block)
         is ComparisonUiBlock.Score -> ScoreComparisonWidget(block)
         is ComparisonUiBlock.ProsCons -> ProsConsWidget(block)
@@ -123,12 +135,22 @@ fun ComparisonBlockWidget(
     }
 }
 
+/** (imageQuery, title) per option — the title is the fallback lookup phrase. */
+private fun ComparisonUiBlock.imageLookupPairs(): List<Pair<String?, String?>> = when (this) {
+    is ComparisonUiBlock.SideBySide -> listOf(
+        optionA.imageQuery to optionA.title,
+        optionB.imageQuery to optionB.title
+    )
+    else -> emptyList()
+}
+
 // ---- 1. Side-by-side -------------------------------------------------------
 
 @Composable
 private fun SideBySideWidget(
     block: ComparisonUiBlock.SideBySide,
-    imageUrls: Map<String, String>
+    imageUrls: Map<String, String>,
+    missingQueries: Set<String>
 ) {
     Column(Modifier.fillMaxWidth()) {
         block.title?.takeIf { it.isNotBlank() }?.let { SectionTitle(it) }
@@ -141,12 +163,14 @@ private fun SideBySideWidget(
                 option = block.optionA,
                 tone = PillTone.PRIMARY,
                 imageUrls = imageUrls,
+                missingQueries = missingQueries,
                 modifier = Modifier.weight(1f)
             )
             OptionCard(
                 option = block.optionB,
                 tone = PillTone.SECONDARY,
                 imageUrls = imageUrls,
+                missingQueries = missingQueries,
                 modifier = Modifier.weight(1f)
             )
         }
@@ -158,14 +182,18 @@ private fun OptionCard(
     option: ComparisonOption,
     tone: PillTone,
     imageUrls: Map<String, String>,
+    missingQueries: Set<String>,
     modifier: Modifier = Modifier
 ) {
     ComparisonCard(modifier = modifier) {
         SmartEntityImage(
             imageUrl = option.imageUrl,
             imageQuery = option.imageQuery,
+            fallbackQuery = option.title,
             resolvedUrls = imageUrls,
+            missingQueries = missingQueries,
             contentDescription = option.title,
+            contentScale = ContentScale.Crop,
             modifier = Modifier
                 .fillMaxWidth()
                 .height(120.dp)
@@ -441,22 +469,34 @@ private fun PriorityComparisonWidget(block: ComparisonUiBlock.Priority) {
 // ---- Image pipeline --------------------------------------------------------
 
 /**
- * Fixed-height entity image: a real photo when one exists, a shimmer while a
- * query is being resolved, and a neutral icon when nothing trustworthy was
- * found. Never crops product cutouts (`ContentScale.Fit`), and always fills
- * its box so two side-by-side cards stay symmetrical.
+ * Fixed-height entity image: a real picture when one exists, a shimmer while
+ * a lookup is in flight, and a neutral icon once the pipeline is done with no
+ * result. The last part matters: shimmering for a phrase that will never
+ * resolve is indistinguishable from a broken image, which is exactly how it
+ * looked before.
+ *
+ * [imageQuery] is the model's phrase, [fallbackQuery] the entity title used
+ * when the phrase does not resolve.
  */
 @Composable
 fun SmartEntityImage(
     imageUrl: String?,
     imageQuery: String?,
+    fallbackQuery: String? = null,
     resolvedUrls: Map<String, String> = emptyMap(),
+    missingQueries: Set<String> = emptySet(),
     contentDescription: String?,
     modifier: Modifier = Modifier,
-    shape: Shape = RoundedCornerShape(12.dp)
+    shape: Shape = RoundedCornerShape(12.dp),
+    contentScale: ContentScale = ContentScale.Fit
 ) {
-    val resolved = imageQuery?.takeIf { it.isNotBlank() }?.let { resolvedUrls[it] }
-    val url = imageUrl?.takeIf { it.isNotBlank() } ?: resolved?.takeIf { it.isNotBlank() }
+    val lookups = listOfNotNull(imageQuery, fallbackQuery).filter { it.isNotBlank() }
+    val resolved = lookups.firstNotNullOfOrNull { key ->
+        resolvedUrls[key]?.takeIf { it.isNotBlank() }
+    }
+    val url = imageUrl?.takeIf { it.isNotBlank() } ?: resolved
+    val settled = lookups.isNotEmpty() &&
+        lookups.all { ImageQuery.key(it) in missingQueries }
     Box(
         modifier = modifier
             .clip(shape)
@@ -470,20 +510,18 @@ fun SmartEntityImage(
                     .crossfade(true)
                     .build(),
                 contentDescription = contentDescription,
-                contentScale = ContentScale.Fit,
+                contentScale = contentScale,
                 modifier = Modifier.fillMaxSize(),
                 loading = { ShimmerFill() },
                 error = { FallbackGlyph() },
                 success = {
                     SubcomposeAsyncImageContent(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(4.dp)
+                        modifier = Modifier.fillMaxSize()
                     )
                 }
             )
-            // A query exists but no URL yet: the lookup is in flight.
-            !imageQuery.isNullOrBlank() -> ShimmerFill()
+            // A lookup is still in flight for this entity.
+            !settled && lookups.isNotEmpty() -> ShimmerFill()
             else -> FallbackGlyph()
         }
     }

@@ -2,6 +2,7 @@ package com.neuron.ai.data.google
 
 import com.neuron.ai.BuildConfig
 import com.neuron.ai.core.coroutines.DispatcherProvider
+import com.neuron.ai.core.diagnostics.DiagnosticsLog
 import com.neuron.ai.core.integration.google.GoogleAccessToken
 import com.neuron.ai.core.integration.google.GoogleActionResult
 import com.neuron.ai.core.integration.google.GoogleConnectorException
@@ -58,6 +59,14 @@ private data class AccountsResponse(val accounts: List<BackendAccountDto> = empt
 @Serializable
 private data class ErrorResponse(val error: String? = null, val message: String? = null)
 
+/** Result of the Debug console's backend reachability probe. */
+data class BackendHealth(
+    val ok: Boolean,
+    val status: Int,
+    val latencyMs: Long,
+    val detail: String
+)
+
 /**
  * Thin HTTP client for the Neuron AI connector Worker. It never sees a Google
  * refresh token or the Web client secret — only short-lived access tokens and
@@ -66,10 +75,13 @@ private data class ErrorResponse(val error: String? = null, val message: String?
 class GoogleBackendClient(
     private val dispatchers: DispatcherProvider,
     baseUrl: String = BuildConfig.GOOGLE_BACKEND_URL,
-    private val http: OkHttpClient = defaultClient()
+    private val http: OkHttpClient = defaultClient(),
+    private val diagnostics: DiagnosticsLog? = null
 ) {
 
-    private val root: String = baseUrl.trim().trimEnd('/')
+    val baseUrl: String = baseUrl.trim().trimEnd('/')
+    private val root: String = baseUrl
+
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
     private val jsonMedia = "application/json; charset=utf-8".toMediaType()
 
@@ -97,15 +109,60 @@ class GoogleBackendClient(
                 else -> "Connector backend error (HTTP $code)."
             }
         val reauth = key == "reauth_required" || (code == 401 && key != "unauthorized")
+        // The raw backend body is what explains a failed connect; keep it in
+        // the diagnostics feed (never in the chat reply).
+        diagnostics?.log(
+            "GOOGLE",
+            "backend error HTTP $code",
+            body.orEmpty().take(400).ifBlank { message }
+        )
         return GoogleConnectorException(message, reauthRequired = reauth)
     }
 
     private suspend fun send(request: Request): String = withContext(dispatchers.io) {
+        val started = System.currentTimeMillis()
         http.newCall(request).execute().use { response ->
             val body = response.body?.string()
+            val elapsed = System.currentTimeMillis() - started
+            diagnostics?.log(
+                "GOOGLE",
+                "${request.method} ${request.url.encodedPath} → ${response.code}",
+                "${elapsed}ms"
+            )
             if (!response.isSuccessful) throw errorOf(response.code, body)
             body.orEmpty()
         }
+    }
+
+    /** Cheap reachability probe used by the connectors diagnostics card. */
+    suspend fun health(): BackendHealth = withContext(dispatchers.io) {
+        if (!configured) {
+            return@withContext BackendHealth(false, 0, 0, "No connector backend URL in this build.")
+        }
+        val started = System.currentTimeMillis()
+        val result = runCatching {
+            http.newCall(Request.Builder().url(url("/health")).get().build()).execute().use { r ->
+                BackendHealth(
+                    ok = r.isSuccessful,
+                    status = r.code,
+                    latencyMs = System.currentTimeMillis() - started,
+                    detail = r.body?.string().orEmpty().take(400)
+                )
+            }
+        }.getOrElse { error ->
+            BackendHealth(
+                ok = false,
+                status = 0,
+                latencyMs = System.currentTimeMillis() - started,
+                detail = error.message ?: error::class.simpleName ?: "unreachable"
+            )
+        }
+        diagnostics?.log(
+            "GOOGLE",
+            "health probe ${result.status} (${result.latencyMs}ms)",
+            result.detail
+        )
+        result
     }
 
     suspend fun exchange(serverAuthCode: String, bearer: String?): Pair<BackendAccountDto, String> {
@@ -119,8 +176,14 @@ class GoogleBackendClient(
         val parsed = runCatching {
             json.decodeFromString(ExchangeResponse.serializer(), body)
         }.getOrElse {
+            diagnostics?.log("GOOGLE", "exchange response unreadable", body.take(400))
             throw GoogleConnectorException("Unexpected response from the connector backend.")
         }
+        diagnostics?.log(
+            "GOOGLE",
+            "account linked",
+            parsed.account.email ?: parsed.account.id
+        )
         return parsed.account to parsed.sessionToken
     }
 

@@ -1,6 +1,5 @@
 package com.neuron.ai.ui.chat
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -12,10 +11,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.OpenInNew
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -23,6 +20,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -33,16 +31,17 @@ import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.LineHeightStyle
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import coil.compose.AsyncImage
 import com.neuron.ai.core.conversation.RichItem
 import com.neuron.ai.core.conversation.RichRecommendationSet
 import com.neuron.ai.core.settings.ResponseSpacing
+import com.neuron.ai.core.web.ImageQuery
 import com.neuron.ai.ui.theme.LocalAppDarkMode
 import com.neuron.ai.ui.theme.Spacing
 
@@ -51,11 +50,18 @@ import com.neuron.ai.ui.theme.Spacing
  * products, books, tools, repositories, places or recipes all use the same
  * reusable card. The AI chooses this surface by calling `ui.rich_items`; the
  * ViewModel validates its JSON and hands a [RichRecommendationSet] here.
+ *
+ * Thumbnails go through the same entity-image pipeline as comparison cards:
+ * a model-supplied URL is used when present, otherwise the item title is
+ * looked up, and a miss settles on a neutral tile instead of shimmering.
  */
 @Composable
 fun RichRecommendationSection(
     recommendations: List<RichRecommendationSet>,
     responseSpacing: ResponseSpacing = ResponseSpacing.COMFORTABLE,
+    imageUrls: Map<String, String> = emptyMap(),
+    missingQueries: Set<String> = emptySet(),
+    onImagesNeeded: (List<String>) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     Column(
@@ -63,7 +69,13 @@ fun RichRecommendationSection(
         verticalArrangement = Arrangement.spacedBy(Spacing.lg * responseSpacing.blockGapScale)
     ) {
         recommendations.forEach { set ->
-            RichRecommendationSetBlock(set, responseSpacing)
+            RichRecommendationSetBlock(
+                set = set,
+                responseSpacing = responseSpacing,
+                imageUrls = imageUrls,
+                missingQueries = missingQueries,
+                onImagesNeeded = onImagesNeeded
+            )
         }
     }
 }
@@ -71,13 +83,16 @@ fun RichRecommendationSection(
 @Composable
 private fun RichRecommendationSetBlock(
     set: RichRecommendationSet,
-    responseSpacing: ResponseSpacing
+    responseSpacing: ResponseSpacing,
+    imageUrls: Map<String, String>,
+    missingQueries: Set<String>,
+    onImagesNeeded: (List<String>) -> Unit
 ) {
     Column(Modifier.fillMaxWidth()) {
         if (set.title.isNotBlank()) {
             Text(
                 text = set.title,
-                style = MaterialTheme.typography.headlineSmall,
+                style = MaterialTheme.typography.headlineSmall.withSpacing(responseSpacing),
                 fontWeight = FontWeight.Bold
             )
         }
@@ -85,7 +100,7 @@ private fun RichRecommendationSetBlock(
             Spacer(Modifier.height(Spacing.sm))
             Text(
                 text = set.intro,
-                style = MaterialTheme.typography.bodyLarge.richSpacing(responseSpacing),
+                style = MaterialTheme.typography.bodyLarge.withSpacing(responseSpacing),
                 color = MaterialTheme.colorScheme.onSurface
             )
         }
@@ -94,7 +109,10 @@ private fun RichRecommendationSetBlock(
             RichItemRow(
                 item = item,
                 index = index + 1,
-                responseSpacing = responseSpacing
+                responseSpacing = responseSpacing,
+                imageUrls = imageUrls,
+                missingQueries = missingQueries,
+                onImagesNeeded = onImagesNeeded
             )
             if (index != set.items.lastIndex) {
                 HorizontalDivider(
@@ -110,14 +128,28 @@ private fun RichRecommendationSetBlock(
 private fun RichItemRow(
     item: RichItem,
     index: Int,
-    responseSpacing: ResponseSpacing
+    responseSpacing: ResponseSpacing,
+    imageUrls: Map<String, String>,
+    missingQueries: Set<String>,
+    onImagesNeeded: (List<String>) -> Unit
 ) {
+    val title = item.title.trim()
+    LaunchedEffect(title, imageUrls, missingQueries) {
+        if (title.isBlank() || !item.imageUrl.isNullOrBlank()) return@LaunchedEffect
+        if (imageUrls[title].isNullOrBlank() && ImageQuery.key(title) !in missingQueries) {
+            onImagesNeeded(listOf(title))
+        }
+    }
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(Spacing.md),
         verticalAlignment = Alignment.Top
     ) {
-        RichItemThumbnail(item)
+        RichItemThumbnail(
+            item = item,
+            imageUrls = imageUrls,
+            missingQueries = missingQueries
+        )
         Column(Modifier.weight(1f)) {
             item.badge?.takeIf { it.isNotBlank() }?.let { badge ->
                 RichBadge(badge)
@@ -162,7 +194,7 @@ private fun RichItemRow(
                 Spacer(Modifier.height(Spacing.sm))
                 Text(
                     text = description,
-                    style = MaterialTheme.typography.bodyMedium.richSpacing(responseSpacing),
+                    style = MaterialTheme.typography.bodyMedium.withSpacing(responseSpacing),
                     color = MaterialTheme.colorScheme.onSurface
                 )
             }
@@ -185,7 +217,7 @@ private fun RichItemRow(
                                     }
                                     append(": ${detail.value}")
                                 },
-                                style = MaterialTheme.typography.bodyMedium.richSpacing(responseSpacing),
+                                style = MaterialTheme.typography.bodyMedium.withSpacing(responseSpacing),
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                         }
@@ -216,45 +248,27 @@ private fun RichItemRow(
 }
 
 @Composable
-private fun RichItemThumbnail(item: RichItem) {
-    val shape = RoundedCornerShape(14.dp)
-    val placeholder: @Composable () -> Unit = {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(126.dp)
-                .background(
-                    MaterialTheme.colorScheme.surfaceVariant,
-                    shape
-                ),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                Icons.Outlined.Image,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                modifier = Modifier.size(30.dp)
-            )
-        }
-    }
-
+private fun RichItemThumbnail(
+    item: RichItem,
+    imageUrls: Map<String, String>,
+    missingQueries: Set<String>
+) {
     Box(
         Modifier
             .width(92.dp)
             .height(126.dp)
-            .clip(shape)
+            .clip(RoundedCornerShape(14.dp))
     ) {
-        // The placeholder sits underneath the image, so a failed/loading
-        // remote poster still leaves a clean tile instead of a blank hole.
-        placeholder()
-        if (!item.imageUrl.isNullOrBlank()) {
-            AsyncImage(
-                model = item.imageUrl,
-                contentDescription = item.title,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.matchParentSize()
-            )
-        }
+        SmartEntityImage(
+            imageUrl = item.imageUrl,
+            imageQuery = null,
+            fallbackQuery = item.title,
+            resolvedUrls = imageUrls,
+            missingQueries = missingQueries,
+            contentDescription = item.title,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier.matchParentSize()
+        )
     }
 }
 
@@ -304,13 +318,25 @@ private fun RichActionLink(label: String, url: String) {
     }
 }
 
-private fun TextStyle.richSpacing(spacing: ResponseSpacing): TextStyle {
+/**
+ * Line spacing only. Trimming is disabled so the extra leading is visible on
+ * the first and last line too — otherwise the setting looks like it does
+ * nothing.
+ */
+private fun TextStyle.withSpacing(spacing: ResponseSpacing): TextStyle {
     val base = lineHeight
-    return if (base != TextUnit.Unspecified) {
-        copy(lineHeight = (base.value * spacing.lineHeightScale).sp)
+    val scaled = if (base != TextUnit.Unspecified) {
+        (base.value * spacing.lineHeightScale).sp
     } else {
-        this
+        (fontSize.value * 1.5f * spacing.lineHeightScale).sp
     }
+    return copy(
+        lineHeight = scaled,
+        lineHeightStyle = LineHeightStyle(
+            alignment = LineHeightStyle.Alignment.Center,
+            trim = LineHeightStyle.Trim.None
+        )
+    )
 }
 
 @Composable

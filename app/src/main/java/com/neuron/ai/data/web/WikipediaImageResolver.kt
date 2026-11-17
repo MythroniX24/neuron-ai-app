@@ -1,8 +1,13 @@
 package com.neuron.ai.data.web
 
 import com.neuron.ai.core.coroutines.DispatcherProvider
+import com.neuron.ai.core.diagnostics.DiagnosticsLog
 import com.neuron.ai.core.log.Logger
 import com.neuron.ai.core.web.EntityImageResolver
+import com.neuron.ai.core.web.ImageQuery
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -14,22 +19,36 @@ import okhttp3.Request
 import okhttp3.OkHttpClient
 import java.util.concurrent.TimeUnit
 
+/** Counters the Debug console shows for the card-image pipeline. */
+data class ImageResolutionStats(
+    val lookups: Int = 0,
+    val resolved: Int = 0,
+    val misses: Int = 0,
+    val failures: Int = 0
+) {
+    val summary: String
+        get() = "$resolved resolved / $misses empty / $failures failed of $lookups lookups"
+}
+
 /**
- * Keyless image lookup for comparison cards.
+ * Keyless image lookup for comparison and recommendation cards.
  *
- * Wikipedia's public REST/action API is the source: it needs no account or
- * key, answers with a stable thumbnail URL for products, phones, apps, models
- * and places, and sends `https` links. Nothing is invented — if the lookup
- * misses, the caller renders the neutral fallback icon.
+ * Wikipedia's public action API is the source: it needs no account or key,
+ * answers with a stable thumbnail URL for products, phones, apps, models and
+ * places, and sends `https` links. Nothing is invented — if the lookup misses,
+ * the caller renders the neutral fallback tile.
  *
- * Bounded on purpose: one request per query, small JSON response, 8 s
- * timeout, and a TTL cache so scrolling a chat never re-hits the network.
- * Runs entirely from the user's own device/network, like web search.
+ * The model's phrase is often too descriptive for an encyclopedia ("Motorola
+ * mid-range smartphone (2024)"), so [ImageQuery] tries the full phrase first
+ * and then progressively simpler variants. Each variant costs at most one
+ * request, results are cached for six hours, and every attempt is recorded in
+ * the diagnostics feed so a permanent placeholder is explainable.
  */
 class WikipediaImageResolver(
     dispatchers: DispatcherProvider,
     private val logger: Logger? = null,
-    httpClient: OkHttpClient? = null
+    httpClient: OkHttpClient? = null,
+    private val diagnostics: DiagnosticsLog? = null
 ) : EntityImageResolver {
 
     private val io = dispatchers.io
@@ -47,23 +66,55 @@ class WikipediaImageResolver(
             size > MAX_CACHE
     }
 
+    private val _stats = MutableStateFlow(ImageResolutionStats())
+    val stats: StateFlow<ImageResolutionStats> = _stats.asStateFlow()
+
     override suspend fun resolve(query: String): String? = withContext(io) {
-        val key = query.trim().lowercase()
+        val key = ImageQuery.key(query)
         if (key.length < 2) return@withContext null
         synchronized(cache) {
             cache[key]?.let { entry ->
                 if (System.currentTimeMillis() - entry.atMs < TTL_MS) return@withContext entry.url
             }
         }
-        val url = runCatching { lookup(key) }
-            .onFailure { logger?.w("Images", "Image lookup failed for \"$query\"", it) }
-            .getOrNull()
-        synchronized(cache) {
-            cache[key] = CacheEntry(url, System.currentTimeMillis())
+        _stats.value = _stats.value.copy(lookups = _stats.value.lookups + 1)
+
+        var found: String? = null
+        var failed = false
+        for (variant in ImageQuery.variants(query)) {
+            val result = runCatching { lookup(variant) }
+            if (result.isFailure) {
+                failed = true
+                logger?.w("Images", "Image lookup failed for \"$variant\"", result.exceptionOrNull())
+            }
+            found = result.getOrNull()
+            if (!found.isNullOrBlank()) {
+                diagnostics?.log("IMAGE", "resolved \"$query\"", "via \"$variant\"")
+                break
+            }
         }
-        url
+
+        synchronized(cache) {
+            cache[key] = CacheEntry(found, System.currentTimeMillis())
+        }
+        _stats.value = _stats.value.let { current ->
+            when {
+                !found.isNullOrBlank() -> current.copy(resolved = current.resolved + 1)
+                failed -> current.copy(failures = current.failures + 1)
+                else -> current.copy(misses = current.misses + 1)
+            }
+        }
+        if (found.isNullOrBlank()) {
+            diagnostics?.log(
+                "IMAGE",
+                "no image for \"$query\"",
+                ImageQuery.variants(query).joinToString(" | ")
+            )
+        }
+        found
     }
 
+    /** One search request; [query] is already a simplified variant. */
     private fun lookup(query: String): String? {
         val httpUrl = runCatching {
             "https://en.wikipedia.org/w/api.php".toHttpUrl().newBuilder()
@@ -72,10 +123,10 @@ class WikipediaImageResolver(
                 .addQueryParameter("formatversion", "2")
                 .addQueryParameter("generator", "search")
                 .addQueryParameter("gsrsearch", query)
-                .addQueryParameter("gsrlimit", "1")
+                .addQueryParameter("gsrlimit", "2")
                 .addQueryParameter("prop", "pageimages")
                 .addQueryParameter("piprop", "thumbnail")
-                .addQueryParameter("pithumbsize", "512")
+                .addQueryParameter("pithumbsize", "640")
                 .build()
         }.getOrNull() ?: return null
 
@@ -126,6 +177,6 @@ class WikipediaImageResolver(
          * keeps requests from being throttled.
          */
         private const val USER_AGENT =
-            "NeuronAI/1.2 (Android; comparison-card image lookup)"
+            "NeuronAI/1.3 (Android; connector-and-card images)"
     }
 }

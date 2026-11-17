@@ -32,6 +32,7 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.LineHeightStyle
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -58,27 +59,37 @@ fun MarkdownText(
         blocks.forEachIndexed { index, block ->
             BlockView(block, spacing)
             if (index != blocks.lastIndex) {
-                Spacer(Modifier.height(Spacing.sm * blockSpacing(block, spacing).blockGapScale))
+                // The paragraph-gap choice is its own setting: it never rides
+                // along with the line-spacing choice.
+                Spacer(Modifier.height(Spacing.sm * spacing.gap.blockGapScale))
             }
         }
     }
 }
 
-/** Lists and prose can choose different density for their surrounding gap. */
-private fun blockSpacing(
-    block: MdBlock,
-    spacing: ReplySpacingProfile
-): ResponseSpacing = if (block is MdBlock.ListBlock) spacing.list else spacing.paragraph
-
-/** Scales a design-system style's existing line height, never its font size. */
+/**
+ * Scales a design-system style's line height (never its font size) and pins
+ * [LineHeightStyle] so the extra leading is actually visible. Without it the
+ * first/last line's leading is trimmed and "line spacing" appears to do
+ * nothing — which is exactly how it read before.
+ */
 private fun TextStyle.withResponseSpacing(spacing: ResponseSpacing): TextStyle {
     val base = lineHeight
-    return if (base != TextUnit.Unspecified) {
-        copy(lineHeight = (base.value * spacing.lineHeightScale).sp)
+    val scaled = if (base != TextUnit.Unspecified) {
+        (base.value * spacing.lineHeightScale).sp
     } else {
-        this
+        (fontSize.value * DEFAULT_LINE_HEIGHT_RATIO * spacing.lineHeightScale).sp
     }
+    return copy(
+        lineHeight = scaled,
+        lineHeightStyle = LineHeightStyle(
+            alignment = LineHeightStyle.Alignment.Center,
+            trim = LineHeightStyle.Trim.None
+        )
+    )
 }
+
+private const val DEFAULT_LINE_HEIGHT_RATIO = 1.5f
 
 @Composable
 private fun BlockView(block: MdBlock, spacing: ReplySpacingProfile) {
