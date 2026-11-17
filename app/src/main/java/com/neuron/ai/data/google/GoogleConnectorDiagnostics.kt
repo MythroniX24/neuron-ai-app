@@ -40,9 +40,26 @@ class GoogleConnectorDiagnostics(
         val backendUrl: String,
         val accounts: List<AccountReport>,
         val lastSignInError: String?,
+        /** Last failure while linking/disconnecting an account (Worker side included). */
+        val lastConnectError: String?,
+        /** Last raw Worker rejection, e.g. HTTP 400 [exchange_failed]. */
+        val lastBackendError: String?,
         val permissions: List<Pair<String, String>>,
         val requestedScopes: List<String>
     )
+
+    /** Last connect/disconnect failure, recorded by the connectors screen. */
+    @Volatile
+    var lastConnectFailure: String? = null
+        private set
+
+    fun recordConnectFailure(stage: String, message: String) {
+        lastConnectFailure = "$stage: $message".take(400)
+    }
+
+    fun clearConnectFailure() {
+        lastConnectFailure = null
+    }
 
     fun snapshot(): Snapshot = Snapshot(
         configured = helper.configured && backend.configured,
@@ -51,6 +68,8 @@ class GoogleConnectorDiagnostics(
         backendUrl = backend.baseUrl.ifBlank { "(missing)" },
         accounts = repository.accounts.value.map { it.report() },
         lastSignInError = helper.lastError,
+        lastConnectError = lastConnectFailure,
+        lastBackendError = backend.lastFailure,
         permissions = GoogleScopes.LABELS,
         requestedScopes = GoogleScopes.ALL
     )

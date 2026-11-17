@@ -116,7 +116,17 @@ fun ConnectedAppsScreen(
     ) { result ->
         val data = result.data
         if (result.resultCode != Activity.RESULT_OK || data == null) {
-            viewModel.report("Google sign-in was cancelled.")
+            // A consent screen that closes itself ("problem communicating with
+            // Google servers") also arrives as RESULT_CANCELED — Google only
+            // reports the real code for a resolvable failure. Both are recorded
+            // as sign-in errors so the report shows the last thing that happened.
+            val sha1 = viewModel.signingSha1()
+            val text = "Google sign-in did not return a code (result ${result.resultCode}). " +
+                "If you did cancel, ignore this. Otherwise the Android OAuth client " +
+                "does not match this APK: add package ${viewModel.packageName()} with " +
+                "SHA-1 $sha1 to Google Cloud → Credentials → the Android client."
+            container.googleSignInHelper.noteFailure(text)
+            viewModel.report(text)
         } else {
             when (val consent = container.googleSignInHelper.resultFrom(data)) {
                 is GoogleConsent.Authorized -> viewModel.connect(consent.serverAuthCode, pendingService)
@@ -210,6 +220,40 @@ fun ConnectedAppsScreen(
                     body = text,
                     isError = messageIsError
                 )
+                if (messageIsError) {
+                    // The signing fingerprint is the single fact Google needs;
+                    // keep it next to the failure instead of hiding it in the
+                    // diagnostics card.
+                    val snapshot = viewModel.diagnosticsSnapshot()
+                    Spacer(Modifier.height(Spacing.sm))
+                    Surface(
+                        shape = RoundedCornerShape(14.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
+                    ) {
+                        Column(Modifier.padding(Spacing.md)) {
+                            Text(
+                                text = "APK Google must match",
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                text = "package: ${snapshot.build.packageName}\n" +
+                                    "SHA-1: ${snapshot.build.signingSha1 ?: "unavailable"}",
+                                style = MaterialTheme.typography.bodySmall.copy(
+                                    fontFamily = FontFamily.Monospace,
+                                    fontSize = 11.sp
+                                )
+                            )
+                            OutlinedButton(
+                                onClick = {
+                                    clipboard.setText(AnnotatedString(viewModel.diagnosticsText()))
+                                },
+                                modifier = Modifier.padding(top = Spacing.sm)
+                            ) { Text("Copy full report") }
+                        }
+                    }
+                }
             }
 
             Spacer(Modifier.height(Spacing.lg))
@@ -532,7 +576,13 @@ private fun DiagnosticsCard(
                     DiagLine("Configured", if (snapshot.configured) "yes" else "NO")
                     DiagLine("Accounts", snapshot.accounts.size.toString())
                     snapshot.lastSignInError?.let { error ->
-                        DiagLine("Last error", error, error = true)
+                        DiagLine("Last sign-in error", error, error = true)
+                    }
+                    snapshot.lastConnectError?.let { error ->
+                        DiagLine("Last connect error", error, error = true)
+                    }
+                    snapshot.lastBackendError?.let { error ->
+                        DiagLine("Last backend error", error, error = true)
                     }
 
                     Spacer(Modifier.height(Spacing.sm))
@@ -599,9 +649,10 @@ private fun DiagLine(
     }
 }
 
+/** Official product logos (downloaded brand PNGs), not hand-drawn vectors. */
 private fun GoogleService.iconRes(): Int = when (this) {
-    GoogleService.GMAIL -> R.drawable.ic_gmail
-    GoogleService.DRIVE -> R.drawable.ic_google_drive
-    GoogleService.DOCS -> R.drawable.ic_google_docs
-    GoogleService.SHEETS -> R.drawable.ic_google_sheets
+    GoogleService.GMAIL -> R.drawable.ic_brand_gmail
+    GoogleService.DRIVE -> R.drawable.ic_brand_drive
+    GoogleService.DOCS -> R.drawable.ic_brand_docs
+    GoogleService.SHEETS -> R.drawable.ic_brand_sheets
 }

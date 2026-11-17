@@ -474,19 +474,21 @@ Design rules:
 - Reply spacing: `ResponseSpacing` presets (compact / comfortable / relaxed /
   airy). Line spacing and paragraph gap are **separate** values:
   `ReplySpacingProfile(paragraph, list, gap)` scales line height for prose and
-  lists while `gap` scales only the space between blocks. The user sets both
-  defaults in Settings → Reply layout (persisted in DataStore); the model can
-  still override line spacing through `ui.reply_spacing`, and every message
-  stores the effective values in metadata. Line heights are applied with
+  lists while `gap` scales only the space between blocks. There is **no
+  user-facing spacing setting**: the model chooses paragraph, list and gap
+  values per reply through `ui.reply_spacing`, and every message stores the
+  effective values in metadata. Line heights are applied with
   `LineHeightStyle(trim = None)` so the extra leading is visible on the first
   and last line as well.
 - Connectors UI: `ConnectedAppsScreen` is built per service (Gmail, Drive,
   Docs, Sheets) — each card has its own brand icon, its own connect button and
   the accounts that can use it, several accounts per service, and
   confirmation before a disconnect. `GoogleService.requestScopes()` asks only
-  for that service plus whatever the install already holds. A diagnostics card
-  shows the installed APK's signing SHA-1 (the Android OAuth client must match
-  it), the web client and backend in use, the last Google status code and a
+  for that service plus whatever the install already holds. Service cards use
+  the official Gmail/Drive/Docs/Sheets brand PNGs. A diagnostics card shows the
+  installed APK's signing SHA-1 (the Android OAuth client must match it), the
+  web client and backend in use, the last sign-in error, the last connect
+  failure, the last Worker rejection and a
   live backend probe; the same facts appear in the Debug console together with
   the in-app `DiagnosticsLog` feed and image counters.
 

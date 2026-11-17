@@ -12,9 +12,10 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
 /**
- * Lets the model control how airy its own reply looks instead of asking the
- * user to tune a global text setting. Paragraphs and lists are independent:
- * a dense list can stay compact while the explanation around it breathes.
+ * Lets the model control how airy its own reply looks — there is no
+ * user-facing spacing setting. Paragraphs and lists are independent: a dense
+ * list can stay compact while the explanation around it breathes, and the gap
+ * between blocks is chosen separately from the line height inside them.
  * The validated profile is emitted as an
  * [com.neuron.ai.core.agent.AgentEvent.ReplySpacing] event and stored on the
  * assistant message.
@@ -24,10 +25,11 @@ class ReplySpacingTool : Tool {
     override val id = TOOL_ID
     override val title = "Adjusting reply spacing"
     override val description =
-        "Choose line spacing separately for prose paragraphs and lists so the reply " +
-            "reads cleanly. Call once per answer before the final text: compact for " +
-            "dense lists and short facts, comfortable for normal chat, relaxed for " +
-            "explanations, airy for long walkthroughs. Do not mention this tool to the user."
+        "Choose line spacing separately for prose paragraphs and lists, plus the gap " +
+            "between blocks, so the reply reads cleanly. Call once per answer before the " +
+            "final text: compact for dense lists and short facts, comfortable for normal " +
+            "chat, relaxed for explanations, airy for long walkthroughs. Do not mention " +
+            "this tool to the user."
     override val requiredCapabilities: Set<Capability> = emptySet()
     override val riskLevel = RiskLevel.SAFE
     override val timeoutMs = 10_000L
@@ -45,6 +47,11 @@ class ReplySpacingTool : Tool {
               "type": "string",
               "enum": ["compact", "comfortable", "relaxed", "airy"],
               "description": "Line spacing inside bullet and numbered lists"
+            },
+            "gap": {
+              "type": "string",
+              "enum": ["compact", "comfortable", "relaxed", "airy"],
+              "description": "Air between separate paragraphs and blocks"
             }
           },
           "required": ["paragraph", "list"]
@@ -59,7 +66,8 @@ class ReplySpacingTool : Tool {
             )
         return ToolResult.Success(
             "Reply spacing set: paragraphs ${profile.paragraph.label.lowercase()}, " +
-                "lists ${profile.list.label.lowercase()}. The UI applies these to the " +
+                "lists ${profile.list.label.lowercase()}, block gap " +
+                "${profile.gap.label.lowercase()}. The UI applies these to the " +
                 "matching blocks. Continue with the final response and do not mention this tool."
         )
     }
@@ -78,16 +86,19 @@ class ReplySpacingTool : Tool {
             val legacy = nameOf(obj, "spacing")
             val paragraph = nameOf(obj, "paragraph") ?: legacy
             val list = nameOf(obj, "list") ?: legacy
+            val gap = nameOf(obj, "gap")
             // An invalid explicit value must fail instead of silently
             // falling back and hiding the model's mistake.
             if (obj["paragraph"] != null && nameOf(obj, "paragraph") == null) return null
             if (obj["list"] != null && nameOf(obj, "list") == null) return null
+            if (obj["gap"] != null && gap == null) return null
             if (obj["spacing"] != null && legacy == null) return null
             if (paragraph == null && list == null) return null
             return ReplySpacingProfile.fromNames(
                 paragraph = paragraph,
                 list = list,
-                legacy = legacy
+                legacy = legacy,
+                gap = gap
             )
         }
 

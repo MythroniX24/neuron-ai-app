@@ -111,6 +111,16 @@ class GoogleSignInHelper(
         )
     }
 
+    /**
+     * Records a failure that happened outside this helper (e.g. the consent
+     * activity closed without a result) so the diagnostics report still shows
+     * the last thing that went wrong instead of "none".
+     */
+    fun noteFailure(message: String) {
+        lastError = message
+        diagnostics?.log("GOOGLE", "consent failed", message)
+    }
+
     /** Short web client id for the Debug console ("…us7"). */
     fun maskedWebClientId(): String {
         if (webClientId.isBlank()) return "(missing)"

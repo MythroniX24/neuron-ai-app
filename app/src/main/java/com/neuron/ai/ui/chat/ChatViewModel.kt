@@ -227,26 +227,6 @@ class ChatViewModel(
     private val _liveReplySpacing = MutableStateFlow(ReplySpacingProfile())
     val liveReplySpacing: StateFlow<ReplySpacingProfile> = _liveReplySpacing.asStateFlow()
 
-    /**
-     * The user's own reply-layout choice, used whenever the AI does not pick
-     * one. Line spacing and paragraph spacing are tracked separately so a
-     * message never inherits one where the other was set.
-     */
-    private var userSpacing = ReplySpacingProfile()
-
-    init {
-        val settingsRef = settings
-        if (settingsRef != null) {
-            viewModelScope.launch {
-                kotlinx.coroutines.flow.combine(
-                    settingsRef.replyLineSpacing,
-                    settingsRef.replyParagraphSpacing
-                ) { line, gap -> line to gap }.collect { (line, gap) ->
-                    userSpacing = ReplySpacingProfile(paragraph = line, list = line, gap = gap)
-                }
-            }
-        }
-    }
 
     /** Wall-clock time of the ACTIVE turn; the timer label reads this. */
     private val _turnElapsedMs = MutableStateFlow(0L)
@@ -1053,7 +1033,7 @@ class ChatViewModel(
         _timeline.value = emptyList()
         _liveRichRecommendations.value = emptyList()
         _liveComparisonBlocks.value = emptyList()
-        _liveReplySpacing.value = userSpacing
+        _liveReplySpacing.value = ReplySpacingProfile()
         // The routing resolution is the FIRST timeline row: which model runs,
         // with what capabilities, and what was degraded (incl. live thermal
         // throttle). It persists with the answer, so the transcript explains
@@ -1189,14 +1169,12 @@ class ChatViewModel(
                         }
 
                         is AgentEvent.ReplySpacing -> {
-                            // The AI picks line spacing; the paragraph gap stays
-                            // the user's own setting unless the reply stored one.
+                            // Spacing is the AI's decision, per reply and per
+                            // block kind; the user never tunes it.
                             _liveReplySpacing.value = ReplySpacingProfile.fromNames(
                                 paragraph = event.paragraph,
                                 list = event.list,
-                                gap = userSpacing.gap.name,
-                                defaultLine = userSpacing.paragraph,
-                                defaultGap = userSpacing.gap
+                                gap = event.gap
                             )
                         }
 
@@ -1346,7 +1324,7 @@ class ChatViewModel(
                 _activity.value = emptyList()
                 _liveRichRecommendations.value = emptyList()
                 _liveComparisonBlocks.value = emptyList()
-                _liveReplySpacing.value = userSpacing
+                _liveReplySpacing.value = ReplySpacingProfile()
             }
             throw cancelled
         }
@@ -1391,7 +1369,7 @@ class ChatViewModel(
         _activity.value = emptyList()
         _liveRichRecommendations.value = emptyList()
         _liveComparisonBlocks.value = emptyList()
-        _liveReplySpacing.value = userSpacing
+        _liveReplySpacing.value = finishedSpacing
         // Keep the finished timeline visible until the next turn begins.
         if (_generation.value is GenerationState.Streaming) {
             _generation.value = GenerationState.Idle

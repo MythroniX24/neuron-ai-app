@@ -579,7 +579,8 @@ class ToolUsingAgent(
                             send(
                                 AgentEvent.ReplySpacing(
                                     paragraph = profile.paragraph.name,
-                                    list = profile.list.name
+                                    list = profile.list.name,
+                                    gap = profile.gap.name
                                 )
                             )
                         }

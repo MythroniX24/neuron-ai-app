@@ -108,7 +108,9 @@ sealed class AgentEvent {
      */
     data class ReplySpacing(
         val paragraph: String,
-        val list: String
+        val list: String,
+        /** Air between blocks; null keeps the renderer default. */
+        val gap: String? = null
     ) : AgentEvent()
 
     data class TextDelta(val text: String) : AgentEvent()

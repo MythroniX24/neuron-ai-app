@@ -1,11 +1,8 @@
 package com.neuron.ai.ui.settings
 
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -16,7 +13,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -29,11 +25,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.neuron.ai.core.settings.ResponseSpacing
 import com.neuron.ai.core.settings.ThemeMode
 import com.neuron.ai.di.AppContainer
 import com.neuron.ai.ui.components.BrandMark
@@ -58,8 +51,6 @@ fun SettingsScreen(
     val themeMode by viewModel.themeMode.collectAsStateWithLifecycle()
     val memoryEntries by viewModel.memoryEntries.collectAsStateWithLifecycle()
     val memoryEnabled by viewModel.memoryEnabled.collectAsStateWithLifecycle()
-    val lineSpacing by viewModel.replyLineSpacing.collectAsStateWithLifecycle()
-    val paragraphSpacing by viewModel.replyParagraphSpacing.collectAsStateWithLifecycle()
 
     Column(
         modifier = Modifier
@@ -111,47 +102,6 @@ fun SettingsScreen(
                     )
                 }
             }
-
-            HorizontalDivider(modifier = Modifier.padding(vertical = Spacing.lg))
-
-            // ---- Reply layout: line spacing and paragraph spacing separately --
-            Text(
-                text = "Reply layout",
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onSurface
-            )
-            Text(
-                text = "Line spacing controls the gap between lines of one paragraph; " +
-                    "paragraph spacing controls the gap between paragraphs. They are " +
-                    "independent, and the AI can still pick per answer.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = Spacing.xs)
-            )
-
-            Text(
-                text = "Line spacing",
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.onSurface,
-                modifier = Modifier.padding(top = Spacing.md)
-            )
-            SpacingChips(
-                selected = lineSpacing,
-                onSelect = { viewModel.setReplyLineSpacing(it) }
-            )
-
-            Text(
-                text = "Paragraph spacing",
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.onSurface,
-                modifier = Modifier.padding(top = Spacing.md)
-            )
-            SpacingChips(
-                selected = paragraphSpacing,
-                onSelect = { viewModel.setReplyParagraphSpacing(it) }
-            )
-
-            SpacingPreview(lineSpacing, paragraphSpacing)
 
             HorizontalDivider(modifier = Modifier.padding(vertical = Spacing.lg))
 
@@ -292,54 +242,6 @@ fun SettingsScreen(
                     )
                 }
             }
-        }
-    }
-}
-
-@Composable
-private fun SpacingChips(
-    selected: ResponseSpacing,
-    onSelect: (ResponseSpacing) -> Unit
-) {
-    Row(
-        horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
-        modifier = Modifier
-            .horizontalScroll(rememberScrollState())
-            .padding(top = Spacing.xs)
-    ) {
-        ResponseSpacing.entries.forEach { option ->
-            FilterChip(
-                selected = option == selected,
-                onClick = { onSelect(option) },
-                label = { Text(option.label) }
-            )
-        }
-    }
-}
-
-/** Small live sample so the two sliders are visibly independent. */
-@Composable
-private fun SpacingPreview(line: ResponseSpacing, paragraph: ResponseSpacing) {
-    androidx.compose.material3.Surface(
-        shape = androidx.compose.foundation.shape.RoundedCornerShape(14.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
-        modifier = Modifier.padding(top = Spacing.md)
-    ) {
-        Column(Modifier.padding(Spacing.md)) {
-            Text(
-                text = "Line spacing sample: Neuron keeps one chat for coding, browsing " +
-                    "and files, so nothing is scattered across separate runtimes.",
-                style = MaterialTheme.typography.bodyLarge.copy(
-                    lineHeight = (24f * line.lineHeightScale).sp
-                )
-            )
-            Spacer(Modifier.height((10f * paragraph.blockGapScale).dp))
-            Text(
-                text = "This second paragraph sits after the paragraph gap you picked.",
-                style = MaterialTheme.typography.bodyLarge.copy(
-                    lineHeight = (24f * line.lineHeightScale).sp
-                )
-            )
         }
     }
 }

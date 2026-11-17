@@ -52,6 +52,11 @@ class ConnectedAppsViewModel(
     /** Current read-only diagnostics snapshot (rebuilds on every call). */
     fun diagnosticsSnapshot(): GoogleConnectorDiagnostics.Snapshot = diagnostics.snapshot()
 
+    /** Package + signing fingerprint of the APK Google must match. */
+    fun packageName(): String = diagnosticsSnapshot().build.packageName
+
+    fun signingSha1(): String = diagnosticsSnapshot().build.signingSha1 ?: "unavailable"
+
     fun markStarting(service: GoogleService) {
         _busy.value = true
         _busyService.value = service
@@ -78,12 +83,20 @@ class ConnectedAppsViewModel(
             _busy.value = false
             _busyService.value = null
             _messageIsError.value = result.isFailure
+            if (result.isSuccess) diagnostics.clearConnectFailure()
             _message.value = result.fold(
                 onSuccess = { account ->
                     val what = service?.label?.let { "$it connected" } ?: "Connected"
                     "$what — ${account.label}."
                 },
-                onFailure = { it.message ?: "Google connection failed." }
+                onFailure = { error ->
+                    val text = error.message ?: "Google connection failed."
+                    diagnostics.recordConnectFailure(
+                        "Linking ${service?.label ?: "account"}",
+                        text
+                    )
+                    text
+                }
             )
         }
     }
@@ -96,7 +109,11 @@ class ConnectedAppsViewModel(
             _messageIsError.value = result.isFailure
             _message.value = result.fold(
                 onSuccess = { "Google account disconnected." },
-                onFailure = { it.message ?: "Could not disconnect the account." }
+                onFailure = { error ->
+                    val text = error.message ?: "Could not disconnect the account."
+                    diagnostics.recordConnectFailure("Disconnecting", text)
+                    text
+                }
             )
         }
     }
@@ -105,8 +122,10 @@ class ConnectedAppsViewModel(
         viewModelScope.launch(dispatchers.io) {
             _busy.value = true
             repository.syncAccounts().onFailure {
+                val text = it.message ?: "Could not refresh the account list."
+                diagnostics.recordConnectFailure("Refreshing accounts", text)
                 _messageIsError.value = true
-                _message.value = it.message ?: "Could not refresh the account list."
+                _message.value = text
             }
             _busy.value = false
         }
@@ -138,6 +157,8 @@ class ConnectedAppsViewModel(
             appendLine("web client: ${snapshot.webClientId}")
             appendLine("backend: ${snapshot.backendUrl}")
             appendLine("last sign-in error: ${snapshot.lastSignInError ?: "none"}")
+            appendLine("last connect error: ${snapshot.lastConnectError ?: "none"}")
+            appendLine("last backend error: ${snapshot.lastBackendError ?: "none"}")
             _health.value?.let { health ->
                 appendLine("backend probe: ${health.status} in ${health.latencyMs}ms — ${health.detail}")
             }

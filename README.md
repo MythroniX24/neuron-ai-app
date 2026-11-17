@@ -69,7 +69,7 @@ schema; no tool logic lives in the UI.
 | Browser | `browser.open`, `browser.read`, `browser.find`, `browser.links`, `browser.click`, `browser.type`, `browser.select` |
 | Terminal & code | `terminal.run`, `code.edit`, `code.patch`, `code.diff`, `code.build`, `code.test` |
 | Memory | `memory.remember`, `memory.recall`, `memory.forget` |
-| Presentation | `ui.rich_items` (native recommendation cards), `ui.compare` (native comparison surfaces), `ui.reply_spacing` (AI-chosen line spacing for prose and lists) |
+| Presentation | `ui.rich_items` (native recommendation cards), `ui.compare` (native comparison surfaces), `ui.reply_spacing` (AI-chosen line spacing for prose and lists, plus the paragraph gap — no user spacing setting) |
 
 The tool loop alternates freely between reasoning, tool calls and short progress
 notes, with a 24-step budget, per-sub-problem retry limits, and a system prompt

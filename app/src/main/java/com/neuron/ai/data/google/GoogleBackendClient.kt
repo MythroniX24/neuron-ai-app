@@ -87,6 +87,11 @@ class GoogleBackendClient(
 
     val configured: Boolean get() = root.isNotBlank()
 
+    /** Last HTTP/shape failure from the Worker, shown in the diagnostics report. */
+    @Volatile
+    var lastFailure: String? = null
+        private set
+
     private fun requireConfigured() {
         if (!configured) {
             throw GoogleConnectorException(
@@ -110,13 +115,20 @@ class GoogleBackendClient(
             }
         val reauth = key == "reauth_required" || (code == 401 && key != "unauthorized")
         // The raw backend body is what explains a failed connect; keep it in
-        // the diagnostics feed (never in the chat reply).
+        // the diagnostics feed (never in the chat reply). The key (e.g.
+        // exchange_failed, no_refresh_token) is surfaced too, because the
+        // generic sentence alone does not say where it broke.
+        val detail = "HTTP $code" + (key?.let { " [$it]" } ?: "") + " — " + message
+        lastFailure = detail
         diagnostics?.log(
             "GOOGLE",
             "backend error HTTP $code",
             body.orEmpty().take(400).ifBlank { message }
         )
-        return GoogleConnectorException(message, reauthRequired = reauth)
+        return GoogleConnectorException(
+            if (key != null) "$message ($key)" else message,
+            reauthRequired = reauth
+        )
     }
 
     private suspend fun send(request: Request): String = withContext(dispatchers.io) {
@@ -130,6 +142,7 @@ class GoogleBackendClient(
                 "${elapsed}ms"
             )
             if (!response.isSuccessful) throw errorOf(response.code, body)
+            lastFailure = null
             body.orEmpty()
         }
     }

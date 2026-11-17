@@ -6,8 +6,6 @@ import androidx.lifecycle.viewModelScope
 import com.neuron.ai.core.coroutines.DispatcherProvider
 import com.neuron.ai.core.diagnostics.DiagnosticEntry
 import com.neuron.ai.core.diagnostics.DiagnosticsLog
-import com.neuron.ai.core.settings.ResponseSpacing
-import com.neuron.ai.core.settings.SettingsRepository
 import com.neuron.ai.data.google.BackendHealth
 import com.neuron.ai.data.google.GoogleConnectorDiagnostics
 import com.neuron.ai.data.local.GgufReader
@@ -39,7 +37,6 @@ import kotlinx.coroutines.withContext
 class DebugConsoleViewModel(
     private val repository: LocalModelRepository,
     private val dispatchers: DispatcherProvider,
-    private val settings: SettingsRepository? = null,
     private val googleDiagnostics: GoogleConnectorDiagnostics? = null,
     private val imageResolver: WikipediaImageResolver? = null,
     private val diagnostics: DiagnosticsLog? = null
@@ -72,7 +69,9 @@ class DebugConsoleViewModel(
         val backendUrl: String,
         val signingSha1: String?,
         val accounts: List<GoogleConnectorDiagnostics.AccountReport>,
-        val lastSignInError: String?
+        val lastSignInError: String?,
+        val lastConnectError: String?,
+        val lastBackendError: String?
     )
 
     data class DebugSnapshot(
@@ -98,10 +97,6 @@ class DebugConsoleViewModel(
         val connector: ConnectorReport? = null,
         /** Card-image pipeline counters. */
         val imageStats: ImageResolutionStats? = null,
-        /** Default line spacing the user picked. */
-        val lineSpacing: ResponseSpacing = ResponseSpacing.COMFORTABLE,
-        /** Default paragraph gap the user picked (independent of line spacing). */
-        val paragraphSpacing: ResponseSpacing = ResponseSpacing.COMFORTABLE,
         /** Newest-last in-app diagnostics feed. */
         val diagnosticEntries: List<DiagnosticEntry> = emptyList()
     )
@@ -166,16 +161,12 @@ class DebugConsoleViewModel(
                     backendUrl = snapshot.backendUrl,
                     signingSha1 = snapshot.build.signingSha1,
                     accounts = snapshot.accounts,
-                    lastSignInError = snapshot.lastSignInError
+                    lastSignInError = snapshot.lastSignInError,
+                    lastConnectError = snapshot.lastConnectError,
+                    lastBackendError = snapshot.lastBackendError
                 )
             },
             imageStats = imageResolver?.stats?.value,
-            lineSpacing = runCatching {
-                settings?.replyLineSpacing?.first() ?: ResponseSpacing.COMFORTABLE
-            }.getOrDefault(ResponseSpacing.COMFORTABLE),
-            paragraphSpacing = runCatching {
-                settings?.replyParagraphSpacing?.first() ?: ResponseSpacing.COMFORTABLE
-            }.getOrDefault(ResponseSpacing.COMFORTABLE),
             diagnosticEntries = diagnostics?.snapshot().orEmpty()
         )
     }
@@ -239,6 +230,8 @@ class DebugConsoleViewModel(
             appendLine("  backend: ${connector.backendUrl}")
             appendLine("  signing SHA-1: ${connector.signingSha1 ?: "unavailable"}")
             appendLine("  last sign-in error: ${connector.lastSignInError ?: "none"}")
+            appendLine("  last connect error: ${connector.lastConnectError ?: "none"}")
+            appendLine("  last backend error: ${connector.lastBackendError ?: "none"}")
             if (connector.accounts.isEmpty()) appendLine("  accounts: (none)")
             connector.accounts.forEach { account ->
                 appendLine(
@@ -255,7 +248,7 @@ class DebugConsoleViewModel(
             appendLine("Card images: ${stats.summary}")
         }
         appendLine()
-        appendLine("Reply layout: lines ${data.lineSpacing.label}, paragraph gap ${data.paragraphSpacing.label}")
+        appendLine("Reply spacing: chosen by the AI per reply (no user setting).")
         if (data.diagnosticEntries.isNotEmpty()) {
             appendLine()
             appendLine("Diagnostics log (newest last):")
@@ -289,7 +282,6 @@ class DebugConsoleViewModelFactory(
         DebugConsoleViewModel(
             repository = container.localModelRepository,
             dispatchers = container.dispatchers,
-            settings = container.settingsRepository,
             googleDiagnostics = container.googleConnectorDiagnostics,
             imageResolver = container.comparisonImageResolver,
             diagnostics = container.diagnostics

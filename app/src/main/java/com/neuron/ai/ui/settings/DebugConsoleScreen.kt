@@ -290,14 +290,13 @@ fun DebugConsoleScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
 
-            // ---- Reply layout: which spacing is actually in effect ------------
-            SectionTitle("Reply layout")
-            KeyValue("Line spacing", data.lineSpacing.label)
-            KeyValue("Paragraph spacing", data.paragraphSpacing.label)
+            // ---- Reply spacing: AI-controlled, per reply ----------------------
+            SectionTitle("Reply spacing")
             Text(
-                text = "Line spacing scales the height of each line; paragraph spacing " +
-                    "scales the gap between blocks. They are stored separately and the " +
-                    "AI can choose per answer.",
+                text = "Line spacing, list spacing and the gap between paragraphs are " +
+                    "chosen by the AI for every reply (ui.reply_spacing) and stored on " +
+                    "that message. There is no user-facing spacing setting, so a reply " +
+                    "never inherits a global choice.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
