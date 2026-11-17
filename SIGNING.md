@@ -2,10 +2,10 @@
 
 Neuron-AI ships two kinds of APK from CI:
 
-| Artifact | Job | Installable? |
-|---|---|---|
-| `neuron-ai-debug-apk` | `build-debug` | yes, debug-signed (Play Protect warnings are more likely) |
-| `neuron-ai-release-apk` | `build-release` | yes **when the signing secrets exist**; otherwise built UNSIGNED and not installable |
+| Artifact | Job | Installable? | Signature |
+|---|---|---|---|
+| `neuron-ai-debug-apk` | `build-debug` | yes (debug build, Play Protect warnings are more likely) | the **release key** when the secrets below exist, otherwise the runner's debug key |
+| `neuron-ai-release-apk` | `build-release` | yes **when the signing secrets exist**; otherwise built UNSIGNED and not installable | the release key |
 
 A **signed release APK** is the one to install: same app, properly signed, far
 fewer "app may be harmful" warnings during sideload. The **"Install unknown
@@ -51,14 +51,34 @@ Repo → **Settings → Secrets and variables → Actions → New repository sec
 | `NEURON_KEY_ALIAS` | `neuron` |
 | `NEURON_KEY_PASSWORD` | key password from step 1 |
 
-Nothing else needs configuring: `build-release` decodes the keystore into
-`$RUNNER_TEMP`, exports `NEURON_KEYSTORE_PATH`, and `app/build.gradle.kts` picks
-up all four variables.
+Nothing else needs configuring: `build-debug` and `build-release` both decode
+the keystore into `$RUNNER_TEMP`, export `NEURON_KEYSTORE_PATH`, and
+`app/build.gradle.kts` picks up all four variables (the debug build type uses
+the same key, see below).
+
+## Why both APKs use the release key
+
+Google Sign-In checks the running APK's **package name + signing certificate
+SHA-1** against the Android OAuth client. If that fingerprint changes, the
+Google Cloud entry silently stops matching and the consent flow comes back as a
+plain *cancel* (`result 0`, no authorization code) — which looks like a bug in
+the app but is a signing change.
+
+A CI debug build used to be signed by the runner's own `~/.android/debug.keystore`.
+That key is generated per runner and the `actions/cache` entry that pinned it can
+be evicted, so the SHA-1 changed between runs and a registered fingerprint went
+stale every time.
+
+Now, when the signing secrets exist, `build-debug` is signed with the same
+long-lived release key, so there is exactly **one** fingerprint to register and it
+never changes. `Report APK signing fingerprint` prints the SHA-1 that is really
+inside the APK (`apksigner verify --print-certs`) in the job summary. Without the
+secrets the workflow falls back to the cached debug keystore.
 
 ## 4. What happens on the next push
 
-1. `build-debug` runs `./gradlew testDebugUnitTest`, builds the debug APK and
-   uploads `neuron-ai-debug-apk`.
+1. `build-debug` runs `./gradlew testDebugUnitTest`, builds the debug APK,
+   prints its real signing SHA-1 and uploads `neuron-ai-debug-apk`.
 2. `build-release` runs `./gradlew assembleRelease` and uploads
    `neuron-ai-release-apk` — signed now that the secrets exist.
 3. Install the **release** APK from **Actions → android-ci → build-release**.

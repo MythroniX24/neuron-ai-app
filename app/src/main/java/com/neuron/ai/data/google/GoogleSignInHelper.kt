@@ -121,11 +121,15 @@ class GoogleSignInHelper(
         diagnostics?.log("GOOGLE", "consent failed", message)
     }
 
-    /** Short web client id for the Debug console ("…us7"). */
+    /**
+     * Enough of the web client id to identify the Cloud project in a report
+     * ("106446745670-velmqq3…") without pasting the whole id.
+     */
     fun maskedWebClientId(): String {
         if (webClientId.isBlank()) return "(missing)"
-        val tail = webClientId.takeLast(8)
-        return "…$tail"
+        val project = webClientId.substringBefore('-', "")
+        val local = webClientId.substringAfter('-', webClientId).take(7)
+        return if (project.isBlank()) "…$local" else "$project-$local…"
     }
 
     private fun fail(message: String): GoogleConsent.Failed {

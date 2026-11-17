@@ -5,6 +5,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -121,10 +122,19 @@ fun ConnectedAppsScreen(
             // reports the real code for a resolvable failure. Both are recorded
             // as sign-in errors so the report shows the last thing that happened.
             val sha1 = viewModel.signingSha1()
-            val text = "Google sign-in did not return a code (result ${result.resultCode}). " +
-                "If you did cancel, ignore this. Otherwise the Android OAuth client " +
-                "does not match this APK: add package ${viewModel.packageName()} with " +
-                "SHA-1 $sha1 to Google Cloud → Credentials → the Android client."
+            // Google reports a configuration failure as a plain cancel, so the
+            // message lists the checks in the order that actually causes it.
+            val text = "Google returned no authorization code (result " +
+                "${result.resultCode}). If you cancelled the dialog yourself, ignore this. " +
+                "Otherwise check, in order:\n\n" +
+                "1. Android OAuth client — Google Cloud → Credentials: an Android client " +
+                "for package ${viewModel.packageName()} with SHA-1 $sha1 (shown below).\n" +
+                "2. OAuth consent screen — Google Auth Platform → Audience: add this Google " +
+                "account as a test user while the app is in Testing, and list the Drive, " +
+                "Gmail, Docs and Sheets scopes under Data access.\n" +
+                "3. Google Play services: update it in the Play Store.\n" +
+                "4. Reinstall the latest APK — a different signing key is a different app " +
+                "to Google."
             container.googleSignInHelper.noteFailure(text)
             viewModel.report(text)
         } else {
@@ -307,7 +317,7 @@ private fun IntroCard(accountCount: Int) {
     ) {
         Column(Modifier.padding(Spacing.lg)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
+                Image(
                     painter = painterResource(R.drawable.ic_google_g),
                     contentDescription = null,
                     modifier = Modifier.size(26.dp)
@@ -361,7 +371,10 @@ private fun ServiceCard(
                         .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)),
                     contentAlignment = Alignment.Center
                 ) {
-                    Icon(
+                    // Image, not Icon: Material's Icon tints whatever painter it
+                    // is given with the current content colour, which flattens
+                    // the brand logo to one flat colour.
+                    Image(
                         painter = painterResource(service.iconRes()),
                         contentDescription = service.label,
                         modifier = Modifier.size(26.dp)
@@ -649,7 +662,11 @@ private fun DiagLine(
     }
 }
 
-/** Official product logos (downloaded brand PNGs), not hand-drawn vectors. */
+/**
+ * Official product logos (downloaded brand PNGs), not hand-drawn vectors.
+ * They carry their own colours, so they are drawn with [Image] — an `Icon`
+ * would tint them with `LocalContentColor` and the colour would disappear.
+ */
 private fun GoogleService.iconRes(): Int = when (this) {
     GoogleService.GMAIL -> R.drawable.ic_brand_gmail
     GoogleService.DRIVE -> R.drawable.ic_brand_drive

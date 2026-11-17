@@ -84,6 +84,24 @@ android {
     }
 
     buildTypes {
+        // CI signs the DEBUG artifact with the same key as the release build
+        // (the keystore arrives through env from GitHub Secrets). Google
+        // Sign-In matches the Android OAuth client on package name + the
+        // APK's signing SHA-1, and a per-runner debug key changes that SHA-1
+        // whenever the keystore cache misses — the registered fingerprint then
+        // goes stale and consent fails with result 0. One long-lived key keeps
+        // the fingerprint valid forever. Locally (no env) the normal debug
+        // keystore is used.
+        debug {
+            val ksPath = System.getenv("NEURON_KEYSTORE_PATH")
+            val ksPass = System.getenv("NEURON_KEYSTORE_PASSWORD")
+            val aliasEnv = System.getenv("NEURON_KEY_ALIAS")
+            val keyPass = System.getenv("NEURON_KEY_PASSWORD")
+            val stable = !ksPath.isNullOrEmpty() && File(ksPath).exists() &&
+                !ksPass.isNullOrEmpty() && !aliasEnv.isNullOrEmpty() &&
+                !keyPass.isNullOrEmpty()
+            if (stable) signingConfig = signingConfigs.getByName("release")
+        }
         release {
             isMinifyEnabled = false
             proguardFiles(

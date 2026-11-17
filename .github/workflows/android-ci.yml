@@ -34,15 +34,26 @@ jobs:
         uses: actions/checkout@v4
 
       # Google Sign-In matches the Android OAuth client on package name + the
-      # APK's signing certificate. A fresh runner generates a fresh debug
-      # keystore, so every CI debug APK used to have a different SHA-1 and
-      # consent failed with DEVELOPER_ERROR (10). Caching one keystore keeps
-      # the fingerprint stable so it can be registered once in Google Cloud.
+      # APK's signing certificate, so the fingerprint must not change between
+      # builds. `Decode signing keystore from secrets` below signs this APK with
+      # the same long-lived release key, which makes the SHA-1 permanent. The
+      # cached debug keystore is only the fallback for repos without the
+      # secrets: a fresh runner generates a fresh debug keystore, and cache
+      # eviction silently does the same, which is what kept changing the SHA-1.
       - name: Restore stable debug keystore
         uses: actions/cache@v4
         with:
           path: ~/.android/debug.keystore
           key: android-debug-keystore-v1
+
+      # Same signing material as the release job (GitHub Secrets only).
+      - name: Decode signing keystore from secrets
+        if: ${{ env.NEURON_KEYSTORE_B64 != '' }}
+        env:
+          NEURON_KEYSTORE_B64: ${{ secrets.NEURON_KEYSTORE_B64 }}
+        run: |
+          echo "$NEURON_KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/neuron-release.jks"
+          echo "NEURON_KEYSTORE_PATH=$RUNNER_TEMP/neuron-release.jks" >> "$GITHUB_ENV"
 
       # Vulkan GPU backend (milestone 5): ggml compiles its SPIR-V shaders
       # with glslc at build time. Ubuntu 24.04's shaderc-glslc 2023.8 lacks
@@ -77,28 +88,36 @@ jobs:
         run: ./gradlew testDebugUnitTest --stacktrace
 
       - name: Build debug APK
+        env:
+          NEURON_KEYSTORE_PASSWORD: ${{ secrets.NEURON_KEYSTORE_PASSWORD }}
+          NEURON_KEY_ALIAS: ${{ secrets.NEURON_KEY_ALIAS }}
+          NEURON_KEY_PASSWORD: ${{ secrets.NEURON_KEY_PASSWORD }}
         run: ./gradlew assembleDebug --stacktrace
 
       # The SHA-1 to paste into the Android OAuth client for com.neuron.ai.
-      - name: Report debug signing fingerprint
+      # Read from the built APK, not from a keystore file: apksigner reports
+      # what is actually inside the APK, which is what Google validates.
+      - name: Report APK signing fingerprint
         run: |
-          KEYSTORE="$HOME/.android/debug.keystore"
-          if [ ! -f "$KEYSTORE" ]; then
-            echo "No debug keystore found; skipping fingerprint."
+          APK=$(ls app/build/outputs/apk/debug/*.apk | head -1)
+          APKSIGNER=$(ls "$ANDROID_HOME"/build-tools/*/apksigner 2>/dev/null | sort -V | tail -1)
+          if [ -z "$APKSIGNER" ]; then
+            echo "No apksigner in the Android SDK; skipping fingerprint."
             exit 0
           fi
-          SHA1=$(keytool -list -v -keystore "$KEYSTORE" -storepass android \
-            -alias androiddebugkey | awk -F': ' '/SHA1:/{print $2; exit}')
-          SHA256=$(keytool -list -v -keystore "$KEYSTORE" -storepass android \
-            -alias androiddebugkey | awk -F': ' '/SHA256:/{print $2; exit}')
-          echo "Debug APK SHA-1: $SHA1"
+          CERTS=$("$APKSIGNER" verify --print-certs "$APK")
+          SHA1=$(printf '%s\n' "$CERTS" | awk -F': ' '/Signer #1 certificate SHA-1 digest:/{print $2; exit}')
+          SHA256=$(printf '%s\n' "$CERTS" | awk -F': ' '/Signer #1 certificate SHA-256 digest:/{print $2; exit}')
+          echo "APK: $(basename "$APK")"
+          echo "SHA-1:   $SHA1"
+          echo "SHA-256: $SHA256"
           {
-            echo "### Debug APK signing fingerprint"
+            echo "### APK signing fingerprint"
             echo '```'
             echo "SHA-1:   $SHA1"
             echo "SHA-256: $SHA256"
             echo '```'
-            echo "Register the SHA-1 in the Android OAuth client for com.neuron.ai, or Google Sign-In will answer DEVELOPER_ERROR (10)."
+            echo "Register this SHA-1 on the Android OAuth client for com.neuron.ai (Google Cloud → Credentials). Connected apps → Diagnostics shows the same value."
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload debug APK artifact
