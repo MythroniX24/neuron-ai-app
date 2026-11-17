@@ -36,6 +36,7 @@ object PermissionUiMapper {
         Capability.TERMINAL -> "Terminal access"
         Capability.NOTIFICATIONS -> "Notifications"
         Capability.MEMORY -> "Memory changes"
+        Capability.GOOGLE -> "Google account access"
     }
 }
 

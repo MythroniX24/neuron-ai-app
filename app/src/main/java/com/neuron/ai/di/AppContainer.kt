@@ -7,6 +7,7 @@ import com.neuron.ai.core.conversation.ConversationRepository
 import com.neuron.ai.core.coroutines.DefaultDispatcherProvider
 import com.neuron.ai.core.coroutines.DispatcherProvider
 import com.neuron.ai.core.integration.BrowserManager
+import com.neuron.ai.core.integration.google.GoogleConnectorRepository
 import com.neuron.ai.core.log.AndroidLogger
 import com.neuron.ai.core.log.Logger
 import com.neuron.ai.core.memory.MemoryStore
@@ -125,6 +126,33 @@ class AppContainer(context: Context) {
         ).also { it.restore() }
     }
 
+    // ---- Google connectors (Drive/Gmail/Sheets/Docs) -----------------------
+    //
+    // Every Google REST call runs on the connector Worker. The device holds
+    // only an opaque backend session token; the Google refresh token is
+    // encrypted on the backend and never reaches the app.
+    val googleBackendClient: com.neuron.ai.data.google.GoogleBackendClient by lazy {
+        com.neuron.ai.data.google.GoogleBackendClient(dispatchers)
+    }
+
+    val googleConnectorRepository: GoogleConnectorRepository by lazy {
+        com.neuron.ai.data.google.GoogleConnectorRepositoryImpl(
+            backend = googleBackendClient,
+            credentials = secureCredentials,
+            dispatchers = dispatchers,
+            logger = logger
+        )
+    }
+
+    /** Google consent helper: returns a server auth code, never a token. */
+    val googleSignInHelper: com.neuron.ai.data.google.GoogleSignInHelper by lazy {
+        com.neuron.ai.data.google.GoogleSignInHelper(context)
+    }
+
+    val googleTools: List<com.neuron.ai.core.agent.Tool> by lazy {
+        com.neuron.ai.data.tool.GoogleConnectorTools.all(googleConnectorRepository)
+    }
+
     val permissionManager: PermissionManager = SessionPermissionManager()
 
     val toolRegistry: ToolRegistry = InMemoryToolRegistry()
@@ -241,6 +269,11 @@ class AppContainer(context: Context) {
             // The model owns reply readability separately for prose and lists.
             toolRegistry.register(com.neuron.ai.data.tool.ReplySpacingTool())
             memoryTools.forEach { toolRegistry.register(it) }
+            // Google connectors. ELEVATED: Capability.GOOGLE is granted on
+            // demand, and the two destructive actions re-prompt every time.
+            googleTools.forEach { toolRegistry.register(it) }
+            // Refresh the linked-account list from the backend, if any.
+            if (googleConnectorRepository.configured) googleConnectorRepository.syncAccounts()
         }
     }
 }

@@ -15,6 +15,7 @@ object Routes {
     const val LOCAL_AI = "local-ai"
     const val LOCAL_MODEL_SETTINGS = "local-model-settings/{modelId}"
     const val DEBUG_CONSOLE = "debug-console"
+    const val CONNECTED_APPS = "connected-apps"
 
     /** When the user arrives here right after a local-model load/runtime failure,
      *  the failed model id and a short human reason can be passed so the screen

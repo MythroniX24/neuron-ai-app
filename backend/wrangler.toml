@@ -1,0 +1,19 @@
+name = "neuron-ai-backend"
+main = "src/index.ts"
+compatibility_date = "2026-01-01"
+
+# Encrypted credential store.
+#   user:<userId>             -> { createdAt }
+#   acct:<userId>:<googleSub> -> AES-GCM sealed refresh/access tokens
+# Workers KV is used instead of D1 because the deploy token has Workers
+# Scripts + KV access but no D1 permission.
+[[kv_namespaces]]
+binding = "TOKENS"
+id = "6f09092e162148daa2e11305b5b41153"
+
+# All credentials are Worker secrets:
+#   GOOGLE_WEB_CLIENT_ID, GOOGLE_WEB_CLIENT_SECRET,
+#   TOKEN_ENCRYPTION_KEY, BACKEND_AUTH_SECRET
+# Optional:
+#   GOOGLE_REDIRECT_URI (only if Google requires it for the code exchange)
+[vars]

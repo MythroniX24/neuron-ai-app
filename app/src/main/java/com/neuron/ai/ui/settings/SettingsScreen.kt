@@ -42,7 +42,8 @@ fun SettingsScreen(
     onOpenConversations: () -> Unit = {},
     onOpenTasks: () -> Unit = {},
     onOpenLocalAi: () -> Unit = {},
-    onOpenDebugConsole: () -> Unit = {}
+    onOpenDebugConsole: () -> Unit = {},
+    onOpenConnectedApps: () -> Unit = {}
 ) {
     val viewModel: SettingsViewModel =
         viewModel(factory = SettingsViewModelFactory(container))
@@ -171,6 +172,22 @@ fun SettingsScreen(
                 androidx.compose.material3.TextButton(onClick = {
                     viewModel.clearAllMemory()
                 }) { Text("Clear all memory", color = MaterialTheme.colorScheme.error) }
+            }
+
+            HorizontalDivider(modifier = Modifier.padding(vertical = Spacing.lg))
+
+            // ---- Connected Apps: Google Drive/Gmail/Sheets/Docs ---------------
+            Text(
+                text = "Connected Apps",
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            SettingsLink(
+                "Google account",
+                "Drive, Gmail, Sheets and Docs tools — Google calls run on the connector " +
+                    "backend, never on this phone"
+            ) {
+                onOpenConnectedApps()
             }
 
             HorizontalDivider(modifier = Modifier.padding(vertical = Spacing.lg))

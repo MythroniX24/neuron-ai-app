@@ -19,6 +19,20 @@ android {
         versionCode = 13
         versionName = "1.2.5"
 
+        // Google connectors: the Android OAuth client is matched by package
+        // name + signing certificate, so it is never passed in code. The WEB
+        // client ID is the serverClientId used for offline access, and the
+        // backend URL is the deployed Cloudflare Worker (public, overridable
+        // per build via -PneuronBackendUrl=... or NEURON_BACKEND_URL).
+        val googleWebClientId =
+            "106446745670-velmqq3ugbqlcelpf5e6b56kblb99us7.apps.googleusercontent.com"
+        val googleBackendUrl = (System.getenv("NEURON_BACKEND_URL")
+            ?: project.findProperty("neuronBackendUrl")
+            ?: "https://neuron-ai-backend.omgupta240511.workers.dev")
+            .toString().trimEnd('/')
+        buildConfigField("String", "GOOGLE_WEB_CLIENT_ID", "\"$googleWebClientId\"")
+        buildConfigField("String", "GOOGLE_BACKEND_URL", "\"$googleBackendUrl\"")
+
         ndk {
             // Local AI: 64-bit only — 32-bit ABIs would double build time and
             // most devices shipping since minSdk 26 are 64-bit.
@@ -86,6 +100,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     // Local AI (on-device inference): llama.cpp via JNI. Sources are
@@ -179,6 +194,10 @@ dependencies {
     implementation(libs.accompanist.drawablepainter)
     implementation(libs.jlatexmath.android)
     implementation(libs.okhttp)
+
+    // Google Identity Services AuthorizationClient: offline access via a
+    // server auth code. No google-services.json and no client secret on device.
+    implementation(libs.play.services.auth)
 
     debugImplementation(libs.androidx.compose.ui.tooling)
 

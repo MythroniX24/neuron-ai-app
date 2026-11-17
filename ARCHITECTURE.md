@@ -227,6 +227,7 @@ Tools are registered in `AppContainer` — adding a tool never touches the loop.
 | Files | `fs.read`, `fs.search` | confined to `filesDir/workspace` |
 | Workspace | `fs.list`, `fs.readfile`, `fs.writefile`, `fs.mkdir`, `fs.rename`, `fs.move`, `fs.copy`, `fs.delete`, `fs.searchfiles`, `fs.metadata` | canonical-path checks; delete carries `FILESYSTEM_DELETE` and always re-prompts |
 | Web | `web.search`, `web.read` | keyless engines, fenced untrusted output |
+| Google | `google.drive.*`, `google.gmail.*`, `google.sheets.*`, `google.docs.*` | thin proxies to the Cloudflare Worker, which holds the encrypted refresh token |
 | Browser | `browser.open/read/find/links`, `browser.click/type/select` | side-effect tools always ask, even with the toggle ON |
 | Terminal/code | `terminal.run`, `code.edit`, `code.patch`, `code.diff`, `code.build`, `code.test` | terminal toggle = standing consent; catastrophic-command guard stays |
 | Memory | `memory.remember`, `memory.recall`, `memory.forget` | scope fixed by conversation context; secrets rejected |

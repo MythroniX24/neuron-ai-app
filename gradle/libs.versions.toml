@@ -16,6 +16,7 @@ coil = "2.7.0"
 jlatexmath = "0.2.0"
 okhttp = "4.12.0"
 accompanist = "0.36.0"
+playServicesAuth = "21.2.0"
 junit = "4.13.2"
 
 [libraries]
@@ -49,6 +50,7 @@ coil-compose = { group = "io.coil-kt", name = "coil-compose", version.ref = "coi
 accompanist-drawablepainter = { group = "com.google.accompanist", name = "accompanist-drawablepainter", version.ref = "accompanist" }
 jlatexmath-android = { group = "ru.noties", name = "jlatexmath-android", version.ref = "jlatexmath" }
 okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version.ref = "okhttp" }
+play-services-auth = { group = "com.google.android.gms", name = "play-services-auth", version.ref = "playServicesAuth" }
 okhttp-mockwebserver = { group = "com.squareup.okhttp3", name = "mockwebserver", version.ref = "okhttp" }
 
 junit = { group = "junit", name = "junit", version.ref = "junit" }

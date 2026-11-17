@@ -16,7 +16,13 @@ enum class Capability {
     TERMINAL,
     NOTIFICATIONS,
     /** User-confirmed memory deletion (curated long-term data). */
-    MEMORY
+    MEMORY,
+    /**
+     * Act on a connected Google account (Drive/Gmail/Sheets/Docs) through the
+     * connector backend. Never granted by default; destructive actions still
+     * always re-prompt.
+     */
+    GOOGLE
 }
 
 /** How a capability may be granted. */
