@@ -174,7 +174,13 @@ private val LocalModalTrigger = compositionLocalOf<(() -> Unit)?> { null }
 fun A2uiBlockView(source: String, modifier: Modifier = Modifier) {
     val parsed = remember(source) { A2uiProtocol.render(source) }
     if (parsed.isEmpty()) {
-        A2uiBuildingSkeleton(modifier)
+        val trimmed = source.trim()
+        val isStreaming = !trimmed.endsWith("}") && !trimmed.endsWith("]")
+        if (isStreaming) {
+            A2uiBuildingSkeleton(modifier)
+        } else {
+            A2uiCardFallback(trimmed, modifier)
+        }
         return
     }
     var surfaces by remember(parsed) { mutableStateOf(parsed) }
@@ -191,6 +197,27 @@ fun A2uiBlockView(source: String, modifier: Modifier = Modifier) {
     CompositionLocalProvider(LocalA2uiWrite provides write) {
         Column(modifier, verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
             surfaces.forEach { surface -> A2uiSurfaceView(surface) }
+        }
+    }
+}
+
+@Composable
+private fun A2uiCardFallback(text: String, modifier: Modifier = Modifier) {
+    Surface(
+        shape = RoundedCornerShape(Radius.md),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+        border = androidx.compose.foundation.BorderStroke(
+            1.dp,
+            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+        ),
+        modifier = modifier.fillMaxWidth()
+    ) {
+        Column(Modifier.padding(Spacing.md)) {
+            Text(
+                text = text.take(600),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }

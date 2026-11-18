@@ -75,17 +75,20 @@ class ToolUsingAgent(
             role = ChatMessage.Role.SYSTEM,
             content = if (toolsConfigured) {
                 "You are Neuron, a capable AI agent running on the user's phone. " +
-                    "Answer clearly and concisely; use Markdown for structure and code.\n" +
+                    "Answer clearly, directly, and comprehensively; use Markdown for structure, tables, and code.\n" +
                     "TOOLS: Use the provided tools when they help (web search, browser, files, " +
                     "terminal, memory). Prefer web.search for anything current or verifiable, " +
                     "and cite sources as [n] matching the search result indices.\n" +
+                    "TOOL CALL FORMAT: Call tools via native function calling or emit: " +
+                    "<tool_call>{\"name\":\"tool_id\",\"arguments\":{...}}</tool_call>\n" +
                     "LOOP: alternate freely between thinking, calling tools, and short progress " +
                     "notes (a sentence or two alongside tool calls is narration, not the final " +
                     "answer) — take as many steps as the task needs.\n" +
                     "REPLY vs WORK: replying does NOT end your turn — you may keep working after " +
                     "a reply, and only you decide when to stop. Never end a message with a " +
-                    "promise of work (\"Let me check…\", \"Searching now…\"): call that tool in " +
-                    "the SAME turn. A reply that announces a step without running it is sent " +
+                    "bare promise of work (\"Let me check…\", \"Let me look up…\", \"Searching now…\"): " +
+                    "call that tool in the SAME turn or provide the complete answer immediately. " +
+                    "A reply that announces a step without running it is sent " +
                     "back to you to finish, so announce only what you are doing right now.\n" +
                     "OUTPUT FORMAT: never write internal tool-log markers (\"[used tool: …]\", " +
                     "\"[tool result] …\") in a reply — they are internal records, not content. " +
@@ -123,10 +126,11 @@ class ToolUsingAgent(
                     "airy for long walkthroughs. Never mention or explain the spacing choice.\n" +
                     com.neuron.ai.core.a2ui.A2uiCatalog.prompt
             } else {
-                "You are Neuron, a helpful on-device AI assistant. Answer the user's " +
-                    "message directly, clearly and concisely. Use Markdown when it helps. " +
-                    "If you are unsure, say so instead of inventing facts. Do not mention " +
-                    "tools, agents, or capabilities you do not have."
+                "You are Neuron, a helpful AI assistant. Answer the user's " +
+                    "message directly, completely, and concisely with all facts, comparisons, and details. " +
+                    "Use Markdown for structure, lists, comparisons, and code. " +
+                    "Never say 'Let me look up...', 'Let me check...', or promise future actions; " +
+                    "provide the full, comprehensive answer immediately in this response."
             }
         )
         // Prior turns give the model real multi-turn context.
@@ -471,20 +475,33 @@ class ToolUsingAgent(
                 // going and makes the model do it. The model still decides
                 // when to stop — an answer that promises nothing further (or
                 // that it repeats after the nudge budget) ends the run.
-                if (toolsConfigured && toolsAvailable &&
-                    continuationNudges < maxContinuationNudges &&
-                    announcesMoreWork(finalText)
-                ) {
-                    continuationNudges++
-                    step--
-                    logger?.w("Agent", "Reply announced further work — continuing the loop")
-                    // Keep the reply visible as progress in the timeline…
-                    send(AgentEvent.IntermediateMessage(finalText))
-                    // …and make it part of the context so the model can build
-                    // on what it just told the user instead of repeating it.
-                    history += ChatMessage(ChatMessage.Role.ASSISTANT, finalText)
-                    history += ChatMessage(ChatMessage.Role.USER, continueNote)
-                    continue@loop
+                if (announcesMoreWork(finalText)) {
+                    if (toolsConfigured && toolsAvailable && continuationNudges < maxContinuationNudges) {
+                        continuationNudges++
+                        step--
+                        logger?.w("Agent", "Reply announced further work — continuing the loop")
+                        // Keep the reply visible as progress in the timeline…
+                        send(AgentEvent.IntermediateMessage(finalText))
+                        // …and make it part of the context so the model can build
+                        // on what it just told the user instead of repeating it.
+                        history += ChatMessage(ChatMessage.Role.ASSISTANT, finalText)
+                        history += ChatMessage(ChatMessage.Role.USER, continueNote)
+                        continue@loop
+                    } else if (continuationNudges >= maxContinuationNudges && step < maxSteps) {
+                        // Nudges exhausted on an unfulfilled announcement ("Let me check...").
+                        // Never accept an empty promise as the final answer; force the model
+                        // to deliver the direct answer using its internal knowledge.
+                        continuationNudges++
+                        toolsAvailable = false
+                        logger?.w("Agent", "Continuation budget exhausted on teaser — requesting direct final answer")
+                        history += ChatMessage(ChatMessage.Role.ASSISTANT, finalText)
+                        history += ChatMessage(
+                            ChatMessage.Role.USER,
+                            "SYSTEM NOTE: Provide the direct final answer now using your knowledge. " +
+                                "Do not promise further steps, do not say 'Let me look up...', and do not call tools."
+                        )
+                        continue@loop
+                    }
                 }
 
                 send(AgentEvent.Finished(finalText))

@@ -55,7 +55,15 @@ object MarkdownParser {
     private val hrRegex = Regex("""^\s{0,3}([-*_])\s*(?:\1\s*){2,}$""")
     private val quoteRegex = Regex("""^\s{0,3}>\s?(.*)$""")
     private val tableDividerRegex = Regex("""^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)+\|?\s*$""")
-    private val imageRegex = Regex("""!\[([^\]]*)]\(([^)\s]+)\)""")
+    private val imageRegex = Regex("""!\[([^\]]*)]\(\s*<?([^\s>)]+)>?(?:\s+["'][^"']*["'])?\s*\)""")
+    private val htmlImgRegex = Regex("""<img\s+[^>]*?src=["']([^"']+)["'][^>]*?>""", RegexOption.IGNORE_CASE)
+    private val htmlAltRegex = Regex("""alt=["']([^"']*)["']""", RegexOption.IGNORE_CASE)
+
+    private data class ParsedImage(
+        val range: IntRange,
+        val url: String,
+        val alt: String
+    )
 
     fun parse(text: String): List<MdBlock> {
         val blocks = mutableListOf<MdBlock>()
@@ -233,15 +241,34 @@ object MarkdownParser {
     }
 
     private fun appendParagraphWithImages(blocks: MutableList<MdBlock>, text: String) {
-        var cursor = 0
+        val matches = mutableListOf<ParsedImage>()
         for (match in imageRegex.findAll(text)) {
-            val before = text.substring(cursor, match.range.first).trim()
-            if (before.isNotBlank()) blocks += MdBlock.Paragraph(before)
-            blocks += MdBlock.Image(
+            matches += ParsedImage(
+                range = match.range,
                 url = match.groupValues[2],
                 alt = match.groupValues[1].trim()
             )
-            cursor = match.range.last + 1
+        }
+        for (match in htmlImgRegex.findAll(text)) {
+            val alt = htmlAltRegex.find(match.value)?.groupValues?.get(1)?.trim() ?: ""
+            matches += ParsedImage(
+                range = match.range,
+                url = match.groupValues[1],
+                alt = alt
+            )
+        }
+        matches.sortBy { it.range.first }
+
+        var cursor = 0
+        for (img in matches) {
+            if (img.range.first < cursor) continue
+            val before = text.substring(cursor, img.range.first).trim()
+            if (before.isNotBlank()) blocks += MdBlock.Paragraph(before)
+            blocks += MdBlock.Image(
+                url = img.url,
+                alt = img.alt
+            )
+            cursor = img.range.last + 1
         }
         val rest = text.substring(cursor).trim()
         if (rest.isNotBlank()) blocks += MdBlock.Paragraph(rest)

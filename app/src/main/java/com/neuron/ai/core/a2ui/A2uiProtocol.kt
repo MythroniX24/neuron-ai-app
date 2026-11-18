@@ -184,14 +184,17 @@ object A2uiProtocol {
                 )
             }
 
-            // A bare component list (models sometimes drop the envelope).
-            val loose = message["components"]
+            // A bare component or component list (models sometimes drop the envelope).
+            val loose = message["components"] ?: if (message.containsKey("component")) message else null
             if (loose != null) {
                 val id = message.str("surfaceId") ?: "surface"
                 val current = surfaceOf(id)
                 val merged = current.components.toMutableMap()
                 readComponents(loose).forEach { (key, value) -> merged[key] = value }
-                surfaces[id] = current.copy(components = merged)
+                surfaces[id] = current.copy(
+                    rootId = if (current.components.isEmpty() && merged.containsKey("root")) "root" else current.rootId,
+                    components = merged
+                )
             }
         }
 
@@ -206,7 +209,13 @@ object A2uiProtocol {
     private fun readComponents(element: JsonElement?): Map<String, A2uiComponent> {
         val list: JsonArray = when (element) {
             is JsonArray -> element
-            is JsonObject -> element["components"] as? JsonArray ?: JsonArray(emptyList())
+            is JsonObject -> {
+                if (element.containsKey("components") && element["components"] is JsonArray) {
+                    element["components"] as JsonArray
+                } else {
+                    JsonArray(listOf(element))
+                }
+            }
             else -> JsonArray(emptyList())
         }
         val out = LinkedHashMap<String, A2uiComponent>()

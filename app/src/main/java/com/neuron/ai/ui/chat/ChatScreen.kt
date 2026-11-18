@@ -551,53 +551,47 @@ fun ChatScreen(
         }
     }
 
-    // Custom presentation: dim scrim + bottom-anchored panel (replaces the
-    // default ModalBottomSheet for a fully hand-designed look). Gated ONLY by
-    // AnimatedVisibility — a wrapping `if (...)` unmounts the node and kills
-    // the exit animation, which previously made the panel teleport away.
+    // Presentation: dim scrim + bottom-docked sheet covering the composer cleanly.
+    // Gated by AnimatedVisibility for smooth slide-in and slide-out.
     androidx.compose.animation.AnimatedVisibility(
         visible = showAttachmentSheet,
-        enter = fadeIn(tween(160)) + slideInVertically(tween(280, easing = FastOutSlowInEasing)) { it / 3 },
-        exit = fadeOut(tween(180)) + slideOutVertically(tween(220, easing = FastOutSlowInEasing)) { it / 3 },
-        modifier = Modifier.align(Alignment.BottomCenter)
+        enter = fadeIn(tween(180)) + slideInVertically(tween(260, easing = FastOutSlowInEasing)) { it },
+        exit = fadeOut(tween(140)) + slideOutVertically(tween(200, easing = FastOutSlowInEasing)) { it },
+        modifier = Modifier.fillMaxSize()
     ) {
         Box(Modifier.fillMaxSize()) {
             Box(
                 Modifier
                     .fillMaxSize()
-                    .background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.45f))
+                    .background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.5f))
                     .clickable(indication = null, interactionSource = remember {
                         androidx.compose.foundation.interaction.MutableInteractionSource()
                     }) { showAttachmentSheet = false }
             )
-            // Drag-up-for-fullscreen panel — same gesture language as the
-            // terminal: strip up = grow, strip down past the threshold = close.
-            com.neuron.ai.ui.components.DraggablePanelContainer(
-                onDismiss = { showAttachmentSheet = false },
-                restFraction = 0.62f,
-                modifier = Modifier.align(Alignment.BottomCenter)
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
             ) {
-            Box(Modifier.navigationBarsPadding()) {
                 AttachmentSheet(
-            onDismiss = { showAttachmentSheet = false },
-            onCamera = launchCamera,
-            onPhotos = {
-                photoPicker.launch(
-                    androidx.activity.result.PickVisualMediaRequest(
-                        ActivityResultContracts.PickVisualMedia.ImageOnly
-                    )
-                )
-            },
-            onFiles = { filePicker.launch(arrayOf("*/*")) },
-            terminalEnabled = terminalEnabled,
-            onToggleTerminal = { viewModel.setTerminalEnabled(it) },
-            browserEnabled = browserEnabled,
-            onToggleBrowser = { viewModel.setBrowserEnabled(it) }
+                    onDismiss = { showAttachmentSheet = false },
+                    onCamera = launchCamera,
+                    onPhotos = {
+                        photoPicker.launch(
+                            androidx.activity.result.PickVisualMediaRequest(
+                                ActivityResultContracts.PickVisualMedia.ImageOnly
+                            )
+                        )
+                    },
+                    onFiles = { filePicker.launch(arrayOf("*/*")) },
+                    terminalEnabled = terminalEnabled,
+                    onToggleTerminal = { viewModel.setTerminalEnabled(it) },
+                    browserEnabled = browserEnabled,
+                    onToggleBrowser = { viewModel.setBrowserEnabled(it) }
                 )
             }
-            }
         }
-        }
+    }
 
     // ---- Draggable terminal panel over the chat (inside the overlay Box) --------
     // AnimatedVisibility stays MOUNTED (not nested inside a session-null

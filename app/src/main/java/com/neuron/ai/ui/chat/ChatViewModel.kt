@@ -1058,10 +1058,16 @@ class ChatViewModel(
             emptyList<com.neuron.ai.core.conversation.ComparisonPlacement>()
         var finishedSpacing = ReplySpacingProfile()
 
+        val effectiveToolPolicy = if (toolsEnabled && capabilityModel.supportsTools) {
+            com.neuron.ai.core.agent.ToolPolicy.Only(toolIdsProvider())
+        } else {
+            com.neuron.ai.core.agent.ToolPolicy.Only(emptySet())
+        }
+
         val agent = agentFactory(
             provider,
             capabilityModel,
-            if (toolsEnabled) toolIdsProvider() else emptySet()
+            if (toolsEnabled && capabilityModel.supportsTools) toolIdsProvider() else emptySet()
         )
 
         try {
@@ -1070,7 +1076,8 @@ class ChatViewModel(
                     instruction = prompt,
                     conversationId = conversationId,
                     attachments = attachments,
-                    history = buildHistory()
+                    history = buildHistory(),
+                    toolPolicy = effectiveToolPolicy
                 )
             ).collect { event ->
                     when (event) {
