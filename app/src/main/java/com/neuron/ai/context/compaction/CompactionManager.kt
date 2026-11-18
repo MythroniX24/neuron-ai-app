@@ -70,10 +70,12 @@ open class CompactionManager(
         conversationId: String,
         maxSourceMessages: Int = 40
     ): StructuredState {
-        val segment = messages
-            .filter { it.metadata?.isError != true }
-            .takeLast(maxSourceMessages)
-            .dropLast(KEEP_RECENT_RAW)
+        val eligible = messages.filter { it.metadata?.isError != true }
+        val segment = if (eligible.size <= KEEP_RECENT_RAW) {
+            emptyList()
+        } else {
+            eligible.dropLast(KEEP_RECENT_RAW).take(maxSourceMessages)
+        }
         if (segment.isEmpty()) {
             return StructuredState(goal = "", decisions = emptyList(), toolOutcomes = emptyList(), sourceCount = 0)
         }
@@ -114,9 +116,13 @@ open class CompactionManager(
      */
     open fun validate(state: StructuredState, sourceMessages: List<Message>): Boolean {
         if (state.sourceCount == 0 || state.keywords.isEmpty()) return false
-        val sourceKeywords = sourceMessages
-            .filter { it.metadata?.isError != true }
-            .takeLast(state.sourceCount + KEEP_RECENT_RAW)
+        val eligible = sourceMessages.filter { it.metadata?.isError != true }
+        val sourceSegment = if (eligible.size <= KEEP_RECENT_RAW) {
+            emptyList()
+        } else {
+            eligible.dropLast(KEEP_RECENT_RAW).take(state.sourceCount)
+        }
+        val sourceKeywords = sourceSegment
             .joinToString(" ") { it.content }
             .lowercase()
             .split(Regex("[^a-z0-9]+"))

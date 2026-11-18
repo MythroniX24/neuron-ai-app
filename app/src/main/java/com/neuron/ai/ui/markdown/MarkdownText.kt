@@ -11,6 +11,8 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -174,14 +176,14 @@ private fun BlockView(block: MdBlock, spacing: ReplySpacingProfile) {
 
         is MdBlock.LatexBlock -> LatexBlockView(block.latex)
 
-        is MdBlock.Quote -> Row {
-            Column(
+        is MdBlock.Quote -> Row(modifier = Modifier.height(IntrinsicSize.Min)) {
+            Box(
                 Modifier
                     .padding(end = Spacing.sm)
                     .width(3.dp)
-                    .height(16.dp)
-                    .background(MaterialTheme.colorScheme.primary)
-            ) {}
+                    .fillMaxHeight()
+                    .background(MaterialTheme.colorScheme.primary, RoundedCornerShape(1.5.dp))
+            )
             Text(
                 text = InlineMarkdown.toAnnotatedString(block.text),
                 style = MaterialTheme.typography.bodyLarge.withResponseSpacing(paragraph),

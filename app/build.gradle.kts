@@ -24,8 +24,10 @@ android {
         // client ID is the serverClientId used for offline access, and the
         // backend URL is the deployed Cloudflare Worker (public, overridable
         // per build via -PneuronBackendUrl=... or NEURON_BACKEND_URL).
-        val googleWebClientId =
-            "106446745670-velmqq3ugbqlcelpf5e6b56kblb99us7.apps.googleusercontent.com"
+        val googleWebClientId = (System.getenv("GOOGLE_WEB_CLIENT_ID")
+            ?: project.findProperty("googleWebClientId")
+            ?: "106446745670-velmqq3ugbqlcelpf5e6b56kblb99us7.apps.googleusercontent.com")
+            .toString()
         val googleBackendUrl = (System.getenv("NEURON_BACKEND_URL")
             ?: project.findProperty("neuronBackendUrl")
             ?: "https://neuron-ai-backend.omgupta240511.workers.dev")

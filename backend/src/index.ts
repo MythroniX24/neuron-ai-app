@@ -400,6 +400,13 @@ const rateBuckets = new Map<string, { count: number; resetAt: number }>();
 
 function rateLimited(key: string, limit: number, windowSeconds: number): boolean {
   const now = Date.now();
+  if (rateBuckets.size > 1000) {
+    for (const [k, v] of rateBuckets.entries()) {
+      if (v.resetAt <= now) {
+        rateBuckets.delete(k);
+      }
+    }
+  }
   const bucket = rateBuckets.get(key);
   if (!bucket || bucket.resetAt <= now) {
     rateBuckets.set(key, { count: 1, resetAt: now + windowSeconds * 1000 });
@@ -856,9 +863,10 @@ function gmailBody(payload: GmailPayload | undefined): string {
 }
 
 function buildRawMessage(to: string, subject: string, body: string): string {
+  const safeTo = to.replace(/[\r\n]/g, " ");
   const safeSubject = subject.replace(/[\r\n]/g, " ");
   const mime = [
-    `To: ${to}`,
+    `To: ${safeTo}`,
     `Subject: ${safeSubject}`,
     "MIME-Version: 1.0",
     "Content-Type: text/plain; charset=UTF-8",

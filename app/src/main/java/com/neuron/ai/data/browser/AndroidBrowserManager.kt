@@ -51,6 +51,33 @@ class WebViewBrowserSession(
         fun onPage(text: String) = onText(text)
     }
 
+    private fun createWebViewClient(navDeferred: CompletableDeferred<Boolean>? = null): WebViewClient =
+        object : WebViewClient() {
+            override fun shouldInterceptRequest(
+                view: WebView?,
+                request: WebResourceRequest?
+            ): WebResourceResponse? {
+                // Block third-party requests lightly: same-host only,
+                // everything else (trackers/ads) is denied.
+                val reqHost = request?.url?.host
+                val pageHost = view?.url?.toUri()?.host
+                    ?: webView?.url?.toUri()?.host
+                return if (reqHost != null && pageHost != null && reqHost != pageHost) {
+                    WebResourceResponse("text/plain", "utf-8", java.io.ByteArrayInputStream(ByteArray(0)))
+                } else null
+            }
+
+            override fun onPageFinished(view: WebView?, viewUrl: String?) {
+                navDeferred?.complete(true)
+            }
+
+            override fun onReceivedError(
+                view: WebView?, req: WebResourceRequest?, err: android.webkit.WebResourceError?
+            ) {
+                if (req?.isForMainFrame == true) navDeferred?.complete(false)
+            }
+        }
+
     private fun ensureWebView() {
         if (webView != null) return
         val deferred = CompletableDeferred<Boolean>()
@@ -66,21 +93,7 @@ class WebViewBrowserSession(
                 wv.addJavascriptInterface(ExtractionBridge { text ->
                     _extractedText = text
                 }, "_neuronExtract")
-                wv.webViewClient = object : WebViewClient() {
-                    override fun shouldInterceptRequest(
-                        view: WebView?,
-                        request: WebResourceRequest?
-                    ): WebResourceResponse? {
-                        // Block third-party requests lightly: same-host only,
-                        // everything else (trackers/ads) is denied.
-                        val reqHost = request?.url?.host
-                        val pageHost = view?.url?.toUri()?.host
-                            ?: webView?.url?.toUri()?.host
-                        return if (reqHost != null && pageHost != null && reqHost != pageHost) {
-                            WebResourceResponse("text/plain", "utf-8", java.io.ByteArrayInputStream(ByteArray(0)))
-                        } else null
-                    }
-                }
+                wv.webViewClient = createWebViewClient()
                 webView = wv
                 deferred.complete(true)
             } catch (t: Throwable) {
@@ -162,16 +175,7 @@ class WebViewBrowserSession(
         _pendingNav = navDeferred
         withContext(dispatchers.main) {
             handler.post {
-                webView?.webViewClient = object : WebViewClient() {
-                    override fun onPageFinished(view: WebView?, viewUrl: String?) {
-                        navDeferred.complete(true)
-                    }
-                    override fun onReceivedError(
-                        view: WebView?, req: WebResourceRequest?, err: android.webkit.WebResourceError?
-                    ) {
-                        if (req?.isForMainFrame == true) navDeferred.complete(false)
-                    }
-                }
+                webView?.webViewClient = createWebViewClient(navDeferred)
                 webView?.loadUrl(url)
             }
         }
@@ -210,7 +214,7 @@ class WebViewBrowserSession(
         withContext(dispatchers.main) {
             val wv = webView ?: return@withContext BrowserResult.Failure("No page is loaded.")
             // Click via DOM text search — NEVER an eval of page-provided JS.
-            val escaped = description.replace("\\", "\\\\").replace("'", "\\'")
+            val escaped = description.replace("\\", "\\\\").replace("'", "\\'").replace("\n", "\\n").replace("\r", "\\r")
             var result: String? = null
             val latch = CompletableDeferred<Unit>()
             handler.post {
@@ -233,8 +237,8 @@ class WebViewBrowserSession(
     override suspend fun typeText(description: String, text: String): BrowserResult =
         withContext(dispatchers.main) {
             val wv = webView ?: return@withContext BrowserResult.Failure("No page is loaded.")
-            val escapedDesc = description.replace("\\", "\\\\").replace("'", "\\'")
-            val escapedText = text.replace("\\", "\\\\").replace("'", "\\'")
+            val escapedDesc = description.replace("\\", "\\\\").replace("'", "\\'").replace("\n", "\\n").replace("\r", "\\r")
+            val escapedText = text.replace("\\", "\\\\").replace("'", "\\'").replace("\n", "\\n").replace("\r", "\\r")
             var result: String? = null
             val latch = CompletableDeferred<Unit>()
             handler.post {
@@ -259,8 +263,8 @@ class WebViewBrowserSession(
     override suspend fun selectOption(description: String, value: String): BrowserResult =
         withContext(dispatchers.main) {
             val wv = webView ?: return@withContext BrowserResult.Failure("No page is loaded.")
-            val escapedDesc = description.replace("\\", "\\\\").replace("'", "\\'")
-            val escapedValue = value.replace("\\", "\\\\").replace("'", "\\'")
+            val escapedDesc = description.replace("\\", "\\\\").replace("'", "\\'").replace("\n", "\\n").replace("\r", "\\r")
+            val escapedValue = value.replace("\\", "\\\\").replace("'", "\\'").replace("\n", "\\n").replace("\r", "\\r")
             var result: String? = null
             val latch = CompletableDeferred<Unit>()
             handler.post {

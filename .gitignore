@@ -14,6 +14,11 @@ app/build/
 
 # Local configuration (machine-specific)
 local.properties
+.env
+.env.*
+*.env
+.dev.vars
+*.dev.vars
 
 # Keystores — never commit signing material
 *.jks

@@ -26,7 +26,8 @@ object InlineMarkdown {
     private data class Token(
         val range: IntRange,
         val contentType: ContentType,
-        val payload: String
+        val payload: String,
+        val label: String? = null
     )
 
     private enum class ContentType { BOLD, ITALIC, CODE, LINK, MATH }
@@ -70,7 +71,7 @@ object InlineMarkdown {
                                 textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline
                             )
                         ) {
-                            append(token.payload)
+                            append(token.label ?: token.payload)
                         }
                     }
 
@@ -85,9 +86,9 @@ object InlineMarkdown {
     private fun collectTokens(text: String): List<Token> {
         val tokens = mutableListOf<Token>()
 
-        fun add(range: IntRange, type: ContentType, payload: String) {
+        fun add(range: IntRange, type: ContentType, payload: String, label: String? = null) {
             if (range.first >= 0 && range.last < text.length) {
-                tokens += Token(range, type, payload)
+                tokens += Token(range, type, payload, label)
             }
         }
 
@@ -102,7 +103,7 @@ object InlineMarkdown {
             add(it.range, ContentType.CODE, it.groupValues[1])
         }
         Regex("""\[([^\]]+)]\(([^)\s]+)\)""").findAll(text).forEach {
-            add(it.range, ContentType.LINK, it.groupValues[2])
+            add(it.range, ContentType.LINK, it.groupValues[2], it.groupValues[1])
         }
         Regex("""\$([^$\n]+?)\$""").findAll(text).forEach {
             add(it.range, ContentType.MATH, it.groupValues[1])

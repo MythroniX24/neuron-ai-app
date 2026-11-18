@@ -87,15 +87,27 @@ void crashSnapshotAppend(const std::string &line) {
     std::string text = line;
     text += '\n';
     size_t used = g_crashSnapshotUsed;
-    if (used + text.size() + 1 >= CRASH_SNAPSHOT_BYTES) {
-        const size_t keep = CRASH_SNAPSHOT_BYTES / 2;
-        std::memmove(g_crashSnapshot, g_crashSnapshot + (used - keep), keep);
-        used = keep;
+    if (used >= CRASH_SNAPSHOT_BYTES) {
+        used = 0;
     }
-    std::memcpy(g_crashSnapshot + used, text.data(), text.size());
-    used += text.size();
-    g_crashSnapshot[used] = '\0';
-    g_crashSnapshotUsed = used;
+    if (text.size() >= CRASH_SNAPSHOT_BYTES) {
+        text = text.substr(text.size() - (CRASH_SNAPSHOT_BYTES / 2));
+    }
+    if (used + text.size() >= CRASH_SNAPSHOT_BYTES) {
+        const size_t keep = CRASH_SNAPSHOT_BYTES / 2;
+        if (used > keep) {
+            std::memmove(g_crashSnapshot, g_crashSnapshot + (used - keep), keep);
+            used = keep;
+        } else {
+            used = 0;
+        }
+    }
+    if (used + text.size() < CRASH_SNAPSHOT_BYTES) {
+        std::memcpy(g_crashSnapshot + used, text.data(), text.size());
+        used += text.size();
+        g_crashSnapshot[used] = '\0';
+        g_crashSnapshotUsed = used;
+    }
 }
 
 void crashWriteAll(int fd, const char *text) {
@@ -215,11 +227,18 @@ void crashSignalHandler(int sig, siginfo_t *info, void *ucontext) {
         raise(sig);
     }
 
-    // Reaching this point means the previous handler RESOLVED the signal — a
-    // Java NullPointerException, say — and the process is still alive. This was
-    // not a crash, so the report must not be shown as one.
-    if (g_crashPath[0] != '\0') {
-        unlink(g_crashPath);
+    // ART uses SIGSEGV itself to turn an implicit null-check fault into a
+    // NullPointerException. If it was a null-check fault (< 4096) and the handler
+    // returned, it was resolved and not a crash, so the report can be cleaned up.
+    // For non-null SIGSEGV or other fatal signals (SIGABRT, etc.), NEVER unlink.
+    if (sig == SIGSEGV && info != nullptr && reinterpret_cast<uintptr_t>(info->si_addr) < 4096) {
+        if (g_crashPath[0] != '\0') {
+            unlink(g_crashPath);
+        }
+    } else {
+        // Fatal native signal did not terminate in previous handler; die with default action.
+        signal(sig, SIG_DFL);
+        raise(sig);
     }
 }
 
@@ -1489,6 +1508,9 @@ Java_com_neuron_ai_data_local_LocalEngineLoader_nativeGenerateTokens(
             keep = 0;
         }
     }
+    if (keep == 0) {
+        llama_memory_seq_rm(llama_get_memory(g_ctx), 0, 0, -1);
+    }
 
     const int decodeCode = decodeRange(g_ctx, tokens, keep);
     if (decodeCode != 0) {
@@ -1621,6 +1643,9 @@ Java_com_neuron_ai_data_local_LocalEngineLoader_nativeGenerateMultimodal(
             mtmd_bitmap_free(wrapper.bitmap);
             return -9;
         }
+        llama_memory_seq_rm(llama_get_memory(g_ctx), 0, 0, -1);
+        g_cachedTokens.clear();
+        g_cachedPos = 0;
         llama_pos n_past = 0;
         // Handles non-causal masking and M-RoPE internally; needs the raw
         // llama_context, so it must run under the lock.

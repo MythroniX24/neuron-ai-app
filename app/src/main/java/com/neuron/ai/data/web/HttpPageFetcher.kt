@@ -145,19 +145,22 @@ object HtmlText {
         "amp" to "&", "lt" to "<", "gt" to ">", "quot" to "\"",
         "apos" to "'", "nbsp" to " ", "mdash" to "—", "ndash" to "–",
         "hellip" to "…", "rsquo" to "’", "lsquo" to "‘",
-        "ldquo" to "“", "rdquo" to "”", "copy" to "©"
+        "ldquo" to "“", "rdquo" to "”", "copy" to "©",
+        "trade" to "™", "reg" to "®", "euro" to "€", "pound" to "£",
+        "yen" to "¥", "cent" to "¢", "deg" to "°", "plusmn" to "±",
+        "bull" to "•", "times" to "×", "divide" to "÷"
     )
 
-    /** Numeric + common named entities; unknown entities are dropped. */
+    /** Numeric + common named entities; unknown entities are preserved. */
     fun decode(text: String): String {
         var s = Regex("&#x([0-9A-Fa-f]+);").replace(text) {
-            it.groupValues[1].toIntOrNull(16)?.toChar()?.toString() ?: ""
+            it.groupValues[1].toIntOrNull(16)?.toChar()?.toString() ?: it.value
         }
         s = Regex("&#(\\d+);").replace(s) {
-            it.groupValues[1].toIntOrNull()?.toChar()?.toString() ?: ""
+            it.groupValues[1].toIntOrNull()?.toChar()?.toString() ?: it.value
         }
         s = Regex("&([a-zA-Z]+);").replace(s) { m ->
-            entities[m.groupValues[1].lowercase()] ?: ""
+            entities[m.groupValues[1].lowercase()] ?: m.value
         }
         return s
     }

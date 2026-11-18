@@ -215,6 +215,8 @@ object MarkdownParser {
                     headingRegex.matches(next) ||
                     bulletRegex.matches(next) ||
                     orderedRegex.matches(next) ||
+                    quoteRegex.matches(next) ||
+                    (next.contains('|') && i + 1 < lines.size && tableDividerRegex.matches(lines[i + 1])) ||
                     next.trimStart().startsWith("```") ||
                     next.trimStart().startsWith("$$") ||
                     hrRegex.matches(next)

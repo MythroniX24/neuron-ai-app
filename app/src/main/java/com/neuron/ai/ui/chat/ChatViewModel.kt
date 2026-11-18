@@ -875,7 +875,8 @@ class ChatViewModel(
                 )
             )
             return
-        }        // Local AI: route through the SAME agent loop with the on-device
+        }
+        // Local AI: route through the SAME agent loop with the on-device
         // provider — no parallel inference path, no special-cased runtime.
         if (selection.first == LOCAL_PROVIDER_ID) {
             val localProvider = localAiProvider

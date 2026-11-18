@@ -348,12 +348,35 @@ object DiffEngine {
             if (i < oldLines.size && j < newLines.size && oldLines[i] == newLines[j]) {
                 i++; j++; continue
             }
+            if (i >= oldLines.size) {
+                while (j < newLines.size) {
+                    out.appendLine("+" + newLines[j++])
+                    changes++
+                }
+                break
+            }
+            if (j >= newLines.size) {
+                while (i < oldLines.size) {
+                    out.appendLine("-" + oldLines[i++])
+                    changes++
+                }
+                break
+            }
             // Find the next alignment point.
             var lookahead = 1
             while (lookahead <= 50) {
-                if (i + lookahead < oldLines.size && j < newLines.size &&
-                    oldLines[i + lookahead] == newLines[j]
+                if (i + lookahead < oldLines.size && j + lookahead < newLines.size &&
+                    oldLines[i + lookahead] == newLines[j + lookahead]
                 ) {
+                    // Lines were modified.
+                    repeat(lookahead) { k -> out.appendLine("-" + oldLines[i + k]) }
+                    repeat(lookahead) { k -> out.appendLine("+" + newLines[j + k]) }
+                    i += lookahead
+                    j += lookahead
+                    changes++
+                    break
+                }
+                if (i + lookahead < oldLines.size && oldLines[i + lookahead] == newLines[j]) {
                     // Lines were removed.
                     repeat(lookahead) { k ->
                         out.appendLine("-" + oldLines[i + k])
@@ -362,9 +385,7 @@ object DiffEngine {
                     changes++
                     break
                 }
-                if (j + lookahead < newLines.size && i < oldLines.size &&
-                    oldLines[i] == newLines[j + lookahead]
-                ) {
+                if (j + lookahead < newLines.size && oldLines[i] == newLines[j + lookahead]) {
                     // Lines were added.
                     repeat(lookahead) { k ->
                         out.appendLine("+" + newLines[j + k])

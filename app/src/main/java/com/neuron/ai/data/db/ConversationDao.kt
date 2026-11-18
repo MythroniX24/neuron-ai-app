@@ -54,8 +54,10 @@ interface ConversationDao {
     suspend fun setBrowserEnabled(id: String, enabled: Boolean)
 
     @Query("DELETE FROM conversations WHERE id = :id")
-    suspend fun deleteConversation(id: String)    @Query("SELECT DISTINCT conversations.* FROM conversations " +
-            "JOIN messages ON messages.conversationId = conversations.id " +
+    suspend fun deleteConversation(id: String)
+
+    @Query("SELECT DISTINCT conversations.* FROM conversations " +
+            "LEFT JOIN messages ON messages.conversationId = conversations.id " +
             "WHERE conversations.title LIKE '%' || :query || '%' " +
             "OR messages.content LIKE '%' || :query || '%' " +
             "ORDER BY conversations.pinned DESC, conversations.updatedAtEpochMs DESC")
