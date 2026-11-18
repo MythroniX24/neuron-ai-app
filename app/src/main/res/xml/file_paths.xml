@@ -3,4 +3,9 @@
     <!-- Camera captures live under filesDir/captures and are shared with the
          camera app only via FileProvider content URIs. -->
     <files-path name="captures" path="captures/" />
+    <!-- Files the agent presents in chat can be opened in whatever installed
+         app handles them; FileProvider is the only way to hand a file:// out. -->
+    <external-path name="storage" path="." />
+    <external-files-path name="app-storage" path="." />
+    <cache-path name="cache" path="." />
 </paths>

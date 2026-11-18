@@ -120,7 +120,8 @@ class ToolUsingAgent(
                     "READABILITY: call ui.reply_spacing once per answer to choose spacing " +
                     "separately for paragraphs and lists — compact for dense lists and " +
                     "short facts, comfortable for normal chat, relaxed for explanations, " +
-                    "airy for long walkthroughs. Never mention or explain the spacing choice."
+                    "airy for long walkthroughs. Never mention or explain the spacing choice.\n" +
+                    com.neuron.ai.core.a2ui.A2uiCatalog.prompt
             } else {
                 "You are Neuron, a helpful on-device AI assistant. Answer the user's " +
                     "message directly, clearly and concisely. Use Markdown when it helps. " +

@@ -74,6 +74,7 @@ env-driven (see `SIGNING.md`).
 | `ARCHITECTURE.md` | package map, agent loop, providers, context pipeline, storage, local AI |
 | `CONTEXT_ARCHITECTURE.md` | context assembly spec: what is implemented, what is planned |
 | `SIGNING.md` | release keystore, GitHub Secrets, artifacts, tags |
+| `A2UI.md` | agent-authored UI (A2UI port): protocol core, catalog, file cards, viewer |
 | `AGENTS.md` | this file — CI rule, quick reference, conventions |
 
 Update the docs in the same change whenever behaviour, tools, settings or CI

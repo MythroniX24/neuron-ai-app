@@ -292,6 +292,15 @@ fun ChatScreen(
         }
     }
 
+    // A2UI cards can carry buttons and forms: a click becomes a normal user
+    // turn so the agent reacts with its tools and its own UI.
+    androidx.compose.runtime.CompositionLocalProvider(
+        com.neuron.ai.ui.a2ui.LocalA2uiAction provides androidx.compose.runtime.remember {
+            { request: com.neuron.ai.ui.a2ui.A2uiActionRequest ->
+                viewModel.send(request.toUserMessage())
+            }
+        }
+    ) {
     Box(Modifier.fillMaxSize()) {
     Column(
         modifier = Modifier
@@ -610,6 +619,7 @@ fun ChatScreen(
                 )
             }
         }
+    }
     }
     }
 }

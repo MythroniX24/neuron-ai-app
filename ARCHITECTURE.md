@@ -474,6 +474,23 @@ Design rules:
   keeps success/miss/failure counters for the Debug console. A half-streamed
   fenced block is stripped by `ComparisonBlocksParser.splitPendingStream()` and
   replaced with a skeleton, so raw JSON never reaches the bubble.
+- **A2UI (agent-authored UI):** a port of `a2ui-project/a2ui` (Apache-2.0).
+  `core/a2ui/A2uiProtocol.kt` parses the streamed messages (v1.0 plus the
+  v0.8/0.9 wire shapes), keeps `A2uiSurface` component maps and data models,
+  resolves `@path` bindings and `@call` functions, and expands `ChildList`
+  templates over data lists. `core/a2ui/A2uiCatalog.kt` is the prompt text the
+  model reads. `ui/a2ui/A2uiSurfaceView.kt` is the Compose adapter: basic
+  catalog widgets plus `FileCard`, `FileList`, `CodeCard` and
+  `DocumentPreview`. A fenced `a2ui` block becomes `MdBlock.A2ui` and renders in
+  place; a partially streamed block shows a placeholder, never raw JSON.
+  Buttons dispatch one user turn (`A2uiActionRequest`), form widgets write back
+  into the surface data model, and `Modal` opens its content in a dialog.
+- **In-app file viewer:** `ui/files/FileRefs.kt` resolves storage-relative,
+  absolute, `file://`, `content://` and https targets; `ui/files/FileViewer.kt`
+  (`FileViewerHost` above every route) renders code with `SyntaxHighlighter`,
+  HTML on a WebView **Preview** tab with a **Code** tab, images full width, and
+  hands anything else to another app through `FileProvider`. Downloads go to
+  the public `Downloads` collection.
 - Reply spacing: `ResponseSpacing` presets (compact / comfortable / relaxed /
   airy). Line spacing and paragraph gap are **separate** values:
   `ReplySpacingProfile(paragraph, list, gap)` scales line height for prose and

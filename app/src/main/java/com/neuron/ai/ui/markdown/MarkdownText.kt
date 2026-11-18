@@ -167,6 +167,9 @@ private fun BlockView(block: MdBlock, spacing: ReplySpacingProfile) {
             )
         }
 
+        // Agent-authored UI (A2UI): native cards, file lists, forms.
+        is MdBlock.A2ui -> com.neuron.ai.ui.a2ui.A2uiBlockView(block.json)
+
         is MdBlock.CodeBlock -> CodeBlockView(block)
 
         is MdBlock.LatexBlock -> LatexBlockView(block.latex)

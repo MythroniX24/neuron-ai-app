@@ -201,6 +201,20 @@ syntax highlighting and copy), LaTeX via `jlatexmath-android`, native rich
 recommendation cards with images/badges/key facts/links, and AI-chosen reply
 spacing applied separately to paragraphs and lists.
 
+**A2UI — agent-authored UI.** The reply can carry a fenced `a2ui` block: JSON
+that describes UI, which the app renders with native Compose widgets instead of
+text. That is how the agent composes arbitrary cards — file cards, file lists,
+code cards, document previews, image galleries, forms, dashboards, buttons —
+inside the conversation. The protocol is a port of
+[a2ui-project/a2ui](https://github.com/a2ui-project/a2ui) (Apache-2.0); see
+[A2UI.md](A2UI.md).
+
+**Files in chat.** A file card shows the type tile, name and size/type line with
+a status chip. Tapping it opens the file in-app: code and text with syntax
+highlighting and copy, HTML on a real **Preview** tab (with the source beside
+it), images full-screen. Anything the app cannot display opens in another app,
+and every card downloads to `Downloads`. Close is top-left, download top-right.
+
 ---
 
 ## Building
@@ -248,17 +262,21 @@ one. See [SIGNING.md](SIGNING.md) for the one-time keystore setup.
 app/src/main/
 ├── java/com/neuron/ai
 │   ├── core/      domain contracts & models (no Android UI deps)
+│   │              └── a2ui/  A2UI protocol core + catalog prompt
 │   ├── data/      implementations: providers, agent, tools, db, web, local AI…
 │   ├── context/   context orchestration pipeline (budget, rank, compaction)
 │   ├── di/        AppContainer — explicit manual dependency graph
 │   └── ui/        Compose screens, ViewModels, design system, Markdown
+│                  ├── a2ui/  A2UI → Compose adapter (cards, forms, files)
+│                  └── files/ in-app file viewer (code, HTML preview)
 ├── cpp/           llama.cpp bridge (CMake, pinned upstream)
 └── res/           resources, adaptive icons
 ```
 
 Detailed design: [ARCHITECTURE.md](ARCHITECTURE.md) · context pipeline:
 [CONTEXT_ARCHITECTURE.md](CONTEXT_ARCHITECTURE.md) · release signing:
-[SIGNING.md](SIGNING.md) · agent/CI rules: [AGENTS.md](AGENTS.md).
+[SIGNING.md](SIGNING.md) · agent UI protocol: [A2UI.md](A2UI.md) ·
+agent/CI rules: [AGENTS.md](AGENTS.md).
 
 ## Testing
 

@@ -52,12 +52,17 @@ class MainActivity : ComponentActivity() {
                 // One full-screen image viewer above every screen: a tapped
                 // picture (reply image or card thumbnail) opens here with a
                 // close cross and a download button.
-                com.neuron.ai.ui.components.ImageViewerHost {
-                    NeuronApp(container = container)
-                    // Full-screen report left by the PREVIOUS run when it crashed.
-                    // Rendered as a dialog so it sits above every screen, and it
-                    // shows nothing at all after a clean launch.
-                    com.neuron.ai.ui.CrashReportGate()
+                // In-app file viewer (code with syntax highlighting, HTML with
+                // a Preview tab, download) sits above every screen so chat
+                // cards can open a file without leaving the app.
+                com.neuron.ai.ui.files.FileViewerHost {
+                    com.neuron.ai.ui.components.ImageViewerHost {
+                        NeuronApp(container = container)
+                        // Full-screen report left by the PREVIOUS run when it crashed.
+                        // Rendered as a dialog so it sits above every screen, and it
+                        // shows nothing at all after a clean launch.
+                        com.neuron.ai.ui.CrashReportGate()
+                    }
                 }
             }
         }

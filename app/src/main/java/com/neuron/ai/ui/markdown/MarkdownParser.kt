@@ -23,6 +23,12 @@ sealed class MdBlock {
     data class Image(val url: String, val alt: String = "") : MdBlock()
 
     /**
+     * A fenced `a2ui` block: agent-authored UI (cards, file lists, forms)
+     * rendered with the A2UI protocol instead of being shown as JSON text.
+     */
+    data class A2ui(val json: String) : MdBlock()
+
+    /**
      * One list row. [number] carries the number the model actually wrote
      * (`3.` → 3) so a list that the parser splits into several blocks — nested
      * bullets in between do that — keeps counting 1, 2, 3 instead of
@@ -63,6 +69,22 @@ object MarkdownParser {
             val fence = Regex("""^\s{0,3}```\s*(\S*)\s*$""").find(line)
             if (fence != null) {
                 val language = fence.groupValues[1].takeIf { it.isNotBlank() }
+                // A2UI blocks are UI, not code: they are handed to the
+                // renderer, and an unfinished block while streaming becomes a
+                // placeholder instead of a wall of raw JSON.
+                if (language == "a2ui" || language == "a2ui-json") {
+                    val body = StringBuilder()
+                    i++
+                    while (i < lines.size &&
+                        !Regex("""^\s{0,3}```\s*$""").matches(lines[i])
+                    ) {
+                        body.appendLine(lines[i])
+                        i++
+                    }
+                    if (i < lines.size) i++
+                    blocks += MdBlock.A2ui(body.toString().trim())
+                    continue
+                }
                 val code = StringBuilder()
                 i++
                 while (i < lines.size && !Regex("""^\s{0,3}```\s*$""").matches(lines[i])) {
