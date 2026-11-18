@@ -57,7 +57,7 @@ class WorkspaceToolsTest {
         val env = FakeEnv(workspace = null)
         val result = WorkspaceTools.ReadFile(env).execute("""{"path":"x.txt"}""")
         assertTrue(result is ToolResult.Failure)
-        assertTrue((result as ToolResult.Failure).message.contains("No workspace attached"))
+        assertTrue((result as ToolResult.Failure).message.contains("No file access"))
     }
 
     @Test

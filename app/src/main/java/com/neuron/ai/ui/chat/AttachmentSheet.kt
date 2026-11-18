@@ -54,9 +54,13 @@ import com.neuron.ai.ui.theme.Spacing
 
 /**
  * Redesigned composer "+" panel: a single, grouped control surface for the
- * conversation. Built from two sections only — attach and tools — plus
- * workspace, so every option is visible in one scroll instead of being
- * hidden behind nested actions. Browser access defaults ON and says so.
+ * conversation. Built from two sections only — attach, then tools — so every
+ * option is visible in one scroll instead of being hidden behind nested
+ * actions. Browser access defaults ON and says so.
+ *
+ * There is deliberately no "add workspace" control: the agent's file tools
+ * work on the whole device storage, so a chat never has to be pointed at a
+ * folder first.
  * Reply spacing is AI-controlled, so it is deliberately not a user control.
  */
 @Composable
@@ -68,17 +72,8 @@ fun AttachmentSheet(
     terminalEnabled: Boolean,
     onToggleTerminal: (Boolean) -> Unit,
     browserEnabled: Boolean,
-    onToggleBrowser: (Boolean) -> Unit,
-    workspaces: List<com.neuron.ai.core.workspace.Workspace>,
-    activeWorkspaceId: String?,
-    onAttachWorkspace: (String) -> Unit,
-    onDetachWorkspace: () -> Unit,
-    onCreateWorkspace: () -> Unit
+    onToggleBrowser: (Boolean) -> Unit
 ) {
-    val activeWorkspaceName = activeWorkspaceId?.let { id ->
-        workspaces.firstOrNull { it.id == id }?.name
-    }
-
     Surface(
         shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
         color = MaterialTheme.colorScheme.surface,
@@ -162,7 +157,7 @@ fun AttachmentSheet(
                 icon = Icons.Outlined.Terminal,
                 title = "Terminal",
                 subtitle = if (terminalEnabled) {
-                    "On — AI can run commands in the attached workspace"
+                    "On — AI can run commands on this phone"
                 } else {
                     "Off — command tools are unavailable"
                 },
@@ -173,66 +168,6 @@ fun AttachmentSheet(
                     .padding(horizontal = Spacing.lg, vertical = Spacing.xs)
                     .entrancePop(delayMs = 150)
             )
-
-            Spacer(Modifier.height(Spacing.lg))
-            SectionLabel("Workspace")
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = Spacing.lg, vertical = Spacing.xs)
-            ) {
-                Icon(
-                    Icons.Outlined.FolderOpen,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(16.dp)
-                )
-                Text(
-                    text = activeWorkspaceName ?: "No project attached",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier
-                        .weight(1f)
-                        .padding(start = Spacing.xs)
-                )
-                if (activeWorkspaceId != null) {
-                    Text(
-                        text = "Detach",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(8.dp))
-                            .clickable { onDetachWorkspace() }
-                            .padding(horizontal = Spacing.xs, vertical = 2.dp)
-                    )
-                }
-            }
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = Spacing.lg, vertical = Spacing.xs)
-            ) {
-                workspaces.take(3).forEach { ws ->
-                    WorkspaceChip(
-                        name = ws.name,
-                        selected = ws.id == activeWorkspaceId,
-                        onClick = {
-                            if (ws.id == activeWorkspaceId) onDetachWorkspace()
-                            else onAttachWorkspace(ws.id)
-                        }
-                    )
-                }
-                WorkspaceChip(
-                    name = "New",
-                    selected = false,
-                    leadingIcon = Icons.Outlined.Add,
-                    onClick = onCreateWorkspace
-                )
-            }
 
             // A quiet confirmation line instead of another button: every
             // control above is a live, saved preference.

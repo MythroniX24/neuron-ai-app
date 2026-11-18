@@ -1,7 +1,24 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!--
+      The agent's file tools work on the user's own storage (Downloads,
+      Documents, DCIM, project folders) instead of a hidden app-private
+      sandbox. Android 11+ requires "All files access" for that; the user
+      grants it from Settings → Storage access. Older releases use the
+      classic storage permissions below.
+    -->
+    <uses-permission
+        android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
+        tools:ignore="ScopedStorage" />
+    <uses-permission
+        android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" />
+    <uses-permission
+        android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="29" />
     <!-- Camera is used only when the user picks "Camera" in the attach sheet. -->
     <uses-permission android:name="android.permission.CAMERA" />
     <!--

@@ -49,11 +49,16 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                 }
-                NeuronApp(container = container)
-                // Full-screen report left by the PREVIOUS run when it crashed.
-                // Rendered as a dialog so it sits above every screen, and it
-                // shows nothing at all after a clean launch.
-                com.neuron.ai.ui.CrashReportGate()
+                // One full-screen image viewer above every screen: a tapped
+                // picture (reply image or card thumbnail) opens here with a
+                // close cross and a download button.
+                com.neuron.ai.ui.components.ImageViewerHost {
+                    NeuronApp(container = container)
+                    // Full-screen report left by the PREVIOUS run when it crashed.
+                    // Rendered as a dialog so it sits above every screen, and it
+                    // shows nothing at all after a clean launch.
+                    com.neuron.ai.ui.CrashReportGate()
+                }
             }
         }
     }

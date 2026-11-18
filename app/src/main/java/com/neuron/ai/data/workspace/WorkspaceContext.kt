@@ -28,13 +28,19 @@ class WorkspaceContext(
 
     /** Resolves [relativePath] inside the root, or null on traversal. */
     fun resolve(relativePath: String): File? {
-        val cleaned = relativePath.trim().removePrefix("/").ifBlank { "." }
-        val candidate = File(root, cleaned).canonicalFile
-        return if (candidate.path == root.path || candidate.path.startsWith(root.path + File.separator)) {
-            candidate
-        } else {
-            null
+        val inside: (File) -> Boolean = { file ->
+            file.path == root.path || file.path.startsWith(root.path + File.separator)
         }
+        val raw = relativePath.trim()
+        if (raw.isEmpty() || raw == "." || raw == "/") return root
+        // Absolute paths are accepted when they point inside the root — the
+        // device-storage root is a long path and models often echo it back.
+        if (raw.startsWith(File.separator) || raw.matches(Regex("^[A-Za-z]:[\\\\/].*"))) {
+            val absolute = runCatching { File(raw).canonicalFile }.getOrNull()
+            if (absolute != null && inside(absolute)) return absolute
+        }
+        val candidate = File(root, raw.removePrefix("/")).canonicalFile
+        return if (inside(candidate)) candidate else null
     }
 
     /** Relative path of [file] within the workspace, or null if outside. */

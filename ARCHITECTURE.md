@@ -142,7 +142,7 @@ com.neuron.ai
 ### Chat screen anatomy
 
 Composer (`Ask Neuron…`), model chip with the selected provider/model, the `+`
-controls sheet (Camera / Photos / Files, Terminal, Browser, Workspace), the
+controls sheet (Camera / Photos / Files, Terminal, Browser), the
 inline agent timeline (collapsible run header, per-step tool rows with action
 details and narration), assistant bubbles with Markdown/LaTeX/rich cards and
 per-message actions (copy, retry, regenerate, edit & resend), the queued-message
@@ -224,8 +224,8 @@ Tools are registered in `AppContainer` — adding a tool never touches the loop.
 | Area | Tools | Notes |
 |---|---|---|
 | Basics | `time.now`, `math.evaluate`, `text.stats` | calculator is a recursive-descent evaluator (no `javax.script`) |
-| Files | `fs.read`, `fs.search` | confined to `filesDir/workspace` |
-| Workspace | `fs.list`, `fs.readfile`, `fs.writefile`, `fs.mkdir`, `fs.rename`, `fs.move`, `fs.copy`, `fs.delete`, `fs.searchfiles`, `fs.metadata` | canonical-path checks; delete carries `FILESYSTEM_DELETE` and always re-prompts |
+| Files | `fs.read`, `fs.search` | confined to the chat's file root |
+| File tools | `fs.list`, `fs.readfile`, `fs.writefile`, `fs.mkdir`, `fs.rename`, `fs.move`, `fs.copy`, `fs.delete`, `fs.searchfiles`, `fs.metadata` | root is device storage (needs *All files access*) or an attached workspace; canonical-path checks; delete carries `FILESYSTEM_DELETE` and always re-prompts |
 | Web | `web.search`, `web.read` | keyless engines, fenced untrusted output |
 | Google | `google.drive.*`, `google.gmail.*`, `google.sheets.*`, `google.docs.*` | thin proxies to the Cloudflare Worker, which holds the encrypted refresh token |
 | Browser | `browser.open/read/find/links`, `browser.click/type/select` | side-effect tools always ask, even with the toggle ON |
@@ -320,7 +320,10 @@ inspected, deleted individually or cleared.
 
 ## 11. Workspace, terminal and coding
 
-**Workspace.** `WorkspaceManagerImpl` owns roots under
+**File root.** By default the tools run against the shared-storage root; the
+user grants it once from Settings → Storage access (`MANAGE_EXTERNAL_STORAGE` on
+Android 11+, the storage permission below that). A conversation may still be
+pointed at a workspace: `WorkspaceManagerImpl` owns those roots under
 `filesDir/workspaces/<id>`. `WorkspaceContext` performs every operation with
 canonical-path validation (rejects `../`, absolute escapes and symlink
 escapes out of the root). Reads run concurrently; every mutation
@@ -501,7 +504,9 @@ Design rules:
 - **Redaction:** every log line passes through `redactSecrets()`, masking values
   of `key|token|secret|password|credential|authorization`. All logging goes
   through the `Logger` facade.
-- **Sandbox:** workspace and file tools cannot escape their roots; attachments
+- **Sandbox:** file tools cannot escape their root — the shared-storage root the
+  user explicitly granted (*All files access*) or an attached workspace; every
+  path is canonicalised, `../` and absolute escapes are rejected. Attachments
   are copied into app-private storage, shared-storage URIs are never handed to
   tools or providers.
 - **Prompt injection:** all page-derived text is fenced and declared as data;
@@ -542,7 +547,7 @@ A JVM suite of 400+ tests (`./gradlew testDebugUnitTest`), organised by package:
 | Values-not-exceptions tool results | Agent loops must reason about failure as data |
 | One chat, capabilities as tools | No duplicate runtimes; the user never chooses a "mode" |
 | Keyless search engines | No paid API, no backend; queries leave the user's own device |
-| App-private workspaces only | Never expose the device filesystem wholesale |
+| One file root per chat | Device storage after the user grants *All files access*, or an attached workspace — never arbitrary paths |
 | Local model = just another provider | One agent loop, one context pipeline, one budget path |
 | Extractors and policies kept pure | `LocalThrottlePolicy`, `CpuTopology`, `PromptPrefix`, `WebContentSanitizer` are unit-testable without Android |
 | AI-owned reply presentation | Spacing and rich cards are chosen by the model through validated tools, not global settings |

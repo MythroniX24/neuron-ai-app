@@ -195,6 +195,15 @@ class AppContainer(context: Context) {
     val workspaceManager: com.neuron.ai.data.workspace.WorkspaceManagerImpl =
         com.neuron.ai.data.workspace.WorkspaceManagerImpl(context.filesDir, dispatchers)
 
+    /**
+     * Shared-storage root for the agent's file tools, or null until the user
+     * grants "All files access" (Settings → Storage access). Null makes the
+     * tools explain the missing permission instead of failing obscurely.
+     */
+    val deviceStorageRoot: () -> java.io.File? = {
+        com.neuron.ai.data.storage.DeviceStorage.root(context)
+    }
+
     val terminalManager: TerminalManager = TerminalManager(dispatchers)
 
     // ---- Milestone 3 services --------------------------------------------------------------

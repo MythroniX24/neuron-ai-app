@@ -22,12 +22,18 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.neuron.ai.core.settings.ThemeMode
+import com.neuron.ai.data.storage.DeviceStorage
 import com.neuron.ai.di.AppContainer
 import com.neuron.ai.ui.components.BrandMark
 import com.neuron.ai.ui.theme.Spacing
@@ -116,6 +122,51 @@ fun SettingsScreen(
             }
             SettingsLink("Tasks", "See and stop running agent tasks") {
                 onOpenTasks()
+            }
+
+            HorizontalDivider(modifier = Modifier.padding(vertical = Spacing.lg))
+
+            // ---- Storage access: the agent works on real device files -------
+            Text(
+                text = "Storage access",
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            val context = LocalContext.current
+            var storageGranted by remember { mutableStateOf(DeviceStorage.hasAccess(context)) }
+            // Coming back from the system screen must refresh the state — the
+            // permission lives outside this process.
+            val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+            DisposableEffect(lifecycleOwner, context) {
+                val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+                    if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+                        storageGranted = DeviceStorage.hasAccess(context)
+                    }
+                }
+                lifecycleOwner.lifecycle.addObserver(observer)
+                onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+            }
+            SettingsLink(
+                title = if (storageGranted) {
+                    "All files access — granted"
+                } else {
+                    "All files access — tap to grant"
+                },
+                subtitle = if (storageGranted) {
+                    "The AI can read and edit any file on this phone: Downloads, " +
+                        "Documents, DCIM, project folders."
+                } else {
+                    "Without it the file tools can only see the app's own folder. " +
+                        "Grant it so the AI can read and edit your files."
+                }
+            ) {
+                val target = DeviceStorage.accessIntent(context)
+                    ?: android.content.Intent(
+                        android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                        android.net.Uri.parse("package:" + context.packageName)
+                    )
+                runCatching { context.startActivity(target) }
+                storageGranted = DeviceStorage.hasAccess(context)
             }
 
             HorizontalDivider(modifier = Modifier.padding(vertical = Spacing.lg))

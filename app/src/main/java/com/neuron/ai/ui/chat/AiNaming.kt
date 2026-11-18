@@ -24,23 +24,33 @@ object AiNaming {
             "Reply with ONLY the title — no quotes, no punctuation at the end.\n\n" +
             firstMessage.take(400)
 
-        return runCatching {
-            val completion = provider.complete(
-                CompletionRequest(
-                    model = Model(id = modelId, displayName = modelId),
-                    messages = listOf(
-                        ChatMessage(
-                            role = ChatMessage.Role.SYSTEM,
-                            content = "You name chat conversations. Output only the title."
-                        ),
-                        ChatMessage(role = ChatMessage.Role.USER, content = prompt)
-                    ),
-                    temperature = 0.3,
-                    maxOutputTokens = 24
-                )
-            )
-            sanitize(completion.message.content)
-        }.getOrNull() ?: deriveChatTitle(firstMessage).takeIf { it != "New chat" }
+        // Two attempts: some OpenAI-compatible endpoints reject a system role
+        // or a tiny token budget, and that silently dropped every chat back to
+        // the first-words heuristic. The second try is a plain user message.
+        val attempts = listOf(
+            listOf(
+                ChatMessage(
+                    role = ChatMessage.Role.SYSTEM,
+                    content = "You name chat conversations. Output only the title."
+                ),
+                ChatMessage(role = ChatMessage.Role.USER, content = prompt)
+            ),
+            listOf(ChatMessage(role = ChatMessage.Role.USER, content = prompt))
+        )
+        for (messages in attempts) {
+            val title = runCatching {
+                provider.complete(
+                    CompletionRequest(
+                        model = Model(id = modelId, displayName = modelId),
+                        messages = messages,
+                        temperature = 0.3,
+                        maxOutputTokens = 40
+                    )
+                ).message.content
+            }.getOrNull()?.let { sanitize(it) }
+            if (title != null) return title
+        }
+        return deriveChatTitle(firstMessage).takeIf { it != "New chat" }
     }
 
     /** Cleans model output: strips quotes/markdown, caps length, guards empties. */

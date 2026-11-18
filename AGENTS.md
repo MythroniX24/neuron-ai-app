@@ -61,9 +61,10 @@ env-driven (see `SIGNING.md`).
   in a reply.
 - Behaviour that affects prompts, routing, throttling or context must stay in
   pure, unit-tested helpers rather than inside Android-bound classes.
-- Security rules that must not regress: workspace/file tools stay inside their
-  roots, page content stays fenced as untrusted data, destructive operations
-  always re-prompt, secrets never reach logs or plain-text storage.
+- Security rules that must not regress: file tools stay inside their root —
+  the shared-storage root the user granted via Settings → Storage access, or an
+  attached workspace — page content stays fenced as untrusted data, destructive
+  operations always re-prompt, secrets never reach logs or plain-text storage.
 
 ## Documentation map
 

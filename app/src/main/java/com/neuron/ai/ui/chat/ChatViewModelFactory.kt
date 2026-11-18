@@ -46,7 +46,8 @@ class ChatViewModelFactory(
                 conversationId = conversationId,
                 conversations = container.conversationRepository as com.neuron.ai.data.conversation.RoomConversationRepository,
                 workspaces = container.workspaceManager,
-                dispatchers = container.dispatchers
+                dispatchers = container.dispatchers,
+                deviceRoot = container.deviceStorageRoot
             )
             container.toolRegistry.register(com.neuron.ai.data.tool.WorkspaceTools.ListDir(toolEnv))
             container.toolRegistry.register(com.neuron.ai.data.tool.WorkspaceTools.ReadFile(toolEnv))

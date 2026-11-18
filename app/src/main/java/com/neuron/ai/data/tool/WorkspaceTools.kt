@@ -59,7 +59,8 @@ object WorkspaceTools {
     ): ToolResult {
         val workspace = env.activeWorkspace()
             ?: return ToolResult.Failure(
-                "No workspace attached to this chat. Attach one with + → Workspace."
+                "No file access. Ask the user to grant \"All files access\" in " +
+                    "Neuron-AI → Settings → Storage access, then retry."
             )
         return block(workspace)
     }
@@ -68,7 +69,9 @@ object WorkspaceTools {
     class ListDir(private val env: WorkspaceToolEnv) : Tool {
         override val id = "fs.list"
         override val title = "Listing directory"
-        override val description = "Lists entries of a directory in the workspace (default: root)."
+        override val description =
+            "Lists entries of a folder on the device (default: the storage root). " +
+                "Relative paths such as \"Download\" or absolute \"/storage/emulated/0/Download\" both work."
         override val requiredCapabilities = setOf(Capability.FILESYSTEM_READ)
         override val parametersSchemaJson =
             """{"type":"object","properties":{"path":{"type":"string"}}}"""
@@ -94,7 +97,7 @@ object WorkspaceTools {
     class ReadFile(private val env: WorkspaceToolEnv) : Tool {
         override val id = "fs.readfile"
         override val title = "Reading file"
-        override val description = "Reads a text file from the workspace by relative path."
+        override val description = "Reads a text file from device storage by relative or absolute path."
         override val requiredCapabilities = setOf(Capability.FILESYSTEM_READ)
         override val parametersSchemaJson =
             """{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}"""
@@ -113,7 +116,7 @@ object WorkspaceTools {
         override val id = "fs.writefile"
         override val title = "Writing file"
         override val description =
-            "Creates or overwrites a text file in the workspace with the given content."
+            "Creates or overwrites a text file in device storage with the given content."
         override val requiredCapabilities = setOf(Capability.FILESYSTEM_WRITE)
         override val riskLevel = RiskLevel.ELEVATED
         override val parametersSchemaJson =

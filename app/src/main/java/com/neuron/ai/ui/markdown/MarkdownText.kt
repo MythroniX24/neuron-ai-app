@@ -3,9 +3,12 @@ package com.neuron.ai.ui.markdown
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -18,6 +21,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ContentCopy
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -26,8 +30,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
@@ -36,9 +43,13 @@ import androidx.compose.ui.text.style.LineHeightStyle
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import coil.compose.SubcomposeAsyncImage
+import coil.request.ImageRequest
 import com.google.accompanist.drawablepainter.rememberDrawablePainter
 import com.neuron.ai.core.settings.ReplySpacingProfile
 import com.neuron.ai.core.settings.ResponseSpacing
+import com.neuron.ai.ui.components.FullScreenImage
+import com.neuron.ai.ui.components.LocalImageOpener
 import com.neuron.ai.ui.theme.Radius
 import com.neuron.ai.ui.theme.Spacing
 
@@ -111,6 +122,51 @@ private fun BlockView(block: MdBlock, spacing: ReplySpacingProfile) {
             style = MaterialTheme.typography.bodyLarge.withResponseSpacing(paragraph)
         )
 
+        // A picture from the web or an attachment preview: shown at its real
+        // aspect ratio and tappable to open full-screen (cross to close,
+        // download at the top right).
+        is MdBlock.Image -> {
+            val opener = LocalImageOpener.current
+            SubcomposeAsyncImage(
+                model = ImageRequest.Builder(LocalContext.current)
+                    .data(block.url)
+                    .crossfade(true)
+                    .build(),
+                contentDescription = block.alt.ifBlank { "Image" },
+                contentScale = ContentScale.Fit,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(Radius.md))
+                    .clickable { opener(FullScreenImage(block.url, block.alt)) },
+                loading = {
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .height(180.dp),
+                        contentAlignment = Alignment.Center
+                    ) { CircularProgressIndicator(Modifier.size(22.dp)) }
+                },
+                error = {
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .height(120.dp)
+                            .background(
+                                MaterialTheme.colorScheme.surfaceVariant,
+                                RoundedCornerShape(Radius.md)
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = block.alt.ifBlank { "Image could not be loaded" },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            )
+        }
+
         is MdBlock.CodeBlock -> CodeBlockView(block)
 
         is MdBlock.LatexBlock -> LatexBlockView(block.latex)
@@ -144,12 +200,15 @@ private fun BlockView(block: MdBlock, spacing: ReplySpacingProfile) {
             block.items.forEachIndexed { index, item ->
                 Row {
                     Text(
-                        text = if (block.ordered) "${index + 1}." else "•",
+                        // The model's own numbers are kept: a list that gets split
+                        // into several blocks (nested bullets do that) then keeps
+                        // reading 1, 2, 3 instead of 1, 1, 1.
+                        text = if (block.ordered) "${item.number ?: (index + 1)}." else "•",
                         style = MaterialTheme.typography.bodyLarge.withResponseSpacing(list),
                         modifier = Modifier.padding(end = Spacing.sm)
                     )
                     Text(
-                        text = InlineMarkdown.toAnnotatedString(item),
+                        text = InlineMarkdown.toAnnotatedString(item.text),
                         style = MaterialTheme.typography.bodyLarge.withResponseSpacing(list)
                     )
                 }

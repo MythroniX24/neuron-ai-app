@@ -2,7 +2,7 @@ package com.neuron.ai.ui.markdown
 
 /**
  * Block-level Markdown parser tuned for AI chat output: headings, paragraphs,
- * fenced code, lists, quotes, tables, rules and display math. Tolerates
+ * fenced code, lists, quotes, tables, rules, images and display math. Tolerates
  * partial/streaming input — unfinished constructs degrade to paragraphs.
  */
 sealed class MdBlock {
@@ -19,8 +19,19 @@ sealed class MdBlock {
 
     data object HorizontalRule : MdBlock()
 
+    /** A standalone picture — either `![alt](url)` or an inline image split out. */
+    data class Image(val url: String, val alt: String = "") : MdBlock()
+
+    /**
+     * One list row. [number] carries the number the model actually wrote
+     * (`3.` → 3) so a list that the parser splits into several blocks — nested
+     * bullets in between do that — keeps counting 1, 2, 3 instead of
+     * restarting at 1 every time.
+     */
+    data class ListItem(val text: String, val number: Int? = null)
+
     data class ListBlock(
-        val items: List<String>,
+        val items: List<ListItem>,
         val ordered: Boolean
     ) : MdBlock()
 
@@ -33,11 +44,12 @@ sealed class MdBlock {
 object MarkdownParser {
 
     private val bulletRegex = Regex("""^\s{0,3}[-*+]\s+(.*)$""")
-    private val orderedRegex = Regex("""^\s{0,3}\d{1,9}[.)]\s+(.*)$""")
+    private val orderedRegex = Regex("""^\s{0,3}(\d{1,9})[.)]\s+(.*)$""")
     private val headingRegex = Regex("""^\s{0,3}(#{1,6})\s+(.*)$""")
     private val hrRegex = Regex("""^\s{0,3}([-*_])\s*(?:\1\s*){2,}$""")
     private val quoteRegex = Regex("""^\s{0,3}>\s?(.*)$""")
     private val tableDividerRegex = Regex("""^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)+\|?\s*$""")
+    private val imageRegex = Regex("""!\[([^\]]*)]\(([^)\s]+)\)""")
 
     fun parse(text: String): List<MdBlock> {
         val blocks = mutableListOf<MdBlock>()
@@ -133,16 +145,33 @@ object MarkdownParser {
             // Lists.
             val bullet = bulletRegex.find(line)
             val ordered = orderedRegex.find(line)
-            val listStart = ordered ?: bullet
-            if (listStart != null) {
+            if (bullet != null || ordered != null) {
                 val isOrdered = ordered != null
-                val items = mutableListOf(listStart.groupValues[1])
+                val items = mutableListOf(
+                    if (ordered != null) {
+                        MdBlock.ListItem(
+                            text = ordered.groupValues[2],
+                            number = ordered.groupValues[1].toIntOrNull()
+                        )
+                    } else {
+                        MdBlock.ListItem(bullet!!.groupValues[1])
+                    }
+                )
                 i++
                 while (i < lines.size) {
-                    val next = bulletRegex.find(lines[i]) ?: orderedRegex.find(lines[i]) ?: break
+                    val nextBullet = bulletRegex.find(lines[i])
+                    val nextOrdered = orderedRegex.find(lines[i])
+                    if (nextBullet == null && nextOrdered == null) break
                     // A different list kind breaks the group.
-                    if (orderedRegex.matches(lines[i]) != isOrdered) break
-                    items += next.groupValues[1]
+                    if ((nextOrdered != null) != isOrdered) break
+                    items += if (nextOrdered != null) {
+                        MdBlock.ListItem(
+                            text = nextOrdered.groupValues[2],
+                            number = nextOrdered.groupValues[1].toIntOrNull()
+                        )
+                    } else {
+                        MdBlock.ListItem(nextBullet!!.groupValues[1])
+                    }
                     i++
                 }
                 blocks += MdBlock.ListBlock(items, isOrdered)
@@ -171,10 +200,27 @@ object MarkdownParser {
                 paragraph.append('\n').append(next.trim())
                 i++
             }
-            blocks += MdBlock.Paragraph(paragraph.toString())
+            // Images inside a paragraph become their own block so they render
+            // as pictures instead of raw `![alt](url)` text.
+            appendParagraphWithImages(blocks, paragraph.toString())
         }
 
         return blocks
+    }
+
+    private fun appendParagraphWithImages(blocks: MutableList<MdBlock>, text: String) {
+        var cursor = 0
+        for (match in imageRegex.findAll(text)) {
+            val before = text.substring(cursor, match.range.first).trim()
+            if (before.isNotBlank()) blocks += MdBlock.Paragraph(before)
+            blocks += MdBlock.Image(
+                url = match.groupValues[2],
+                alt = match.groupValues[1].trim()
+            )
+            cursor = match.range.last + 1
+        }
+        val rest = text.substring(cursor).trim()
+        if (rest.isNotBlank()) blocks += MdBlock.Paragraph(rest)
     }
 
     private fun splitTableRow(line: String): List<String> =

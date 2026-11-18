@@ -50,9 +50,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.clickable
 import coil.compose.SubcomposeAsyncImage
 import coil.compose.SubcomposeAsyncImageContent
 import coil.request.ImageRequest
+import com.neuron.ai.ui.components.FullScreenImage
+import com.neuron.ai.ui.components.LocalImageOpener
 import com.neuron.ai.core.conversation.ComparisonLayout
 import com.neuron.ai.core.conversation.ComparisonOption
 import com.neuron.ai.core.conversation.ComparisonPlacement
@@ -497,10 +500,16 @@ fun SmartEntityImage(
     val url = imageUrl?.takeIf { it.isNotBlank() } ?: resolved
     val settled = lookups.isNotEmpty() &&
         lookups.all { ImageQuery.key(it) in missingQueries }
+    val opener = LocalImageOpener.current
     Box(
         modifier = modifier
             .clip(shape)
-            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)),
+            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f))
+            // A real picture is tappable: full-screen view with close and
+            // download, same surface as markdown images.
+            .clickable(enabled = url != null) {
+                url?.let { opener(FullScreenImage(it, contentDescription)) }
+            },
         contentAlignment = Alignment.Center
     ) {
         when {

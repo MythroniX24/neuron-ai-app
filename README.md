@@ -49,7 +49,7 @@ memory are *tools of the same agent* inside a normal conversation — no separat
 | **Camera / Photos / Files** | Attach images or documents. Text-like files and PDFs are flattened into the prompt; images go to vision models only. |
 | **Terminal** | Per-chat AI shell access, **OFF** by default. ON is standing consent for the agent's commands (a catastrophic-command guard still applies). With it OFF, shell/coding tools raise a real permission dialog. |
 | **Browser** | Per-chat browsing tools, **ON** by default. Read-only tools need the toggle; clicking, typing and selecting always ask for explicit permission. |
-| **Workspace** | Attach or create a workspace. The agent's filesystem, terminal and coding tools all live inside it. |
+| **File access** | Nothing to attach: the agent's files, terminal and coding tools work on the whole device storage (Downloads, Documents, DCIM, project folders) once Settings → Storage access has **All files access**. |
 
 Switching a capability creates the conversation lazily, so a brand-new chat
 starts with the same composer from the first frame.
@@ -122,11 +122,15 @@ message, so history renders identically after a restart.
 - Settings → Memory can inspect, delete entries, clear everything, or switch the
   feature off entirely.
 
-### Workspace, terminal and coding
+### Files, terminal and coding
 
-- Workspaces live under `filesDir/workspaces/<id>` — app-private by
-  construction; every path is canonicalised and checked, so `../` and absolute
-  escapes are rejected (covered by tests).
+- The file tools' root is the shared-storage root (`/storage/emulated/0`) once
+  the user grants **All files access** in Settings → Storage access; an
+  explicitly attached workspace (`filesDir/workspaces/<id>`) takes precedence
+  when one exists. Every path is canonicalised and checked, so `../` and
+  absolute escapes are rejected (covered by tests).
+- The `+` sheet no longer asks for a workspace: the agent reads and edits any
+  file the user owns, like a computer assistant would.
 - Reads run concurrently; every mutation serialises behind a per-workspace
   `Mutex`, so two agent tasks can never interleave writes on one project.
 - `code.edit` is an exact-unique replacement; `code.patch` refuses to apply when
