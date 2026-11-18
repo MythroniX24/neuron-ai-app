@@ -55,6 +55,27 @@ jobs:
           echo "$NEURON_KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/neuron-release.jks"
           echo "NEURON_KEYSTORE_PATH=$RUNNER_TEMP/neuron-release.jks" >> "$GITHUB_ENV"
 
+      # Guard: the whole point of decoding the keystore above is that every
+      # APK this workflow produces carries ONE permanent SHA-1. If the secrets
+      # are missing, assembleDebug silently falls back to the runner's random
+      # debug keystore, which would register a different fingerprint on every
+      # run — the exact problem this file avoids. Fail on pushes/tags (those
+      # APKs are installed) instead of shipping a fingerprint that changes.
+      # Pull requests without secrets only get a warning so forks still build.
+      - name: Verify the permanent signing key is in use
+        run: |
+          if [ -f "${NEURON_KEYSTORE_PATH:-}" ]; then
+            echo "Signing with the permanent keystore from secrets: $NEURON_KEYSTORE_PATH"
+            exit 0
+          fi
+          MESSAGE="Signing secrets are missing, so this debug APK would be signed by a random runner key and its SHA-1 would change. Add NEURON_KEYSTORE_B64, NEURON_KEYSTORE_PASSWORD, NEURON_KEY_ALIAS and NEURON_KEY_PASSWORD."
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "::warning::$MESSAGE"
+            exit 0
+          fi
+          echo "::error::$MESSAGE"
+          exit 1
+
       # Vulkan GPU backend (milestone 5): ggml compiles its SPIR-V shaders
       # with glslc at build time. Ubuntu 24.04's shaderc-glslc 2023.8 lacks
       # the GL_EXT_integer_dot_product extension probe target, so we vendor

@@ -4,7 +4,7 @@ Neuron-AI ships two kinds of APK from CI:
 
 | Artifact | Job | Installable? | Signature |
 |---|---|---|---|
-| `neuron-ai-debug-apk` | `build-debug` | yes (debug build, Play Protect warnings are more likely) | the **release key** when the secrets below exist, otherwise the runner's debug key |
+| `neuron-ai-debug-apk` | `build-debug` | yes (debug build, Play Protect warnings are more likely) | the **release key** when the secrets below exist (the job fails instead of falling back on push/tag), otherwise — on fork PRs only — the runner's debug key |
 | `neuron-ai-release-apk` | `build-release` | yes **when the signing secrets exist**; otherwise built UNSIGNED and not installable | the release key |
 
 A **signed release APK** is the one to install: same app, properly signed, far
@@ -72,8 +72,19 @@ stale every time.
 Now, when the signing secrets exist, `build-debug` is signed with the same
 long-lived release key, so there is exactly **one** fingerprint to register and it
 never changes. `Report APK signing fingerprint` prints the SHA-1 that is really
-inside the APK (`apksigner verify --print-certs`) in the job summary. Without the
-secrets the workflow falls back to the cached debug keystore.
+inside the APK (`apksigner verify --print-certs`) in the job summary.
+
+`Verify the permanent signing key is in use` fails a push/tag build when the
+secrets are missing, because that build would fall back to a random runner key
+and register a new fingerprint again. Pull requests from forks (which never
+receive secrets) only get a warning.
+
+**So the fingerprint is added to Google Cloud exactly once.** A new APK, a new
+feature, a new version — all of them come out of this pipeline signed by the same
+certificate, and Google matches on the certificate, not on the APK. The only
+fingerprints that ever need extra OAuth clients are ones from *other* signing
+keys, e.g. an APK you build locally in Android Studio with your PC's
+debug keystore (`~/.android/debug.keystore`).
 
 ## 4. What happens on the next push
 
