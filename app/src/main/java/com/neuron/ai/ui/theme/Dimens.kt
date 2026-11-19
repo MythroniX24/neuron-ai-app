@@ -17,6 +17,7 @@ object Spacing {
 
 /** Single source of truth for corner rounding. */
 object Radius {
+    val xs: Dp = 4.dp
     val sm: Dp = 8.dp
     val md: Dp = 12.dp
     val lg: Dp = 16.dp
