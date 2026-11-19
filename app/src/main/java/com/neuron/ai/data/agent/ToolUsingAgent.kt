@@ -85,9 +85,13 @@ class ToolUsingAgent(
                     "notes (a sentence or two alongside tool calls is narration, not the final " +
                     "answer) — take as many steps as the task needs.\n" +
                     "REPLY vs WORK: replying does NOT end your turn — you may keep working after " +
-                    "a reply, and only you decide when to stop. Never end a message with a " +
-                    "bare promise of work (\"Let me check…\", \"Let me look up…\", \"Searching now…\"): " +
-                    "call that tool in the SAME turn or provide the complete answer immediately. " +
+                    "a reply, and only you decide when to stop. " +
+                    "TURN CONTROL & AUTONOMOUS CONTINUATION: You decide whether to complete your turn or keep working. " +
+                    "If your answer is complete and you are done, finish naturally (or end with [DONE]). " +
+                    "If you want to continue working, output another part, or take another step without waiting for user input, " +
+                    "end your message with [CONTINUE] or <continue/>. The system will immediately invoke your next turn so you can continue seamlessly. " +
+                    "Never end a message with a bare promise of work (\"Let me check…\", \"Let me look up…\", \"Searching now…\"): " +
+                    "call that tool in the SAME turn, use [CONTINUE] to perform the next step, or provide the complete answer immediately. " +
                     "A reply that announces a step without running it is sent " +
                     "back to you to finish, so announce only what you are doing right now.\n" +
                     "OUTPUT FORMAT: never write internal tool-log markers (\"[used tool: …]\", " +
@@ -129,8 +133,10 @@ class ToolUsingAgent(
                 "You are Neuron, a helpful AI assistant. Answer the user's " +
                     "message directly, completely, and concisely with all facts, comparisons, and details. " +
                     "Use Markdown for structure, lists, comparisons, and code. " +
-                    "Never say 'Let me look up...', 'Let me check...', or promise future actions; " +
-                    "provide the full, comprehensive answer immediately in this response."
+                    "TURN CONTROL: You decide when to finish your turn. If your response is complete, finish naturally (or end with [DONE]). " +
+                    "If you need to generate additional sections or continue working without waiting for the user, end your message with [CONTINUE] or <continue/> " +
+                    "and the system will immediately prompt you to continue seamlessly. " +
+                    "Never say 'Let me look up...' or leave unfulfilled promises."
             }
         )
         // Prior turns give the model real multi-turn context.
@@ -169,6 +175,8 @@ class ToolUsingAgent(
         // Survives across turns so an exhausted budget can still surface the
         // last model output instead of a bare failure.
         var lastAssistantText = ""
+        // Accumulates text across multi-step autonomous continuations (when the AI uses [CONTINUE]).
+        val accumulatedText = StringBuilder()
         loop@ while (step < maxSteps) {
             step++
 
@@ -470,21 +478,43 @@ class ToolUsingAgent(
                     return@channelFlow
                 }
 
+                // 1. AI-directed autonomous continuation:
+                // The AI decides whether to complete the turn or keep working.
+                val wantsContinuation = containsContinuationMarker(finalText)
+                if (wantsContinuation && step < maxSteps) {
+                    val cleanSegment = stripCompletionMarkers(stripContinuationMarkers(finalText)).trim()
+                    if (cleanSegment.isNotBlank()) {
+                        if (accumulatedText.isNotEmpty()) {
+                            accumulatedText.append("\n\n").append(cleanSegment)
+                        } else {
+                            accumulatedText.append(cleanSegment)
+                        }
+                    }
+                    send(AgentEvent.TextBuffer(accumulatedText.toString()))
+                    history += ChatMessage(ChatMessage.Role.ASSISTANT, cleanSegment)
+                    history += ChatMessage(ChatMessage.Role.USER, "Please continue with the next step.")
+                    logger?.i("Agent", "AI requested continuation [CONTINUE] — continuing loop at step $step")
+                    continue@loop
+                }
+
+                // Strip any completion markers (e.g. [DONE], [COMPLETE], <done/>)
+                val cleanFinal = stripCompletionMarkers(finalText).trim()
+
                 // A reply is NOT automatically the end of the turn: when it
                 // announces work that has not happened yet, the loop keeps
                 // going and makes the model do it. The model still decides
                 // when to stop — an answer that promises nothing further (or
                 // that it repeats after the nudge budget) ends the run.
-                if (announcesMoreWork(finalText)) {
+                if (announcesMoreWork(cleanFinal)) {
                     if (toolsConfigured && toolsAvailable && continuationNudges < maxContinuationNudges) {
                         continuationNudges++
                         step--
                         logger?.w("Agent", "Reply announced further work — continuing the loop")
                         // Keep the reply visible as progress in the timeline…
-                        send(AgentEvent.IntermediateMessage(finalText))
+                        send(AgentEvent.IntermediateMessage(cleanFinal))
                         // …and make it part of the context so the model can build
                         // on what it just told the user instead of repeating it.
-                        history += ChatMessage(ChatMessage.Role.ASSISTANT, finalText)
+                        history += ChatMessage(ChatMessage.Role.ASSISTANT, cleanFinal)
                         history += ChatMessage(ChatMessage.Role.USER, continueNote)
                         continue@loop
                     } else if (continuationNudges >= maxContinuationNudges && step < maxSteps) {
@@ -494,7 +524,7 @@ class ToolUsingAgent(
                         continuationNudges++
                         toolsAvailable = false
                         logger?.w("Agent", "Continuation budget exhausted on teaser — requesting direct final answer")
-                        history += ChatMessage(ChatMessage.Role.ASSISTANT, finalText)
+                        history += ChatMessage(ChatMessage.Role.ASSISTANT, cleanFinal)
                         history += ChatMessage(
                             ChatMessage.Role.USER,
                             "SYSTEM NOTE: Provide the direct final answer now using your knowledge. " +
@@ -504,7 +534,17 @@ class ToolUsingAgent(
                     }
                 }
 
-                send(AgentEvent.Finished(finalText))
+                val finalFullText = if (accumulatedText.isNotEmpty()) {
+                    if (cleanFinal.isNotEmpty()) {
+                        accumulatedText.append("\n\n").append(cleanFinal).toString()
+                    } else {
+                        accumulatedText.toString()
+                    }
+                } else {
+                    cleanFinal
+                }
+
+                send(AgentEvent.Finished(finalFullText))
                 return@channelFlow
             }
 
@@ -740,6 +780,22 @@ class ToolUsingAgent(
             narrationMarkerRegex.replace(text, ""),
             ""
         ).trim()
+
+    private val continuationMarkerRegex = Regex(
+        """(?i)\[\s*(CONTINUE|NEXT_STEP|NEXT)\s*\]|<\s*continue\s*\/?>"""
+    )
+    private val completionMarkerRegex = Regex(
+        """(?i)\[\s*(DONE|COMPLETE|FINISH)\s*\]|<\s*(done|complete|finish)\s*\/?>"""
+    )
+
+    private fun containsContinuationMarker(text: String): Boolean =
+        continuationMarkerRegex.containsMatchIn(text)
+
+    private fun stripContinuationMarkers(text: String): String =
+        text.replace(continuationMarkerRegex, "").trim()
+
+    private fun stripCompletionMarkers(text: String): String =
+        text.replace(completionMarkerRegex, "").trim()
 
     /**
      * True when a text-only reply ANNOUNCES work that has not run yet

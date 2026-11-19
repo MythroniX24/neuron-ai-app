@@ -855,4 +855,56 @@ class AgentToolLoopIntegrationTest {
         )
         assertTrue(events.filterIsInstance<AgentEvent.Failed>().isEmpty())
     }
+
+    @Test
+    fun `model uses CONTINUE marker to perform autonomous multi-step turn`() = runTest {
+        val provider = ScriptedProvider()
+        // Step 1: AI outputs first part and decides to continue
+        provider.script.add(StreamEvent.Delta("Here is step 1 of the solution. [CONTINUE]"))
+        // Step 2: AI completes its work and signals completion
+        provider.script.add(StreamEvent.Delta("Here is step 2, final details. [DONE]"))
+
+        val (agent, _) = buildAgent(provider)
+        val events = withTimeout(5_000) {
+            collect(agent, AgentGoal(instruction = "explain in steps", conversationId = "c1"))
+        }
+
+        // Verify two requests were made
+        assertEquals(2, provider.requests.size)
+        // Verify continuation message was sent to the model
+        val secondRequestLastUser = provider.requests[1].last { it.role == ChatMessage.Role.USER }
+        assertTrue(secondRequestLastUser.content.contains("continue"))
+
+        // Verify accumulated answer in Finished event
+        val finished = events.filterIsInstance<AgentEvent.Finished>().single()
+        assertEquals(
+            "Here is step 1 of the solution.\n\nHere is step 2, final details.",
+            finished.summary
+        )
+        // Ensure markers were stripped
+        assertFalse(finished.summary.contains("[CONTINUE]"))
+        assertFalse(finished.summary.contains("[DONE]"))
+        assertTrue(events.filterIsInstance<AgentEvent.Failed>().isEmpty())
+    }
+
+    @Test
+    fun `model uses continue XML tag to autonomously continue generation`() = runTest {
+        val provider = ScriptedProvider()
+        provider.script.add(StreamEvent.Delta("Overview of the architecture: <continue/>"))
+        provider.script.add(StreamEvent.Delta("Implementation details: finished successfully."))
+
+        val (agent, _) = buildAgent(provider)
+        val events = withTimeout(5_000) {
+            collect(agent, AgentGoal(instruction = "architecture overview", conversationId = "c1"))
+        }
+
+        assertEquals(2, provider.requests.size)
+        val finished = events.filterIsInstance<AgentEvent.Finished>().single()
+        assertEquals(
+            "Overview of the architecture:\n\nImplementation details: finished successfully.",
+            finished.summary
+        )
+        assertFalse(finished.summary.contains("<continue/>"))
+        assertTrue(events.filterIsInstance<AgentEvent.Failed>().isEmpty())
+    }
 }
