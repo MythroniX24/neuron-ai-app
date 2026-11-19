@@ -116,6 +116,14 @@ sealed class AgentEvent {
     data class TextDelta(val text: String) : AgentEvent()
 
     /**
+     * An interactive question card with tappable options and custom text input.
+     * Emitted when `ui.ask_question` is called or a question block is parsed.
+     */
+    data class QuestionCard(
+        val payload: com.neuron.ai.core.conversation.QuestionCardPayload
+    ) : AgentEvent()
+
+    /**
      * Replaces the accumulated visible text buffer for this turn. Emitted
      * when the agent repairs the stream (e.g. a tool call recovered from
      * plain-text markup must not stay in the visible chat bubble). The UI

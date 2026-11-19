@@ -227,6 +227,21 @@ class ChatViewModel(
     private val _liveReplySpacing = MutableStateFlow(ReplySpacingProfile())
     val liveReplySpacing: StateFlow<ReplySpacingProfile> = _liveReplySpacing.asStateFlow()
 
+    /** Active interactive question card with numbered options and custom input. */
+    private val _activeQuestionCard =
+        MutableStateFlow<com.neuron.ai.core.conversation.QuestionCardPayload?>(null)
+    val activeQuestionCard: StateFlow<com.neuron.ai.core.conversation.QuestionCardPayload?> =
+        _activeQuestionCard.asStateFlow()
+
+    fun dismissQuestionCard() {
+        _activeQuestionCard.value = null
+    }
+
+    fun submitQuestionAnswer(answer: String) {
+        _activeQuestionCard.value = null
+        send(answer)
+    }
+
 
     /** Wall-clock time of the ACTIVE turn; the timer label reads this. */
     private val _turnElapsedMs = MutableStateFlow(0L)
@@ -641,6 +656,7 @@ class ChatViewModel(
     fun send(text: String) {
         val prompt = text.trim()
         val attachments = _draftAttachments.value
+        _activeQuestionCard.value = null
         if (prompt.isEmpty() && attachments.isEmpty()) return
         if (_generation.value is GenerationState.Streaming) {
             // Never drop what the user typed mid-turn — queue it; it is sent
@@ -1176,6 +1192,10 @@ class ChatViewModel(
                             )
                         }
 
+                        is AgentEvent.QuestionCard -> {
+                            _activeQuestionCard.value = event.payload
+                        }
+
                         is AgentEvent.ReplySpacing -> {
                             // Spacing is the AI's decision, per reply and per
                             // block kind; the user never tunes it.
@@ -1253,6 +1273,15 @@ class ChatViewModel(
                                                     .imageQueries(placement.block)
                                             }
                                         )
+                                    }
+                            }
+                            // Fallback for interactive question blocks in text:
+                            if (_activeQuestionCard.value == null) {
+                                com.neuron.ai.core.conversation.QuestionCardParser
+                                    .extractFenced(summary)
+                                    ?.let { (card, visible) ->
+                                        _activeQuestionCard.value = card
+                                        summary = visible
                                     }
                             }
                             // Never shrink an already-streamed buffer: a

@@ -311,6 +311,8 @@ class AppContainer(context: Context) {
             toolRegistry.register(com.neuron.ai.data.tool.ComparisonTool())
             // The model owns reply readability separately for prose and lists.
             toolRegistry.register(com.neuron.ai.data.tool.ReplySpacingTool())
+            // Interactive question cards: tappable options + custom input (Claude style).
+            toolRegistry.register(com.neuron.ai.data.tool.QuestionTool())
             memoryTools.forEach { toolRegistry.register(it) }
             // Google connectors. ELEVATED: Capability.GOOGLE is granted on
             // demand, and the two destructive actions re-prompt every time.

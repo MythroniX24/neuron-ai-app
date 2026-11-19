@@ -128,6 +128,11 @@ class ToolUsingAgent(
                     "separately for paragraphs and lists — compact for dense lists and " +
                     "short facts, comfortable for normal chat, relaxed for explanations, " +
                     "airy for long walkthroughs. Never mention or explain the spacing choice.\n" +
+                    "INTERACTIVE QUESTIONS: When you need the user to choose or pick between options " +
+                    "(e.g. project choice, next steps, design preference, tech stack, choices, settings, confirmation), " +
+                    "do NOT ask as plain bullet points in text. Call ui.ask_question with the question and list of options " +
+                    "so the app presents an interactive tappable card with numbered option buttons and custom text input. " +
+                    "You can pass 1 or multiple questions in one call.\n" +
                     com.neuron.ai.core.a2ui.A2uiCatalog.prompt
             } else {
                 "You are Neuron, a helpful AI assistant. Answer the user's " +
@@ -544,7 +549,17 @@ class ToolUsingAgent(
                     cleanFinal
                 }
 
-                send(AgentEvent.Finished(finalFullText))
+                var textToEmit = finalFullText
+                com.neuron.ai.core.conversation.QuestionCardParser.extractFenced(finalFullText)?.let { (payload, visible) ->
+                    send(AgentEvent.QuestionCard(payload))
+                    textToEmit = visible
+                } ?: run {
+                    com.neuron.ai.core.conversation.QuestionCardParser.parseFromText(finalFullText)?.let {
+                        send(AgentEvent.QuestionCard(it))
+                    }
+                }
+
+                send(AgentEvent.Finished(textToEmit))
                 return@channelFlow
             }
 
@@ -642,6 +657,14 @@ class ToolUsingAgent(
                                 )
                             )
                         }
+                }
+                // Interactive question card for options/choices.
+                if (call.toolId == com.neuron.ai.core.conversation.QuestionCardParser.TOOL_ID &&
+                    result is com.neuron.ai.core.agent.ToolResult.Success
+                ) {
+                    com.neuron.ai.core.conversation.QuestionCardParser
+                        .parse(call.argumentsJson)
+                        ?.let { send(AgentEvent.QuestionCard(it)) }
                 }
 
                 send(

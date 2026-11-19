@@ -164,6 +164,7 @@ fun ChatScreen(
     val attachmentNotice by viewModel.attachmentNotice.collectAsStateWithLifecycle()
     val queuedMessage by viewModel.queuedMessage.collectAsStateWithLifecycle()
     val conversation by viewModel.conversation.collectAsStateWithLifecycle()
+    val activeQuestionCard by viewModel.activeQuestionCard.collectAsStateWithLifecycle()
     // TOOL rows are agent plumbing, not chat messages. Their output is shown
     // inside the new timeline rows; rendering them here produced the old
     // standalone "Ran command / Web search" cards beside the new UI.
@@ -495,6 +496,20 @@ fun ChatScreen(
                 )
                 TextButton(onClick = viewModel::cancelQueuedMessage) { Text("Undo") }
             }
+        }
+
+        // Interactive questionnaire card (Claude-style multiple-choice pill options & custom answer)
+        activeQuestionCard?.let { card ->
+            InteractiveQuestionCard(
+                payload = card,
+                onOptionSelected = { answer ->
+                    viewModel.submitQuestionAnswer(answer)
+                },
+                onDismiss = viewModel::dismissQuestionCard,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = Spacing.lg, vertical = Spacing.xs)
+            )
         }
 
         ComposerBar(
