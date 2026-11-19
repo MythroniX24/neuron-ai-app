@@ -493,7 +493,7 @@ class ToolUsingAgent(
                     send(AgentEvent.TextBuffer(accumulatedText.toString()))
                     history += ChatMessage(ChatMessage.Role.ASSISTANT, cleanSegment)
                     history += ChatMessage(ChatMessage.Role.USER, "Please continue with the next step.")
-                    logger?.i("Agent", "AI requested continuation [CONTINUE] — continuing loop at step $step")
+                    logger?.d("Agent", "AI requested continuation [CONTINUE] — continuing loop at step $step")
                     continue@loop
                 }
 
