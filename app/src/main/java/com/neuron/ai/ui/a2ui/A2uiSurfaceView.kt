@@ -103,7 +103,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
-import coil.compose.SubcomposeAsyncImage
+import com.neuron.ai.ui.components.NeuronAsyncImage
 import com.neuron.ai.core.a2ui.A2uiChild
 import com.neuron.ai.core.a2ui.A2uiComponent
 import com.neuron.ai.core.a2ui.A2uiProtocol
@@ -173,7 +173,16 @@ private val LocalModalTrigger = compositionLocalOf<(() -> Unit)?> { null }
 @Composable
 fun A2uiBlockView(source: String, modifier: Modifier = Modifier) {
     val parsed = remember(source) { A2uiProtocol.render(source) }
-    if (parsed.isEmpty()) {
+    // Retain the last valid parsed surfaces so partial streaming updates or trailing noise
+    // never wipes already-rendered cards back into raw code!
+    var lastSurfaces by remember { mutableStateOf<List<A2uiSurface>>(emptyList()) }
+    if (parsed.isNotEmpty()) {
+        lastSurfaces = parsed
+    }
+
+    val surfacesToRender = if (parsed.isNotEmpty()) parsed else lastSurfaces
+
+    if (surfacesToRender.isEmpty()) {
         val trimmed = source.trim()
         val isStreaming = !trimmed.endsWith("}") && !trimmed.endsWith("]")
         if (isStreaming) {
@@ -183,7 +192,8 @@ fun A2uiBlockView(source: String, modifier: Modifier = Modifier) {
         }
         return
     }
-    var surfaces by remember(parsed) { mutableStateOf(parsed) }
+
+    var surfaces by remember(surfacesToRender) { mutableStateOf(surfacesToRender) }
     val write: (String, String, JsonElement) -> Unit = { surfaceId, path, value ->
         surfaces = surfaces.map { surface ->
             if (surface.id == surfaceId) {
@@ -203,6 +213,12 @@ fun A2uiBlockView(source: String, modifier: Modifier = Modifier) {
 
 @Composable
 private fun A2uiCardFallback(text: String, modifier: Modifier = Modifier) {
+    val cleanTitle = Regex(""""title"\s*:\s*"([^"]+)"""").find(text)?.groupValues?.get(1)
+        ?: Regex(""""name"\s*:\s*"([^"]+)"""").find(text)?.groupValues?.get(1)
+        ?: "Card"
+    val cleanContent = Regex(""""(?:text|description|content|summary)"\s*:\s*"([^"]+)"""").find(text)?.groupValues?.get(1)
+        ?: ""
+
     Surface(
         shape = RoundedCornerShape(Radius.md),
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
@@ -213,11 +229,30 @@ private fun A2uiCardFallback(text: String, modifier: Modifier = Modifier) {
         modifier = modifier.fillMaxWidth()
     ) {
         Column(Modifier.padding(Spacing.md)) {
-            Text(
-                text = text.take(600),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(Spacing.xs)
+            ) {
+                Icon(
+                    Icons.Outlined.Info,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(18.dp)
+                )
+                Text(
+                    text = cleanTitle,
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+            }
+            if (cleanContent.isNotBlank()) {
+                Spacer(Modifier.height(Spacing.xs))
+                Text(
+                    text = cleanContent,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
         }
     }
 }
@@ -278,11 +313,34 @@ private fun A2uiComponentView(
         "Text" -> {
             val text = resolver.string(component, "text", scope).orEmpty()
             if (text.isBlank()) return
-            if (resolver.string(component, "variant", scope) == "caption") {
+            val variant = resolver.string(component, "variant", scope)?.lowercase()
+            val isHighlight = resolver.boolean(component, "highlight", scope) == true || variant == "highlight"
+            if (isHighlight) {
+                Box(
+                    modifier = Modifier
+                        .background(
+                            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f),
+                            RoundedCornerShape(Radius.xs)
+                        )
+                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                ) {
+                    Text(
+                        text = text,
+                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+            } else if (variant == "caption") {
                 Text(
                     text = text,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            } else if (variant in listOf("title", "headline")) {
+                Text(
+                    text = text,
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+                    color = MaterialTheme.colorScheme.onSurface
                 )
             } else {
                 MarkdownText(markdown = text)
@@ -342,14 +400,53 @@ private fun A2uiComponentView(
             }
         }
 
-        "Card" -> Surface(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(Radius.md),
-            color = MaterialTheme.colorScheme.surface,
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
-        ) {
-            Column(Modifier.padding(Spacing.md)) {
-                Children(component, surface, resolver, scope, depth)
+        "Card" -> {
+            val variant = resolver.string(component, "variant", scope)?.lowercase() ?: ""
+            val isHighlight = resolver.boolean(component, "highlight", scope) == true ||
+                variant in listOf("highlight", "highlighted", "primary", "accent", "success", "warning", "info")
+
+            val borderColor = when {
+                variant in listOf("primary", "accent", "highlight", "highlighted") || isHighlight ->
+                    MaterialTheme.colorScheme.primary
+                variant == "success" -> Color(0xFF10B981)
+                variant == "warning" -> Color(0xFFF59E0B)
+                variant == "error" -> MaterialTheme.colorScheme.error
+                variant == "info" -> Color(0xFF3B82F6)
+                else -> MaterialTheme.colorScheme.outline
+            }
+
+            val backgroundColor = when {
+                variant in listOf("primary", "accent", "highlight", "highlighted") || isHighlight ->
+                    MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.20f)
+                variant == "success" -> Color(0xFF10B981).copy(alpha = 0.12f)
+                variant == "warning" -> Color(0xFFF59E0B).copy(alpha = 0.12f)
+                variant == "error" -> MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.20f)
+                variant == "info" -> Color(0xFF3B82F6).copy(alpha = 0.12f)
+                variant in listOf("filled", "tonal") -> MaterialTheme.colorScheme.surfaceVariant
+                else -> MaterialTheme.colorScheme.surface
+            }
+
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(Radius.md),
+                color = backgroundColor,
+                border = BorderStroke(if (isHighlight) 1.5.dp else 1.dp, borderColor),
+                tonalElevation = if (variant == "elevated") 2.dp else 0.dp
+            ) {
+                Column(Modifier.padding(Spacing.md)) {
+                    Children(component, surface, resolver, scope, depth)
+                }
+            }
+        }
+
+        "Badge", "Chip", "Tag" -> {
+            val text = resolver.string(component, "text", scope)
+                ?: resolver.string(component, "label", scope)
+                ?: ""
+            if (text.isNotBlank()) {
+                val variant = resolver.string(component, "variant", scope)?.lowercase() ?: "default"
+                val icon = resolver.string(component, "icon", scope)
+                A2uiBadge(text, variant, icon)
             }
         }
 
@@ -394,6 +491,68 @@ private fun A2uiComponentView(
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
+    }
+}
+
+@Composable
+private fun A2uiBadge(text: String, variant: String, icon: String?) {
+    val (bgColor, textColor, borderColor) = when (variant) {
+        "primary", "accent", "highlight" -> Triple(
+            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f),
+            MaterialTheme.colorScheme.primary,
+            MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
+        )
+        "success" -> Triple(
+            Color(0xFF10B981).copy(alpha = 0.15f),
+            Color(0xFF059669),
+            Color(0xFF10B981).copy(alpha = 0.4f)
+        )
+        "warning" -> Triple(
+            Color(0xFFF59E0B).copy(alpha = 0.15f),
+            Color(0xFFD97706),
+            Color(0xFFF59E0B).copy(alpha = 0.4f)
+        )
+        "error" -> Triple(
+            MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f),
+            MaterialTheme.colorScheme.error,
+            MaterialTheme.colorScheme.error.copy(alpha = 0.5f)
+        )
+        "info" -> Triple(
+            Color(0xFF3B82F6).copy(alpha = 0.15f),
+            Color(0xFF2563EB),
+            Color(0xFF3B82F6).copy(alpha = 0.4f)
+        )
+        else -> Triple(
+            MaterialTheme.colorScheme.surfaceVariant,
+            MaterialTheme.colorScheme.onSurfaceVariant,
+            MaterialTheme.colorScheme.outlineVariant
+        )
+    }
+
+    Surface(
+        shape = CircleShape,
+        color = bgColor,
+        border = BorderStroke(1.dp, borderColor)
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = Spacing.sm, vertical = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            if (icon != null) {
+                Icon(
+                    imageVector = a2uiIcon(icon),
+                    contentDescription = null,
+                    tint = textColor,
+                    modifier = Modifier.size(12.dp)
+                )
+            }
+            Text(
+                text = text,
+                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium),
+                color = textColor
+            )
+        }
     }
 }
 
@@ -454,35 +613,15 @@ private fun A2uiImage(
         "cover" -> ContentScale.Crop
         else -> ContentScale.Crop
     }
-    SubcomposeAsyncImage(
+    NeuronAsyncImage(
         model = model,
         contentDescription = description ?: "Image",
         contentScale = scale,
         modifier = Modifier
             .then(if (variant == "icon" || variant == "avatar") Modifier.size(height) else Modifier.fillMaxWidth())
             .then(if (variant == "icon" || variant == "avatar") Modifier else Modifier.height(height))
-            .clip(shape)
-            .clickable { opener(FullScreenImage(model, description)) },
-        loading = {
-            Box(Modifier.fillMaxWidth().height(height), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator(Modifier.size(20.dp))
-            }
-        },
-        error = {
-            Box(
-                Modifier
-                    .fillMaxWidth()
-                    .height(height)
-                    .background(MaterialTheme.colorScheme.surfaceVariant, shape),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = description?.takeIf { it.isNotBlank() } ?: "Image unavailable",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        }
+            .clip(shape),
+        onClick = { opener(FullScreenImage(model, description)) }
     )
 }
 

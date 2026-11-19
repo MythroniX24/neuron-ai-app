@@ -55,7 +55,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
-import coil.compose.SubcomposeAsyncImage
+import com.neuron.ai.ui.components.NeuronAsyncImage
 import com.neuron.ai.ui.markdown.SyntaxHighlighter
 import com.neuron.ai.ui.theme.LocalAppDarkMode
 import com.neuron.ai.ui.theme.Radius
@@ -236,19 +236,11 @@ private fun WebPreview(ref: FileRef) {
 @Composable
 private fun ImageFileBody(ref: FileRef) {
     Box(Modifier.fillMaxSize().padding(Spacing.md), contentAlignment = Alignment.Center) {
-        SubcomposeAsyncImage(
+        NeuronAsyncImage(
             model = ref.uri,
             contentDescription = ref.name,
             contentScale = ContentScale.Fit,
-            modifier = Modifier.fillMaxWidth(),
-            loading = { CircularProgressIndicator(Modifier.size(24.dp)) },
-            error = {
-                Text(
-                    "This image could not be opened.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
+            modifier = Modifier.fillMaxWidth()
         )
     }
 }

@@ -51,9 +51,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.clickable
-import coil.compose.SubcomposeAsyncImage
-import coil.compose.SubcomposeAsyncImageContent
+import coil.compose.AsyncImage
 import coil.request.ImageRequest
+import coil.request.CachePolicy
 import com.neuron.ai.ui.components.FullScreenImage
 import com.neuron.ai.ui.components.LocalImageOpener
 import com.neuron.ai.core.conversation.ComparisonLayout
@@ -513,21 +513,16 @@ fun SmartEntityImage(
         contentAlignment = Alignment.Center
     ) {
         when {
-            url != null -> SubcomposeAsyncImage(
+            url != null -> AsyncImage(
                 model = ImageRequest.Builder(LocalContext.current)
                     .data(url)
-                    .crossfade(true)
+                    .crossfade(100)
+                    .memoryCachePolicy(CachePolicy.ENABLED)
+                    .diskCachePolicy(CachePolicy.ENABLED)
                     .build(),
                 contentDescription = contentDescription,
                 contentScale = contentScale,
-                modifier = Modifier.fillMaxSize(),
-                loading = { ShimmerFill() },
-                error = { FallbackGlyph() },
-                success = {
-                    SubcomposeAsyncImageContent(
-                        modifier = Modifier.fillMaxSize()
-                    )
-                }
+                modifier = Modifier.fillMaxSize()
             )
             // A lookup is still in flight for this entity.
             !settled && lookups.isNotEmpty() -> ShimmerFill()

@@ -1284,17 +1284,15 @@ class ChatViewModel(
                                         summary = visible
                                     }
                             }
-                            // Never shrink an already-streamed buffer: a
-                            // transient empty model turn or a stray Finished
-                            // must not erase partial output the user saw.
-                            if (summary.length > assistantBuffer.length) {
-                                assistantBuffer = StringBuilder(summary)
-                            }
+                            // When fenced blocks (recommendations, comparisons, question cards) were extracted,
+                            // summary is legitimately shorter than assistantBuffer. Update assistantBuffer
+                            // to the clean visible summary so raw JSON blocks never leak into the saved message!
+                            assistantBuffer = StringBuilder(summary)
                             finishedRich = _liveRichRecommendations.value
                             finishedComparisons = _liveComparisonBlocks.value
                             finishedSpacing = _liveReplySpacing.value
-                            _liveRichRecommendations.value = emptyList()
-                            _liveComparisonBlocks.value = emptyList()
+                            // Keep live rich recommendations and comparison blocks active while streaming
+                            // finishes so the UI doesn't momentarily flash raw code or empty cards.
                             _generation.value = GenerationState.Streaming(assistantBuffer.toString())
                             // Snapshot before clearing — the assistant message
                             // metadata is written after collection completes.

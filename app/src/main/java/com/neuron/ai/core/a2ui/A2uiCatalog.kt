@@ -34,12 +34,13 @@ RULES
 - Text props accept simple Markdown. Never put image URLs in Text — use the Image component.
 
 COMPONENTS (props)
-- Text: text, variant "body"|"caption"
+- Text: text, variant "body"|"caption"|"title"|"headline"|"highlight", highlight true|false
+- Badge: text, variant "default"|"primary"|"success"|"warning"|"error"|"info", icon (shows an eye-catching pill badge)
 - Image: url (real image URL; can be {"@path":…}), description, variant "icon"|"avatar"|"smallFeature"|"mediumFeature"|"largeFeature"|"header", fit "cover"|"contain"
 - Icon: name (add, arrowBack, arrowForward, attachFile, calendarToday, check, close, delete, download, edit, folder, info, lock, mail, menu, moreVert, person, play, refresh, search, send, settings, share, star, upload, warning…)
 - Row / Column: children, justify "start"|"center"|"end"|"spaceBetween"|"spaceAround"|"spaceEvenly", align "start"|"center"|"end"|"stretch"
 - List: children, direction "vertical"|"horizontal", align
-- Card: child
+- Card: child, variant "highlight"|"primary"|"success"|"warning"|"error"|"elevated"|"tonal", highlight true|false (adds prominent accent border and background tint)
 - Divider: axis "horizontal"|"vertical"
 - Button: child (a Text component), variant "default"|"primary"|"borderless", action {"event":{"name":"submit","userMessage":"Send it","context":{"plan":{"@path":"/plan"}}}}
 - TextField: label, value, placeholder, variant "shortText"|"longText"|"number"|"obscured"

@@ -77,30 +77,36 @@ object MarkdownParser {
             val fence = Regex("""^\s{0,3}```\s*(\S*)\s*$""").find(line)
             if (fence != null) {
                 val language = fence.groupValues[1].takeIf { it.isNotBlank() }
-                // A2UI blocks are UI, not code: they are handed to the
-                // renderer, and an unfinished block while streaming becomes a
-                // placeholder instead of a wall of raw JSON.
-                if (language == "a2ui" || language == "a2ui-json") {
-                    val body = StringBuilder()
-                    i++
-                    while (i < lines.size &&
-                        !Regex("""^\s{0,3}```\s*$""").matches(lines[i])
-                    ) {
-                        body.appendLine(lines[i])
-                        i++
-                    }
-                    if (i < lines.size) i++
-                    blocks += MdBlock.A2ui(body.toString().trim())
-                    continue
-                }
-                val code = StringBuilder()
+                val langLower = language?.lowercase()
+                val isA2uiFence = langLower in listOf(
+                    "a2ui", "a2ui-json", "ui", "card", "neuron-card", "neuron-ui", "custom-card"
+                )
+
+                val body = StringBuilder()
                 i++
                 while (i < lines.size && !Regex("""^\s{0,3}```\s*$""").matches(lines[i])) {
-                    code.appendLine(lines[i])
+                    body.appendLine(lines[i])
                     i++
                 }
-                blocks += MdBlock.CodeBlock(language, code.toString().trimEnd('\n'))
-                i++
+                if (i < lines.size) i++
+
+                val content = body.toString().trim()
+                // A2UI blocks are UI, not code: they are handed to the
+                // renderer, and an unfinished block while streaming becomes a
+                // placeholder instead of a wall of raw JSON. Also detect JSON blocks
+                // that contain UI components/surfaces.
+                val looksLikeA2ui = isA2uiFence || (
+                    (langLower == "json" || langLower == null) &&
+                    (content.contains(""""createSurface"""") ||
+                     content.contains(""""updateComponents"""") ||
+                     (content.contains(""""component"""") && content.contains(""""Card"""")))
+                )
+
+                if (looksLikeA2ui) {
+                    blocks += MdBlock.A2ui(content)
+                } else {
+                    blocks += MdBlock.CodeBlock(language, content)
+                }
                 continue
             }
 

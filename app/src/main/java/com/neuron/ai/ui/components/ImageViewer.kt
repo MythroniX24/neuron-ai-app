@@ -35,7 +35,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
-import coil.compose.SubcomposeAsyncImage
+import coil.compose.AsyncImage
+import coil.request.ImageRequest
+import coil.request.CachePolicy
 
 /**
  * An image the user tapped, opened full-screen above the whole app.
@@ -93,30 +95,18 @@ private fun FullScreenImageViewer(image: FullScreenImage, onClose: () -> Unit) {
                 .fillMaxSize()
                 .background(Color.Black)
         ) {
-            SubcomposeAsyncImage(
-                model = image.url,
+            AsyncImage(
+                model = ImageRequest.Builder(LocalContext.current)
+                    .data(image.url)
+                    .crossfade(100)
+                    .memoryCachePolicy(CachePolicy.ENABLED)
+                    .diskCachePolicy(CachePolicy.ENABLED)
+                    .build(),
                 contentDescription = image.description,
                 contentScale = ContentScale.Fit,
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(vertical = 72.dp),
-                loading = {
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator(
-                            color = Color.White,
-                            modifier = Modifier.size(28.dp)
-                        )
-                    }
-                },
-                error = {
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Text(
-                            text = "This image could not be loaded.",
-                            color = Color.White,
-                            style = MaterialTheme.typography.bodyMedium
-                        )
-                    }
-                }
+                    .padding(vertical = 72.dp)
             )
 
             // Close — top left.
@@ -170,25 +160,46 @@ private fun ScrimIconButton(
  */
 private fun downloadImage(context: Context, image: FullScreenImage) {
     val name = image.fileName?.takeIf { it.isNotBlank() } ?: run {
-        val segment = Uri.parse(image.url).lastPathSegment
+        val segment = runCatching { Uri.parse(image.url).lastPathSegment }
+            .getOrNull()
             ?.substringAfterLast('/')
             ?.take(60)
             ?.replace(Regex("[^A-Za-z0-9._-]"), "_")
             ?.takeIf { it.isNotBlank() }
-            ?: "neuron-image"
+            ?: "neuron-ai-image"
         if (segment.contains('.')) segment else "$segment-${System.currentTimeMillis()}.jpg"
     }
+
     runCatching {
-        val request = DownloadManager.Request(Uri.parse(image.url))
-            .setTitle(name)
-            .setNotificationVisibility(
-                DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED
-            )
-            .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, name)
-        val manager = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
-        manager.enqueue(request)
-        Toast.makeText(context, "Saving to Downloads/$name", Toast.LENGTH_SHORT).show()
+        val url = image.url.trim()
+        if (url.startsWith("http://", ignoreCase = true) || url.startsWith("https://", ignoreCase = true)) {
+            val request = DownloadManager.Request(Uri.parse(url))
+                .setTitle(name)
+                .setNotificationVisibility(
+                    DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED
+                )
+                .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, name)
+            val manager = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+            manager.enqueue(request)
+            Toast.makeText(context, "Saving to Downloads/$name", Toast.LENGTH_SHORT).show()
+        } else if (url.startsWith("data:", ignoreCase = true) && url.contains(";base64,", ignoreCase = true)) {
+            val commaIdx = url.indexOf(',')
+            val bytes = android.util.Base64.decode(url.substring(commaIdx + 1), android.util.Base64.DEFAULT)
+            val destFile = java.io.File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), name)
+            destFile.writeBytes(bytes)
+            Toast.makeText(context, "Saved to Downloads/$name", Toast.LENGTH_SHORT).show()
+        } else {
+            val localPath = if (url.startsWith("file://", ignoreCase = true)) url.substring(7) else url
+            val srcFile = java.io.File(localPath)
+            if (srcFile.exists()) {
+                val destFile = java.io.File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), name)
+                srcFile.copyTo(destFile, overwrite = true)
+                Toast.makeText(context, "Saved to Downloads/$name", Toast.LENGTH_SHORT).show()
+            } else {
+                Toast.makeText(context, "Image file not found", Toast.LENGTH_SHORT).show()
+            }
+        }
     }.onFailure {
-        Toast.makeText(context, "Could not download this image", Toast.LENGTH_SHORT).show()
+        Toast.makeText(context, "Could not save this image: ${it.localizedMessage}", Toast.LENGTH_SHORT).show()
     }
 }

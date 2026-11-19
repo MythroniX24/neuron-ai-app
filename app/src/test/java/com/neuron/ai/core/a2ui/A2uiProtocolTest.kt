@@ -159,4 +159,49 @@ class A2uiProtocolTest {
         assertTrue(A2uiValue.asBoolean(A2uiValue.resolve(invalid, surface.dataModel, surface.dataModel)) == false)
         assertTrue(A2uiValue.asBoolean(A2uiValue.resolve(valid, surface.dataModel, surface.dataModel)) == true)
     }
+
+    @Test
+    fun `resolves smart root when rootId is omitted or custom`() {
+        val source = """
+            {"version":"1.0","createSurface":{"surfaceId":"s1","components":[
+              {"id":"custom_card","component":"Card","child":"text1"},
+              {"id":"text1","component":"Text","text":"Card Content"}
+            ]}}
+        """.trimIndent()
+
+        val surface = A2uiProtocol.render(source).single()
+        assertNotNull(surface.root)
+        assertEquals("custom_card", surface.root?.id)
+        assertEquals("Card", surface.root?.type)
+    }
+
+    @Test
+    fun `parses direct component array and assigns root id if missing`() {
+        val source = """
+            [
+              {"component":"Card","child":"c1"},
+              {"id":"c1","component":"Text","text":"Direct component"}
+            ]
+        """.trimIndent()
+
+        val surfaces = A2uiProtocol.render(source)
+        assertEquals(1, surfaces.size)
+        val surface = surfaces.first()
+        assertNotNull(surface.root)
+        assertEquals("Card", surface.root?.type)
+        assertEquals("root", surface.root?.id)
+    }
+
+    @Test
+    fun `parses single component object directly`() {
+        val source = """
+            {"component":"Card","child":"t1"}
+        """.trimIndent()
+
+        val surfaces = A2uiProtocol.render(source)
+        assertEquals(1, surfaces.size)
+        val surface = surfaces.first()
+        assertNotNull(surface.root)
+        assertEquals("Card", surface.root?.type)
+    }
 }

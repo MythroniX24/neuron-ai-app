@@ -43,9 +43,26 @@ data class A2uiSurface(
 ) {
     fun component(id: String): A2uiComponent? = components[id]
 
-    /** The component to mount: `root` by contract, or the first one sent. */
+    /** The component to mount: `root` by contract, or the top-level card/container. */
     val root: A2uiComponent?
-        get() = components[rootId] ?: components["root"] ?: components.values.firstOrNull()
+        get() {
+            components[rootId]?.let { return it }
+            components["root"]?.let { return it }
+            // Find component not referenced as child by other components
+            val childIds = components.values.flatMap { comp ->
+                val list = mutableListOf<String>()
+                (comp.props["child"] as? JsonPrimitive)?.content?.let { list.add(it) }
+                (comp.props["children"] as? JsonArray)?.forEach { elem ->
+                    (elem as? JsonPrimitive)?.content?.let { list.add(it) }
+                }
+                list
+            }.toSet()
+            val cards = components.values.filter { it.type == "Card" && it.id !in childIds }
+            if (cards.isNotEmpty()) return cards.first()
+            val topLevel = components.values.filter { it.id !in childIds }
+            if (topLevel.isNotEmpty()) return topLevel.first()
+            return components.values.firstOrNull()
+        }
 }
 
 object A2uiProtocol {
@@ -65,17 +82,64 @@ object A2uiProtocol {
      * one message may still span several lines.
      */
     fun parseMessages(source: String): List<JsonObject> {
-        val text = source.trim().removePrefix("```a2ui").removePrefix("```json")
-            .removeSuffix("```").trim()
+        val text = source.trim()
+            .replaceFirst(Regex("""^```[a-zA-Z0-9_-]*\s*"""), "")
+            .replaceFirst(Regex("""\s*```$"""), "")
+            .trim()
         if (text.isEmpty()) return emptyList()
 
         val whole = runCatching { json.parseToJsonElement(text) }.getOrNull()
         if (whole != null) {
             when (whole) {
-                is JsonArray -> return whole.mapNotNull { it as? JsonObject }
+                is JsonArray -> {
+                    val isComponentArray = whole.isNotEmpty() && whole.all {
+                        it is JsonObject && (it.containsKey("component") || it.containsKey("id") || it.containsKey("type"))
+                    }
+                    if (isComponentArray) {
+                        return listOf(
+                            JsonObject(
+                                mapOf(
+                                    "version" to JsonPrimitive("1.0"),
+                                    "createSurface" to JsonObject(
+                                        mapOf(
+                                            "surfaceId" to JsonPrimitive("s1"),
+                                            "components" to whole
+                                        )
+                                    )
+                                )
+                            )
+                        )
+                    }
+                    return whole.mapNotNull { it as? JsonObject }
+                }
                 is JsonObject -> {
                     val nested = whole["messages"]
                     if (nested is JsonArray) return nested.mapNotNull { it as? JsonObject }
+
+                    if (whole.containsKey("createSurface") && whole.containsKey("updateComponents")) {
+                        return listOf(
+                            JsonObject(mapOf("createSurface" to whole["createSurface"]!!)),
+                            JsonObject(mapOf("updateComponents" to whole["updateComponents"]!!))
+                        )
+                    }
+
+                    if (whole.containsKey("component") || whole.containsKey("components") || whole.containsKey("type")) {
+                        val componentsElement = whole["components"] ?: JsonArray(listOf(whole))
+                        return listOf(
+                            JsonObject(
+                                mapOf(
+                                    "version" to JsonPrimitive("1.0"),
+                                    "createSurface" to JsonObject(
+                                        mapOf(
+                                            "surfaceId" to (whole.str("surfaceId")?.let { JsonPrimitive(it) } ?: JsonPrimitive("s1")),
+                                            "components" to componentsElement
+                                        )
+                                    )
+                                )
+                            )
+                        )
+                    }
+
                     return listOf(whole)
                 }
                 else -> Unit
@@ -219,9 +283,9 @@ object A2uiProtocol {
             else -> JsonArray(emptyList())
         }
         val out = LinkedHashMap<String, A2uiComponent>()
-        list.forEach { entry ->
-            val obj = entry as? JsonObject ?: return@forEach
-            val id = obj.str("id") ?: return@forEach
+        list.forEachIndexed { index, entry ->
+            val obj = entry as? JsonObject ?: return@forEachIndexed
+            val id = obj.str("id") ?: if (out.isEmpty()) "root" else "c_${index + 1}"
             val declaration = obj["component"]
             val type: String?
             val props: JsonObject
@@ -239,11 +303,11 @@ object A2uiProtocol {
                 }
                 else -> {
                     // Tolerate "type": "Text" and objects that only carry props.
-                    type = obj.str("type") ?: obj.keys.firstOrNull { it != "id" }
+                    type = obj.str("type") ?: if (obj.containsKey("title") || obj.containsKey("text")) "Card" else obj.keys.firstOrNull { it != "id" }
                     props = JsonObject(obj.filterKeys { it != "id" && it != "type" })
                 }
             }
-            if (type == null) return@forEach
+            if (type == null) return@forEachIndexed
             out[id] = A2uiComponent(id = id, type = type, props = props)
         }
         return out

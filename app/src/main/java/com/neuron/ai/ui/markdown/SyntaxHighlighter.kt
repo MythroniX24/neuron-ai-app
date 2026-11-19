@@ -78,13 +78,30 @@ object SyntaxHighlighter {
             "fn", "let", "mut", "struct", "enum", "trait", "impl", "pub", "use", "mod",
             "match", "if", "else", "loop", "while", "for", "in", "return", "self",
             "Some", "None", "Ok", "Err", "true", "false", "async", "await", "move"
-        )
+        ),
+        "json" to setOf("true", "false", "null"),
+        "sql" to setOf(
+            "select", "from", "where", "insert", "into", "values", "update", "set", "delete",
+            "create", "table", "alter", "drop", "index", "join", "left", "right", "inner",
+            "outer", "on", "group", "by", "order", "asc", "desc", "having", "limit", "offset",
+            "and", "or", "not", "null", "is", "in", "like", "between", "union", "all", "as",
+            "primary", "key", "foreign", "references", "default", "distinct", "count", "sum"
+        ),
+        "sh" to setOf(
+            "if", "then", "else", "elif", "fi", "case", "esac", "for", "while", "until", "do",
+            "done", "in", "function", "return", "exit", "export", "local", "readonly", "echo",
+            "cd", "pwd", "ls", "grep", "awk", "sed", "cat", "mkdir", "rm", "cp", "mv", "chmod",
+            "curl", "wget", "sudo", "git", "source", "alias"
+        ),
+        "yaml" to setOf("true", "false", "yes", "no", "null", "on", "off")
     )
 
     private val aliases = mapOf(
         "kt" to "kotlin", "kts" to "kotlin",
         "js" to "javascript", "ts" to "javascript", "tsx" to "javascript", "jsx" to "javascript",
-        "py" to "python", "golang" to "go", "rs" to "rust"
+        "py" to "python", "golang" to "go", "rs" to "rust",
+        "bash" to "sh", "shell" to "sh", "zsh" to "sh",
+        "yml" to "yaml", "json5" to "json"
     )
 
     fun highlight(code: String, language: String?, dark: Boolean = false): AnnotatedString {
@@ -108,11 +125,29 @@ object SyntaxHighlighter {
 
             // Comments.
             val commentStyle = SpanStyle(color = palette.comment, fontStyle = FontStyle.Italic)
-            if (key == "python") {
-                allMatches(code, Regex("""#[^\n]*""")) { style(it.first, it.last + 1, commentStyle) }
-            } else {
-                allMatches(code, Regex("""//[^\n]*""")) { style(it.first, it.last + 1, commentStyle) }
-                allMatches(code, Regex("""/\*[\s\S]*?\*/""")) { style(it.first, it.last + 1, commentStyle) }
+            when (key) {
+                "python", "sh", "yaml" -> {
+                    allMatches(code, Regex("""#[^\n]*""")) { style(it.first, it.last + 1, commentStyle) }
+                }
+                "sql" -> {
+                    allMatches(code, Regex("""--[^\n]*""")) { style(it.first, it.last + 1, commentStyle) }
+                    allMatches(code, Regex("""/\*[\s\S]*?\*/""")) { style(it.first, it.last + 1, commentStyle) }
+                }
+                else -> {
+                    allMatches(code, Regex("""//[^\n]*""")) { style(it.first, it.last + 1, commentStyle) }
+                    allMatches(code, Regex("""/\*[\s\S]*?\*/""")) { style(it.first, it.last + 1, commentStyle) }
+                }
+            }
+
+            // JSON keys: highlight property names distinctly
+            if (key == "json") {
+                val keyStyle = SpanStyle(color = palette.keyword, fontWeight = FontWeight.SemiBold)
+                allMatches(code, Regex(""""([^"\\\n]+)"\s*:""")) { range ->
+                    val colonIdx = code.indexOf(':', range.first)
+                    if (colonIdx > range.first && claim(range.first until colonIdx)) {
+                        style(range.first, colonIdx, keyStyle)
+                    }
+                }
             }
 
             // Strings (multi-line triple quotes, then single-line).
