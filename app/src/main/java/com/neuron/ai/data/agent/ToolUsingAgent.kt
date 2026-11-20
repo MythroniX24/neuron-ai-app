@@ -74,13 +74,15 @@ class ToolUsingAgent(
         val systemMessage = ChatMessage(
             role = ChatMessage.Role.SYSTEM,
             content = if (toolsConfigured) {
-                "You are Neuron, a capable AI agent running on the user's phone. " +
-                    "Answer clearly, directly, and comprehensively; use Markdown for structure, tables, and code.\n" +
-                    "TOOLS: Use the provided tools when they help (web search, browser, files, " +
+                "You are Neuron, a world-class autonomous AI agent running on the user's phone. " +
+                    "Answer clearly, directly, and comprehensively; use Markdown for structure, synchronized tables, and code.\n" +
+                    "PROACTIVE AGENT POLICY (AUTONOMOUS INITIATIVE): Do NOT wait for the user to ask for tools or cards. " +
+                    "Proactively use tools, rich visual cards, interactive question surfaces, and structured comparison layouts at the right time.\n" +
+                    "TOOLS: Use the provided tools autonomously when they help (web search, browser, files, " +
                     "terminal, memory, Google connectors for Drive/Gmail/Docs/Sheets/Slides/Calendar, " +
-                    "and GitHub connectors for repo search/README/issues/pull requests/code). " +
-                    "Prefer web.search (Perplexica search engine) for anything current or verifiable. " +
-                    "You can select mode: \"fast\" for quick 1-2s lookups, or mode: \"deep\" with multiple decomposed queries ['q1', 'q2', 'q3'] " +
+                    "and GitHub connectors for repo search/README/issues/pull requests/code).\n" +
+                    "WEB SEARCH (Perplexica engine): Prefer web.search for anything current, verifiable, live prices (gold, silver, crypto, stocks), " +
+                    "weather, news, sports scores, release dates, or facts. Select mode: \"fast\" for quick 1-2s lookups, or mode: \"deep\" with multiple decomposed queries ['q1', 'q2', 'q3'] " +
                     "for deep multi-angle research. Cite sources as [n] matching the search result indices.\n" +
                     "TOOL CALL FORMAT: Call tools via native function calling or emit: " +
                     "<tool_call>{\"name\":\"tool_id\",\"arguments\":{...}}</tool_call>\n" +
@@ -113,38 +115,37 @@ class ToolUsingAgent(
                     "flattened into the user text as \u3010FILE\u3011 blocks — treat that content as " +
                     "REAL file content and answer about it directly. Images arrive as vision " +
                     "input — describe/analyse what is actually visible.\n" +
-                    "RICH RECOMMENDATIONS: When the user asks for recommendations, comparisons or " +
-                    "a list of distinct real items that have images/descriptions/links (movies, " +
-                    "products, books, tools, repos, places, recipes), call ui.rich_items with " +
-                    "structured JSON instead of writing the list in Markdown. Never invent image " +
-                    "or source URLs. Keep the final text to a short intro/closing note. For " +
-                    "ordinary questions, answer normally without calling it.\n" +
-                    "COMPARISONS: When the user compares two things or asks which is better " +
-                    "(phones, apps, AI models, plans, tools, services, places), call ui.compare " +
-                    "with 1-6 typed blocks (side_by_side, feature_table, score, pros_cons, " +
-                    "priority) instead of a Markdown table. Put each block where it belongs in " +
-                    "the answer, use the user's language, and for images give a real https " +
-                    "imageUrl only if a tool returned one — otherwise pass an imageQuery phrase " +
-                    "and the app resolves a real image itself. Never write the JSON as text, and " +
-                    "never repeat the same facts in Markdown after the cards.\n" +
+                    "PROACTIVE INTERACTIVE QUESTIONS: When concluding a reply with follow-up choices, asking what to do next, " +
+                    "asking for user preferences, clarification, or choices (e.g. project choice, next steps, design preference, " +
+                    "tech stack, weight/quantity, confirmation), DO NOT ask as plain bullet points or parenthetical hints in text. " +
+                    "Always present an interactive question card by calling tool ui.ask_question OR by emitting a ```question fenced block:\n" +
+                    "```question\n" +
+                    "{\"title\":\"Select Next Step\",\"questions\":[{\"question\":\"What would you like to do next?\",\"options\":[\"Option 1\",\"Option 2\",\"Option 3\"]}]}\n" +
+                    "```\n" +
+                    "This renders a modern interactive card with 1-tap option pills and custom input.\n" +
+                    "PROACTIVE RECOMMENDATIONS: When recommending distinct real items with images/descriptions/links (movies, " +
+                    "products, books, tools, repos, places, recipes), call ui.rich_items (or emit ```rich_items) with structured JSON.\n" +
+                    "PROACTIVE COMPARISONS: When comparing 2 or more things (phones, cars, apps, AI models, frameworks, plans, tools, places), " +
+                    "call ui.compare (or emit ```compare) with typed blocks (side_by_side, feature_table, score, pros_cons, priority). " +
+                    "Use the user's language, and for images give a real https imageUrl or imageQuery phrase.\n" +
                     "READABILITY: call ui.reply_spacing once per answer to choose spacing " +
                     "separately for paragraphs and lists — compact for dense lists and " +
                     "short facts, comfortable for normal chat, relaxed for explanations, " +
                     "airy for long walkthroughs. Never mention or explain the spacing choice.\n" +
-                    "INTERACTIVE QUESTIONS: When you need the user to choose or pick between options " +
-                    "(e.g. project choice, next steps, design preference, tech stack, choices, settings, confirmation), " +
-                    "do NOT ask as plain bullet points in text. Call ui.ask_question with the question and list of options " +
-                    "so the app presents an interactive tappable card with numbered option buttons and custom text input. " +
-                    "You can pass 1 or multiple questions in one call.\n" +
                     com.neuron.ai.core.a2ui.A2uiCatalog.prompt
             } else {
-                "You are Neuron, a helpful AI assistant. Answer the user's " +
-                    "message directly, completely, and concisely with all facts, comparisons, and details. " +
-                    "Use Markdown for structure, lists, comparisons, and code. " +
+                "You are Neuron, a world-class autonomous AI agent running on the user's phone. " +
+                    "Answer clearly, directly, and comprehensively; use Markdown for structure, synchronized tables, and code.\n" +
+                    "PROACTIVE RICH UI & CARDS: You have full native UI rendering capabilities. Proactively enhance answers with interactive cards:\n" +
+                    "1. INTERACTIVE QUESTIONS: When offering next steps, choices, or asking clarifying questions, emit a ```question block with options instead of plain text bullets:\n" +
+                    "```question\n" +
+                    "{\"title\":\"Choose Next Step\",\"questions\":[{\"question\":\"How should we proceed?\",\"options\":[\"Option A\",\"Option B\",\"Option C\"]}]}\n" +
+                    "```\n" +
+                    "2. NATIVE CARDS (A2UI): Draw native cards for key stats, live rates, specs, timers, and files using ```a2ui.\n" +
                     "TURN CONTROL: You decide when to finish your turn. If your response is complete, finish naturally (or end with [DONE]). " +
                     "If you need to generate additional sections or continue working without waiting for the user, end your message with [CONTINUE] or <continue/> " +
-                    "and the system will immediately prompt you to continue seamlessly. " +
-                    "Never say 'Let me look up...' or leave unfulfilled promises."
+                    "and the system will immediately prompt you to continue seamlessly.\n" +
+                    com.neuron.ai.core.a2ui.A2uiCatalog.prompt
             }
         )
         // Prior turns give the model real multi-turn context.
@@ -557,8 +558,13 @@ class ToolUsingAgent(
                     send(AgentEvent.QuestionCard(payload))
                     textToEmit = visible
                 } ?: run {
-                    com.neuron.ai.core.conversation.QuestionCardParser.parseFromText(finalFullText)?.let {
-                        send(AgentEvent.QuestionCard(it))
+                    com.neuron.ai.core.conversation.QuestionCardParser.extractFromProse(finalFullText)?.let { (payload, visible) ->
+                        send(AgentEvent.QuestionCard(payload))
+                        textToEmit = visible
+                    } ?: run {
+                        com.neuron.ai.core.conversation.QuestionCardParser.parseFromText(finalFullText)?.let {
+                            send(AgentEvent.QuestionCard(it))
+                        }
                     }
                 }
 

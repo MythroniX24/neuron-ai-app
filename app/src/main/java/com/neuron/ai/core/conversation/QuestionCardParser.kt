@@ -87,11 +87,13 @@ object QuestionCardParser {
     }
 
     /**
-     * Extracts a fenced question block and returns the payload paired with the
+     * Extracts a fenced question block (or XML tag or JSON block) and returns the payload paired with the
      * remaining visible text (with the fenced block removed).
      */
     fun extractFenced(text: String): Pair<QuestionCardPayload, String>? {
         if (text.isBlank()) return null
+
+        // 1. Standard markdown fence ```question or ```ask_question
         val fence = Regex("""```(?:question|ask_question)\s*([\s\S]*?)```""")
         fence.findAll(text).forEach { match ->
             val body = match.groupValues.getOrNull(1).orEmpty()
@@ -99,6 +101,113 @@ object QuestionCardParser {
             val visible = text.removeRange(match.range).trim()
             return payload to visible
         }
+
+        // 2. XML tags <question>...</question> or <ask_question>...</ask_question> or <interactive_question>...</interactive_question>
+        val xmlRegex = Regex("""<(?:question|ask_question|interactive_question)>\s*([\s\S]*?)\s*</(?:question|ask_question|interactive_question)>""")
+        xmlRegex.findAll(text).forEach { match ->
+            val body = match.groupValues.getOrNull(1).orEmpty()
+            val payload = parse(body) ?: return@forEach
+            val visible = text.removeRange(match.range).trim()
+            return payload to visible
+        }
+
+        // 3. Fenced json ```json with "questions" or "question"
+        val jsonFence = Regex("""```(?:json)?\s*(\{\s*"(?:questions|question)"[\s\S]*?\})\s*```""")
+        jsonFence.findAll(text).forEach { match ->
+            val body = match.groupValues.getOrNull(1).orEmpty()
+            val payload = parse(body) ?: return@forEach
+            val visible = text.removeRange(match.range).trim()
+            return payload to visible
+        }
+
+        return null
+    }
+
+    /**
+     * Heuristically detects if the trailing part of the AI's response is asking a multi-choice
+     * question in natural language (numbered/bulleted list or parenthetical choices), and
+     * promotes it to an interactive question card so the user gets tappable options.
+     */
+    fun extractFromProse(text: String): Pair<QuestionCardPayload, String>? {
+        if (text.isBlank()) return null
+        val trimmed = text.trim()
+        val lines = trimmed.lines()
+        if (lines.isEmpty()) return null
+
+        // Case A: Trailing list of numbered or bulleted options (e.g. 1. / 2. / - / * / •)
+        val itemRegex = Regex("""^\s*(?:[1-9]\.?|[1-9]\)|[-*•])\s+(.+)$""")
+        val trailingItems = mutableListOf<String>()
+        var itemStartIndex = lines.size
+
+        for (idx in lines.indices.reversed()) {
+            val line = lines[idx].trim()
+            if (line.isBlank()) {
+                if (trailingItems.isNotEmpty()) continue else continue
+            }
+            val match = itemRegex.find(line)
+            if (match != null) {
+                trailingItems.add(0, match.groupValues[1].trim())
+                itemStartIndex = idx
+                if (trailingItems.size > 6) break
+            } else {
+                break
+            }
+        }
+
+        if (trailingItems.size in 2..6 && itemStartIndex > 0) {
+            var leadInLine = ""
+            for (idx in (itemStartIndex - 1) downTo 0) {
+                val line = lines[idx].trim()
+                if (line.isNotBlank()) {
+                    leadInLine = line
+                    break
+                }
+            }
+
+            val looksLikeQuestion = leadInLine.endsWith("?") ||
+                leadInLine.endsWith(":") ||
+                listOf("choose", "select", "which", "option", "prefer", "next step", "would you like",
+                       "बताएं", "चुनें", "विकल्प", "कदम", "क्या आप", "पसंद").any {
+                    leadInLine.contains(it, ignoreCase = true)
+                }
+
+            if (looksLikeQuestion && leadInLine.isNotBlank()) {
+                val cleanQuestion = leadInLine.trimEnd(':').trim()
+                val question = InteractiveQuestion(
+                    question = cleanQuestion,
+                    options = trailingItems,
+                    allowCustom = true
+                )
+                val payload = QuestionCardPayload(questions = listOf(question))
+                val remainingLines = lines.take(itemStartIndex).joinToString("\n").trim()
+                return payload to remainingLines
+            }
+        }
+
+        // Case B: Trailing sentence with parenthetical choices like (जैसे 10 ग्राम, 50 ग्राम या 1 किलो)
+        // or (e.g. option A, option B, or option C)
+        val parentheticalRegex = Regex("""\((?:जैसे|e\.g\.|for example|such as|like)\s*[:]?\s*([^)]+)\)""")
+        val lastSentence = lines.lastOrNull { it.isNotBlank() }?.trim().orEmpty()
+        val match = parentheticalRegex.find(lastSentence)
+        if (match != null) {
+            val inside = match.groupValues[1].trim()
+            val rawTokens = inside.split(Regex(""",|\s+या\s+|\s+or\s+|\/"""))
+                .map { it.replace(Regex("""^[1-9]\.?\s*"""), "").trim() }
+                .filter { it.length in 2..40 }
+
+            if (rawTokens.size in 2..6) {
+                val questionText = lastSentence.replace(match.value, "").replace(Regex("""\s+"""), " ").trim()
+                val question = InteractiveQuestion(
+                    question = if (questionText.isNotBlank()) questionText else "विकल्प चुनें (Select an option):",
+                    options = rawTokens,
+                    allowCustom = true
+                )
+                val payload = QuestionCardPayload(questions = listOf(question))
+                val remaining = trimmed.removeSuffix(lastSentence).trim()
+                return payload to (if (remaining.isNotBlank()) remaining else lastSentence)
+            }
+        }
+
         return null
     }
 }

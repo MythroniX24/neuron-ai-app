@@ -114,9 +114,9 @@ data class ProviderConfig(
     /** Extra HTTP headers required by some gateways. */
     val customHeaders: Map<String, String> = emptyMap(),
     /** Whether image attachments may be sent as vision input. */
-    val visionEnabled: Boolean = false,
+    val visionEnabled: Boolean = true,
     /** Whether the agent may offer registered tools to this provider's models. */
-    val toolsEnabled: Boolean = false,
+    val toolsEnabled: Boolean = true,
     val enabled: Boolean = true
 ) {
     enum class Kind { OPENAI_COMPATIBLE }

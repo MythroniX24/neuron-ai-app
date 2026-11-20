@@ -1028,8 +1028,8 @@ class ChatViewModel(
         val capabilityModel = Model(
             id = modelId,
             displayName = modelId,
-            supportsVision = visionEnabled,
-            supportsTools = toolsEnabled,
+            supportsVision = com.neuron.ai.data.provider.ModelCapabilities.estimateVision(modelId, visionEnabled),
+            supportsTools = com.neuron.ai.data.provider.ModelCapabilities.estimateTools(modelId, toolsEnabled),
             contextWindowTokens = contextWindowTokens
                 ?: com.neuron.ai.data.provider.ModelCapabilities.estimateContextWindow(modelId)
         )
@@ -1083,7 +1083,7 @@ class ChatViewModel(
             emptyList<com.neuron.ai.core.conversation.WebSource>()
         var finishedSpacing = ReplySpacingProfile()
 
-        val effectiveToolPolicy = if (toolsEnabled && capabilityModel.supportsTools) {
+        val effectiveToolPolicy = if (capabilityModel.supportsTools) {
             com.neuron.ai.core.agent.ToolPolicy.Only(toolIdsProvider())
         } else {
             com.neuron.ai.core.agent.ToolPolicy.Only(emptySet())
@@ -1092,7 +1092,7 @@ class ChatViewModel(
         val agent = agentFactory(
             provider,
             capabilityModel,
-            if (toolsEnabled && capabilityModel.supportsTools) toolIdsProvider() else emptySet()
+            if (capabilityModel.supportsTools) toolIdsProvider() else emptySet()
         )
 
         try {
@@ -1300,6 +1300,13 @@ class ChatViewModel(
                                     ?.let { (card, visible) ->
                                         _activeQuestionCard.value = card
                                         summary = visible
+                                    } ?: run {
+                                        com.neuron.ai.core.conversation.QuestionCardParser
+                                            .extractFromProse(summary)
+                                            ?.let { (card, visible) ->
+                                                _activeQuestionCard.value = card
+                                                summary = visible
+                                            }
                                     }
                             }
                             // When fenced blocks (recommendations, comparisons, question cards) were extracted,
