@@ -30,7 +30,7 @@ object InlineMarkdown {
         val label: String? = null
     )
 
-    private enum class ContentType { BOLD, ITALIC, CODE, LINK, MATH }
+    private enum class ContentType { BOLD, ITALIC, CODE, LINK, MATH, HIGHLIGHT }
 
     @Composable
     fun toAnnotatedString(
@@ -39,6 +39,8 @@ object InlineMarkdown {
     ): AnnotatedString {
         // Theme-aware inline colors, read once per call.
         val codeBackground = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.12f)
+        val highlightBackground = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)
+        val highlightColor = MaterialTheme.colorScheme.primary
         val linkColor = MaterialTheme.colorScheme.primary
         val tokens = collectTokens(text)
 
@@ -55,6 +57,16 @@ object InlineMarkdown {
                     }
 
                     ContentType.ITALIC -> withStyle(SpanStyle(fontStyle = FontStyle.Italic)) {
+                        append(token.payload)
+                    }
+
+                    ContentType.HIGHLIGHT -> withStyle(
+                        SpanStyle(
+                            background = highlightBackground,
+                            color = highlightColor,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    ) {
                         append(token.payload)
                     }
 
@@ -90,6 +102,12 @@ object InlineMarkdown {
             if (range.first >= 0 && range.last < text.length) {
                 tokens += Token(range, type, payload, label)
             }
+        }
+
+        // Highlights (==text== or <mark>text</mark>)
+        Regex("""==(.+?)==|(?i)<mark>(.+?)</mark>""").findAll(text).forEach {
+            val payload = it.groupValues[1].ifEmpty { it.groupValues[2] }
+            add(it.range, ContentType.HIGHLIGHT, payload)
         }
 
         // Bold before italic so ** wins.

@@ -573,7 +573,7 @@ private fun ModelsSearch(
                     .focusRequester(focusRequester),
                 placeholder = { Text("Search GGUF models") },
                 singleLine = true,
-                shape = RoundedCornerShape(28.dp),
+                shape = RoundedCornerShape(12.dp),
                 leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null) },
                 trailingIcon = {
                     if (state.searchQuery.isNotEmpty()) {

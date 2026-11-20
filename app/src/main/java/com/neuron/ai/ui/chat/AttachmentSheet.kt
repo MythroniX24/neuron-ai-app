@@ -61,7 +61,7 @@ fun AttachmentSheet(
     onToggleBrowser: (Boolean) -> Unit
 ) {
     Surface(
-        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+        shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp),
         color = MaterialTheme.colorScheme.surface,
         tonalElevation = 4.dp,
         shadowElevation = 12.dp,

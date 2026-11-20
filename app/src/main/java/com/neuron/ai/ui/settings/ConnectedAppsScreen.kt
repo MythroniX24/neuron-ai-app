@@ -538,7 +538,7 @@ fun ConnectedAppsScreen(
 @Composable
 private fun IntroCard(accountCount: Int) {
     Surface(
-        shape = RoundedCornerShape(20.dp),
+        shape = RoundedCornerShape(12.dp),
         color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)
     ) {
         Column(Modifier.padding(Spacing.lg)) {
@@ -581,7 +581,7 @@ private fun ServiceCard(
     val linked = accounts.filter { it.canUse(service) }
     val connecting = busyService == service
     Surface(
-        shape = RoundedCornerShape(20.dp),
+        shape = RoundedCornerShape(12.dp),
         color = MaterialTheme.colorScheme.surface,
         border = androidx.compose.foundation.BorderStroke(
             width = 1.dp,
@@ -771,7 +771,7 @@ private fun DiagnosticsCard(
 ) {
     val snapshot = viewModel.diagnosticsSnapshot()
     Surface(
-        shape = RoundedCornerShape(20.dp),
+        shape = RoundedCornerShape(12.dp),
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
     ) {
         Column(Modifier.padding(Spacing.md)) {
@@ -911,7 +911,7 @@ private fun GitHubServiceCard(
     onDisconnect: () -> Unit
 ) {
     Surface(
-        shape = RoundedCornerShape(20.dp),
+        shape = RoundedCornerShape(12.dp),
         color = MaterialTheme.colorScheme.surface,
         border = androidx.compose.foundation.BorderStroke(
             width = 1.dp,

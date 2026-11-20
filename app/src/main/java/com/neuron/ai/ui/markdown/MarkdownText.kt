@@ -24,9 +24,11 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
@@ -264,36 +266,112 @@ private fun CodeBlockView(block: MdBlock.CodeBlock) {
 
 @Composable
 private fun TableView(table: MdBlock.Table) {
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .horizontalScroll(rememberScrollState())
-            .border(
-                BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
-                RoundedCornerShape(Radius.sm)
-            )
-    ) {
-        Row(Modifier.background(MaterialTheme.colorScheme.surfaceVariant)) {
-            table.headers.forEach { header ->
-                Text(
-                    text = InlineMarkdown.toAnnotatedString(header),
-                    style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier
-                        .padding(Spacing.sm)
-                        .widthIn(min = 72.dp)
-                )
+    val numCols = maxOf(table.headers.size, table.rows.maxOfOrNull { it.size } ?: 0)
+    if (numCols == 0) return
+
+    val headers = List(numCols) { i -> table.headers.getOrElse(i) { "" } }
+    val rows = table.rows.map { row -> List(numCols) { i -> row.getOrElse(i) { "" } } }
+
+    val colWidths = remember(headers, rows) {
+        List(numCols) { c ->
+            val headerLen = headers[c].length
+            val maxRowLen = rows.maxOfOrNull { it[c].length } ?: 0
+            val maxLen = maxOf(headerLen, maxRowLen)
+            when {
+                maxLen <= 6 -> 84.dp
+                maxLen <= 14 -> 120.dp
+                maxLen <= 24 -> 160.dp
+                maxLen <= 40 -> 210.dp
+                else -> 260.dp
             }
         }
-        table.rows.forEach { row ->
-            Row {
-                row.forEach { cell ->
-                    Text(
-                        text = InlineMarkdown.toAnnotatedString(cell),
-                        style = MaterialTheme.typography.bodySmall,
+    }
+
+    Surface(
+        shape = RoundedCornerShape(10.dp),
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = Spacing.xs)
+    ) {
+        Column(
+            modifier = Modifier.horizontalScroll(rememberScrollState())
+        ) {
+            // Header Row
+            Row(
+                modifier = Modifier
+                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f))
+                    .height(IntrinsicSize.Min),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                headers.forEachIndexed { idx, header ->
+                    if (idx > 0) {
+                        Box(
+                            modifier = Modifier
+                                .width(1.dp)
+                                .fillMaxHeight()
+                                .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                        )
+                    }
+                    Box(
                         modifier = Modifier
-                            .padding(Spacing.sm)
-                            .widthIn(min = 72.dp)
+                            .width(colWidths[idx])
+                            .padding(horizontal = 12.dp, vertical = 10.dp)
+                    ) {
+                        Text(
+                            text = InlineMarkdown.toAnnotatedString(header),
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                }
+            }
+
+            HorizontalDivider(
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.8f),
+                thickness = 1.dp
+            )
+
+            // Data Rows
+            rows.forEachIndexed { rIdx, row ->
+                val bg = if (rIdx % 2 == 1) {
+                    MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.25f)
+                } else {
+                    Color.Transparent
+                }
+                Row(
+                    modifier = Modifier
+                        .background(bg)
+                        .height(IntrinsicSize.Min),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    row.forEachIndexed { cIdx, cell ->
+                        if (cIdx > 0) {
+                            Box(
+                                modifier = Modifier
+                                    .width(1.dp)
+                                    .fillMaxHeight()
+                                    .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
+                            )
+                        }
+                        Box(
+                            modifier = Modifier
+                                .width(colWidths[cIdx])
+                                .padding(horizontal = 12.dp, vertical = 9.dp)
+                        ) {
+                            Text(
+                                text = InlineMarkdown.toAnnotatedString(cell),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                    }
+                }
+                if (rIdx < rows.lastIndex) {
+                    HorizontalDivider(
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
+                        thickness = 0.5.dp
                     )
                 }
             }

@@ -113,6 +113,7 @@ import com.neuron.ai.core.a2ui.A2uiValue
 import com.neuron.ai.ui.components.FullScreenImage
 import com.neuron.ai.ui.components.LocalImageOpener
 import com.neuron.ai.ui.files.FileRef
+import com.neuron.ai.ui.markdown.InlineMarkdown
 import com.neuron.ai.ui.files.LocalFileOpener
 import com.neuron.ai.ui.files.OpenFileRequest
 import com.neuron.ai.ui.files.downloadToDownloads
@@ -320,25 +321,30 @@ private fun A2uiComponentView(
                     modifier = Modifier
                         .background(
                             MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f),
-                            RoundedCornerShape(Radius.xs)
+                            RoundedCornerShape(6.dp)
                         )
-                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                        .border(
+                            1.dp,
+                            MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
+                            RoundedCornerShape(6.dp)
+                        )
+                        .padding(horizontal = 8.dp, vertical = 3.dp)
                 ) {
                     Text(
-                        text = text,
+                        text = InlineMarkdown.toAnnotatedString(text),
                         style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
                         color = MaterialTheme.colorScheme.primary
                     )
                 }
             } else if (variant == "caption") {
                 Text(
-                    text = text,
+                    text = InlineMarkdown.toAnnotatedString(text),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             } else if (variant in listOf("title", "headline")) {
                 Text(
-                    text = text,
+                    text = InlineMarkdown.toAnnotatedString(text),
                     style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
                     color = MaterialTheme.colorScheme.onSurface
                 )
@@ -530,12 +536,12 @@ private fun A2uiBadge(text: String, variant: String, icon: String?) {
     }
 
     Surface(
-        shape = CircleShape,
+        shape = RoundedCornerShape(6.dp),
         color = bgColor,
         border = BorderStroke(1.dp, borderColor)
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = Spacing.sm, vertical = 2.dp),
+            modifier = Modifier.padding(horizontal = Spacing.sm, vertical = 3.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
@@ -548,7 +554,7 @@ private fun A2uiBadge(text: String, variant: String, icon: String?) {
                 )
             }
             Text(
-                text = text,
+                text = InlineMarkdown.toAnnotatedString(text),
                 style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium),
                 color = textColor
             )
@@ -582,13 +588,20 @@ private fun A2uiImage(
     scope: JsonElement
 ) {
     val context = LocalContext.current
-    val raw = resolver.string(component, "url", scope).orEmpty()
+    val raw = resolver.string(component, "url", scope)
+        ?: resolver.string(component, "src", scope)
+        ?: resolver.string(component, "source", scope)
+        ?: resolver.string(component, "uri", scope)
+        ?: resolver.string(component, "imageUrl", scope)
+        ?: resolver.string(component, "image_url", scope)
+        ?: ""
     if (raw.isBlank()) return
     val model = remember(raw) {
-        if (raw.startsWith("http") || raw.startsWith("content:") || raw.startsWith("file:")) {
-            raw
+        val trimmed = raw.trim()
+        if (trimmed.startsWith("http") || trimmed.startsWith("content:") || trimmed.startsWith("file:")) {
+            trimmed
         } else {
-            FileRef.resolve(context, raw)?.uri?.toString() ?: raw
+            FileRef.resolve(context, trimmed)?.uri?.toString() ?: trimmed
         }
     }
     val description = resolver.string(component, "description", scope)
@@ -879,7 +892,7 @@ private fun A2uiModal(
         properties = DialogProperties(usePlatformDefaultWidth = false)
     ) {
         Surface(
-            shape = RoundedCornerShape(20.dp),
+            shape = RoundedCornerShape(12.dp),
             color = MaterialTheme.colorScheme.surface,
             modifier = Modifier
                 .fillMaxWidth()

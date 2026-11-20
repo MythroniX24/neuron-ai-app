@@ -4,6 +4,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -12,21 +14,26 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.BrokenImage
+import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import coil.compose.AsyncImage
-import coil.compose.AsyncImagePainter
+import androidx.compose.ui.unit.sp
+import coil.compose.SubcomposeAsyncImage
+import coil.compose.SubcomposeAsyncImageContent
 import coil.request.CachePolicy
 import coil.request.ImageRequest
 import com.neuron.ai.ui.theme.Radius
@@ -35,8 +42,8 @@ import com.neuron.ai.ui.theme.Spacing
 /**
  * High-performance, low-latency image composable for chat and UI cards.
  *
- * Uses direct [AsyncImage] (avoiding Compose SubcomposeAsyncImage layout overhead)
- * with memory cache priority for sub-millisecond instant display.
+ * Configured with standard browser headers to prevent CDN 403 Forbidden drops
+ * (e.g. Unsplash, Wikimedia), with smooth loading placeholders and graceful error fallbacks.
  */
 @Composable
 fun NeuronAsyncImage(
@@ -50,13 +57,31 @@ fun NeuronAsyncImage(
     error: @Composable (BoxScope.() -> Unit)? = null
 ) {
     val context = LocalContext.current
-    val imageRequest = ImageRequest.Builder(context)
-        .data(model)
-        .crossfade(100)
-        .memoryCachePolicy(CachePolicy.ENABLED)
-        .diskCachePolicy(CachePolicy.ENABLED)
-        .networkCachePolicy(CachePolicy.ENABLED)
-        .build()
+
+    val sanitizedModel = remember(model) {
+        if (model is String) {
+            val trimmed = model.trim().trim('`', '"', '\'')
+            if (trimmed.startsWith("http://")) {
+                "https://${trimmed.removePrefix("http://")}"
+            } else {
+                trimmed
+            }
+        } else {
+            model
+        }
+    }
+
+    val imageRequest = remember(sanitizedModel) {
+        ImageRequest.Builder(context)
+            .data(sanitizedModel)
+            .crossfade(150)
+            .setHeader("User-Agent", "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36")
+            .setHeader("Accept", "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8")
+            .memoryCachePolicy(CachePolicy.ENABLED)
+            .diskCachePolicy(CachePolicy.ENABLED)
+            .networkCachePolicy(CachePolicy.ENABLED)
+            .build()
+    }
 
     val clickModifier = if (onClick != null) {
         Modifier.clickable(onClick = onClick)
@@ -64,10 +89,65 @@ fun NeuronAsyncImage(
         Modifier
     }
 
-    AsyncImage(
+    SubcomposeAsyncImage(
         model = imageRequest,
         contentDescription = contentDescription,
         contentScale = contentScale,
-        modifier = modifier.then(clickModifier)
+        modifier = modifier.then(clickModifier),
+        loading = {
+            if (placeholder != null) {
+                placeholder()
+            } else {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(24.dp),
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)
+                    )
+                }
+            }
+        },
+        error = {
+            if (error != null) {
+                error()
+            } else {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.25f))
+                        .padding(Spacing.sm),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.BrokenImage,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                            modifier = Modifier.size(28.dp)
+                        )
+                        if (!contentDescription.isNullOrBlank()) {
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                text = contentDescription,
+                                style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        success = {
+            SubcomposeAsyncImageContent()
+        }
     )
 }
