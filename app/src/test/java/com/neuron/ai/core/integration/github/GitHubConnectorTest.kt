@@ -69,4 +69,29 @@ class GitHubConnectorTest {
             assertTrue(tool.requiredCapabilities.contains(com.neuron.ai.core.permissions.Capability.GITHUB))
         }
     }
+
+    @Test
+    fun `startDeviceFlow parses device code response correctly`() = runTest {
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .setBody("""{"device_code":"dev_xyz","user_code":"1234-ABCD","verification_uri":"https://github.com/login/device","expires_in":900,"interval":5}""")
+        )
+
+        val customRepo = GitHubRepositoryImpl(
+            credentials = store,
+            dispatchers = TestDispatchers,
+            httpClient = OkHttpClient(),
+            authBaseUrl = server.url("/").toString()
+        )
+
+        val res = customRepo.startDeviceFlow()
+        assertTrue(res.isSuccess)
+        val deviceCode = res.getOrThrow()
+        assertEquals("dev_xyz", deviceCode.deviceCode)
+        assertEquals("1234-ABCD", deviceCode.userCode)
+        assertEquals("https://github.com/login/device", deviceCode.verificationUri)
+        assertEquals(900, deviceCode.expiresIn)
+        assertEquals(5, deviceCode.interval)
+    }
 }

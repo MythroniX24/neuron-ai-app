@@ -32,8 +32,13 @@ android {
             ?: project.findProperty("neuronBackendUrl")
             ?: "https://neuron-ai-backend.omgupta240511.workers.dev")
             .toString().trimEnd('/')
+        val githubClientId = (System.getenv("GITHUB_CLIENT_ID")
+            ?: project.findProperty("githubClientId")
+            ?: "Ov23li7SYoxct6ZJI2HB")
+            .toString()
         buildConfigField("String", "GOOGLE_WEB_CLIENT_ID", "\"$googleWebClientId\"")
         buildConfigField("String", "GOOGLE_BACKEND_URL", "\"$googleBackendUrl\"")
+        buildConfigField("String", "GITHUB_CLIENT_ID", "\"$githubClientId\"")
 
         ndk {
             // Local AI: 64-bit only — 32-bit ABIs would double build time and

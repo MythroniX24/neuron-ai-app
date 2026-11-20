@@ -113,6 +113,7 @@ fun ConnectedAppsScreen(
     val messageIsError by viewModel.messageIsError.collectAsStateWithLifecycle()
     val health by viewModel.health.collectAsStateWithLifecycle()
     val gitHubAccount by viewModel.gitHubAccount.collectAsStateWithLifecycle()
+    val gitHubAuthState by viewModel.gitHubAuthState.collectAsStateWithLifecycle()
 
     val scope = rememberCoroutineScope()
     var pendingService by remember { mutableStateOf<GoogleService?>(null) }
@@ -244,8 +245,9 @@ fun ConnectedAppsScreen(
             Spacer(Modifier.height(Spacing.sm))
             GitHubServiceCard(
                 account = gitHubAccount,
-                busy = busy,
-                onConnect = { showGitHubDialog = true },
+                busy = busy || gitHubAuthState !is ConnectedAppsViewModel.GitHubAuthState.Idle,
+                onSignIn = { viewModel.startGitHubDeviceAuth() },
+                onConnectWithToken = { showGitHubDialog = true },
                 onDisconnect = { viewModel.disconnectGitHub() }
             )
 
@@ -396,6 +398,140 @@ fun ConnectedAppsScreen(
                 }
             }
         )
+    }
+
+    when (val state = gitHubAuthState) {
+        is ConnectedAppsViewModel.GitHubAuthState.RequestingCode -> {
+            AlertDialog(
+                onDismissRequest = { viewModel.dismissGitHubAuthDialog() },
+                title = { Text("Connecting to GitHub...") },
+                text = {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(Spacing.md),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        CircularProgressIndicator(modifier = Modifier.size(24.dp))
+                        Text("Requesting authorization code from GitHub...")
+                    }
+                },
+                confirmButton = {},
+                dismissButton = {
+                    TextButton(onClick = { viewModel.dismissGitHubAuthDialog() }) { Text("Cancel") }
+                }
+            )
+        }
+        is ConnectedAppsViewModel.GitHubAuthState.AwaitingUser -> {
+            val context = LocalContext.current
+            AlertDialog(
+                onDismissRequest = { viewModel.dismissGitHubAuthDialog() },
+                title = {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Image(
+                            painter = painterResource(R.drawable.ic_brand_github),
+                            contentDescription = "GitHub",
+                            modifier = Modifier.size(28.dp)
+                        )
+                        Text("Authorize on GitHub")
+                    }
+                },
+                text = {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            text = "Enter this one-time code on GitHub to authorize Neuron AI:",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(Modifier.height(Spacing.md))
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)),
+                            modifier = Modifier.clickable {
+                                clipboard.setText(AnnotatedString(state.userCode))
+                            }
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = Spacing.lg, vertical = Spacing.md),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Text(
+                                    text = state.userCode,
+                                    style = MaterialTheme.typography.headlineMedium.copy(
+                                        fontFamily = FontFamily.Monospace,
+                                        fontWeight = FontWeight.Bold,
+                                        letterSpacing = 2.sp
+                                    ),
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                                Icon(
+                                    Icons.Outlined.ContentCopy,
+                                    contentDescription = "Copy code",
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
+                        Spacer(Modifier.height(Spacing.xs))
+                        Text(
+                            text = "Tap code to copy",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(Modifier.height(Spacing.md))
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                            Text(
+                                text = "Waiting for approval in browser...",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            clipboard.setText(AnnotatedString(state.userCode))
+                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(state.verificationUri))
+                            context.startActivity(intent)
+                        }
+                    ) {
+                        Text("Copy & Open GitHub ↗")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { viewModel.dismissGitHubAuthDialog() }) {
+                        Text("Cancel")
+                    }
+                }
+            )
+        }
+        is ConnectedAppsViewModel.GitHubAuthState.Error -> {
+            AlertDialog(
+                onDismissRequest = { viewModel.dismissGitHubAuthDialog() },
+                title = { Text("GitHub Sign In Failed") },
+                text = { Text(state.message) },
+                confirmButton = {
+                    Button(onClick = { viewModel.startGitHubDeviceAuth() }) {
+                        Text("Retry")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { viewModel.dismissGitHubAuthDialog() }) {
+                        Text("Close")
+                    }
+                }
+            )
+        }
+        is ConnectedAppsViewModel.GitHubAuthState.Success -> {
+            // Dismiss dialog automatically
+            viewModel.dismissGitHubAuthDialog()
+        }
+        ConnectedAppsViewModel.GitHubAuthState.Idle -> {
+            // Nothing to show
+        }
     }
 }
 
@@ -770,7 +906,8 @@ private fun GoogleService.iconRes(): Int = when (this) {
 private fun GitHubServiceCard(
     account: GitHubAccount?,
     busy: Boolean,
-    onConnect: () -> Unit,
+    onSignIn: () -> Unit,
+    onConnectWithToken: () -> Unit,
     onDisconnect: () -> Unit
 ) {
     Surface(
@@ -835,17 +972,29 @@ private fun GitHubServiceCard(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Text(
-                        text = "Not connected yet.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    TextButton(
+                        onClick = onConnectWithToken,
+                        enabled = !busy,
+                        contentPadding = PaddingValues(horizontal = Spacing.xs, vertical = Spacing.xs)
+                    ) {
+                        Text("Use Token", style = MaterialTheme.typography.labelSmall)
+                    }
                     Button(
-                        onClick = onConnect,
+                        onClick = onSignIn,
                         enabled = !busy,
                         contentPadding = PaddingValues(horizontal = Spacing.md, vertical = Spacing.xs)
                     ) {
-                        Text("Connect")
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Image(
+                                painter = painterResource(R.drawable.ic_brand_github),
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Text("Sign in with GitHub")
+                        }
                     }
                 }
             } else {

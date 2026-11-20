@@ -148,6 +148,61 @@ class ConnectedAppsViewModel(
         }
     }
 
+    sealed interface GitHubAuthState {
+        data object Idle : GitHubAuthState
+        data object RequestingCode : GitHubAuthState
+        data class AwaitingUser(
+            val userCode: String,
+            val verificationUri: String,
+            val deviceCode: String
+        ) : GitHubAuthState
+        data class Success(val account: com.neuron.ai.core.integration.github.GitHubAccount) : GitHubAuthState
+        data class Error(val message: String) : GitHubAuthState
+    }
+
+    private val _gitHubAuthState = MutableStateFlow<GitHubAuthState>(GitHubAuthState.Idle)
+    val gitHubAuthState: StateFlow<GitHubAuthState> = _gitHubAuthState.asStateFlow()
+
+    private var gitHubAuthJob: kotlinx.coroutines.Job? = null
+
+    fun startGitHubDeviceAuth() {
+        gitHubAuthJob?.cancel()
+        gitHubAuthJob = viewModelScope.launch(dispatchers.io) {
+            _gitHubAuthState.value = GitHubAuthState.RequestingCode
+            val deviceCodeResult = gitHubRepository.startDeviceFlow()
+            val deviceCode = deviceCodeResult.getOrElse {
+                _gitHubAuthState.value = GitHubAuthState.Error(it.message ?: "Failed to initiate GitHub authorization.")
+                return@launch
+            }
+
+            _gitHubAuthState.value = GitHubAuthState.AwaitingUser(
+                userCode = deviceCode.userCode,
+                verificationUri = deviceCode.verificationUri,
+                deviceCode = deviceCode.deviceCode
+            )
+
+            val tokenResult = gitHubRepository.pollDeviceFlow(deviceCode.deviceCode, deviceCode.interval)
+            tokenResult.fold(
+                onSuccess = { account ->
+                    _gitHubAuthState.value = GitHubAuthState.Success(account)
+                    _messageIsError.value = false
+                    _message.value = "Connected GitHub as @${account.login}"
+                },
+                onFailure = { error ->
+                    if (error !is kotlinx.coroutines.CancellationException) {
+                        _gitHubAuthState.value = GitHubAuthState.Error(error.message ?: "GitHub authorization failed.")
+                    }
+                }
+            )
+        }
+    }
+
+    fun dismissGitHubAuthDialog() {
+        gitHubAuthJob?.cancel()
+        gitHubAuthJob = null
+        _gitHubAuthState.value = GitHubAuthState.Idle
+    }
+
     fun refresh() {
         viewModelScope.launch(dispatchers.io) {
             _busy.value = true

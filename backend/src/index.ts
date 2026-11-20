@@ -40,6 +40,7 @@ export interface Env {
   TOKEN_ENCRYPTION_KEY: string;
   BACKEND_AUTH_SECRET: string;
   GOOGLE_REDIRECT_URI?: string;
+  GITHUB_CLIENT_ID?: string;
 }
 
 const SESSION_TTL_SECONDS = 30 * 24 * 60 * 60;
@@ -1627,6 +1628,31 @@ export default {
       }
       if (url.pathname === "/auth/google/accounts" && request.method === "GET") {
         return await handleAccounts(request, env);
+      }
+
+      if (url.pathname === "/auth/github/config" && request.method === "GET") {
+        return json({ clientId: env.GITHUB_CLIENT_ID || "Ov23li7SYoxct6ZJI2HB" });
+      }
+      if (url.pathname === "/auth/github/device-code" && request.method === "POST") {
+        const clientId = env.GITHUB_CLIENT_ID || "Ov23li7SYoxct6ZJI2HB";
+        const res = await fetch("https://github.com/login/device/code", {
+          method: "POST",
+          headers: { "Accept": "application/json", "Content-Type": "application/x-www-form-urlencoded" },
+          body: `client_id=${encodeURIComponent(clientId)}&scope=repo,read:user`,
+        });
+        const data = await res.json();
+        return json(data);
+      }
+      if (url.pathname === "/auth/github/token" && request.method === "POST") {
+        const body = await request.json() as { deviceCode: string };
+        const clientId = env.GITHUB_CLIENT_ID || "Ov23li7SYoxct6ZJI2HB";
+        const res = await fetch("https://github.com/login/oauth/access_token", {
+          method: "POST",
+          headers: { "Accept": "application/json", "Content-Type": "application/x-www-form-urlencoded" },
+          body: `client_id=${encodeURIComponent(clientId)}&device_code=${encodeURIComponent(body.deviceCode)}&grant_type=urn:ietf:params:oauth:grant-type:device_code`,
+        });
+        const data = await res.json();
+        return json(data);
       }
 
       // One endpoint per Google action: POST /google/<action> with

@@ -17,6 +17,18 @@ data class GitHubAccount(
 )
 
 /**
+ * Result of requesting a device code from GitHub OAuth Device Authorization Grant.
+ */
+@Serializable
+data class GitHubDeviceCode(
+    val deviceCode: String,
+    val userCode: String,
+    val verificationUri: String,
+    val expiresIn: Int = 900,
+    val interval: Int = 5
+)
+
+/**
  * Interface for GitHub API interactions and token lifecycle.
  */
 interface GitHubRepository {
@@ -27,4 +39,7 @@ interface GitHubRepository {
     suspend fun disconnect(): Result<Unit>
     suspend fun getAccount(): GitHubAccount?
     suspend fun execute(endpoint: String, method: String = "GET", bodyJson: String? = null): Result<String>
+
+    suspend fun startDeviceFlow(): Result<GitHubDeviceCode>
+    suspend fun pollDeviceFlow(deviceCode: String, intervalSeconds: Int): Result<GitHubAccount>
 }

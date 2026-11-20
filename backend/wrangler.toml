@@ -17,3 +17,4 @@ id = "6f09092e162148daa2e11305b5b41153"
 # Optional:
 #   GOOGLE_REDIRECT_URI (only if Google requires it for the code exchange)
 [vars]
+GITHUB_CLIENT_ID = "Ov23li7SYoxct6ZJI2HB"
