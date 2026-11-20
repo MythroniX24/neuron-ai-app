@@ -21,11 +21,13 @@ import kotlinx.coroutines.launch
  */
 class ConnectedAppsViewModel(
     private val repository: GoogleConnectorRepository,
+    private val gitHubRepository: com.neuron.ai.core.integration.github.GitHubRepository,
     private val diagnostics: GoogleConnectorDiagnostics,
     private val dispatchers: DispatcherProvider
 ) : ViewModel() {
 
     val accounts: StateFlow<List<GoogleAccount>> = repository.accounts
+    val gitHubAccount: StateFlow<com.neuron.ai.core.integration.github.GitHubAccount?> = gitHubRepository.account
 
     /** True when this build carries a connector backend URL. */
     val configured: Boolean = repository.configured
@@ -115,6 +117,34 @@ class ConnectedAppsViewModel(
                     text
                 }
             )
+        }
+    }
+
+    fun connectGitHub(token: String) {
+        if (token.isBlank()) {
+            _messageIsError.value = true
+            _message.value = "GitHub Personal Access Token cannot be blank."
+            return
+        }
+        viewModelScope.launch(dispatchers.io) {
+            _busy.value = true
+            val result = gitHubRepository.connect(token)
+            _busy.value = false
+            _messageIsError.value = result.isFailure
+            _message.value = result.fold(
+                onSuccess = { "GitHub connected — @${it.login}." },
+                onFailure = { it.message ?: "Failed to connect GitHub account." }
+            )
+        }
+    }
+
+    fun disconnectGitHub() {
+        viewModelScope.launch(dispatchers.io) {
+            _busy.value = true
+            val result = gitHubRepository.disconnect()
+            _busy.value = false
+            _messageIsError.value = result.isFailure
+            _message.value = if (result.isSuccess) "GitHub account disconnected." else "Could not disconnect GitHub."
         }
     }
 

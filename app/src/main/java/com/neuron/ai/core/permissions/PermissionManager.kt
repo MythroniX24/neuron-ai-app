@@ -18,11 +18,15 @@ enum class Capability {
     /** User-confirmed memory deletion (curated long-term data). */
     MEMORY,
     /**
-     * Act on a connected Google account (Drive/Gmail/Sheets/Docs) through the
-     * connector backend. Never granted by default; destructive actions still
-     * always re-prompt.
+     * Act on a connected Google account (Drive/Gmail/Sheets/Docs/Slides/Calendar)
+     * through the connector backend. Never granted by default; destructive actions
+     * still always re-prompt.
      */
-    GOOGLE
+    GOOGLE,
+    /**
+     * Act on a connected GitHub account (repos/issues/PRs/code) via GitHub API.
+     */
+    GITHUB
 }
 
 /** How a capability may be granted. */

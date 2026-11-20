@@ -17,6 +17,8 @@ object GoogleScopes {
     const val GMAIL_COMPOSE = "https://www.googleapis.com/auth/gmail.compose"
     const val SPREADSHEETS = "https://www.googleapis.com/auth/spreadsheets"
     const val DOCUMENTS = "https://www.googleapis.com/auth/documents"
+    const val PRESENTATIONS = "https://www.googleapis.com/auth/presentations"
+    const val CALENDAR = "https://www.googleapis.com/auth/calendar"
 
     val ALL: List<String> = listOf(
         OPENID,
@@ -27,7 +29,9 @@ object GoogleScopes {
         GMAIL_SEND,
         GMAIL_COMPOSE,
         SPREADSHEETS,
-        DOCUMENTS
+        DOCUMENTS,
+        PRESENTATIONS,
+        CALENDAR
     )
 
     /** Human labels for the Connected Apps permission list. */
@@ -37,7 +41,9 @@ object GoogleScopes {
         GMAIL_SEND to "Gmail (send)",
         GMAIL_COMPOSE to "Gmail (drafts)",
         SPREADSHEETS to "Google Sheets",
-        DOCUMENTS to "Google Docs"
+        DOCUMENTS to "Google Docs",
+        PRESENTATIONS to "Google Slides",
+        CALENDAR to "Google Calendar"
     )
 }
 

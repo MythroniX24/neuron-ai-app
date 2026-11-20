@@ -209,6 +209,55 @@ object GoogleConnectorTools {
                     "\"replace\":{\"type\":\"string\"}",
                 listOf("documentId", "find")
             )
+        ),
+        // ---- Slides -------------------------------------------------------
+        action(
+            repository, "google.slides.get", "slides.get", "Reading Google Slides",
+            "Retrieves presentation details, slide count, slide titles, and text elements " +
+                "from a Google Slides presentation by presentationId.",
+            schema("\"presentationId\":{\"type\":\"string\"}", listOf("presentationId"))
+        ),
+        action(
+            repository, "google.slides.create", "slides.create", "Creating presentation",
+            "Creates a new Google Slides presentation with a given title. Returns the presentation ID and web link.",
+            schema("\"title\":{\"type\":\"string\"}", listOf("title"))
+        ),
+        action(
+            repository, "google.slides.addSlide", "slides.addSlide", "Adding slide",
+            "Appends a new slide with a title and optional body text into a Google Slides presentation.",
+            schema(
+                "\"presentationId\":{\"type\":\"string\"},\"title\":{\"type\":\"string\"}," +
+                    "\"body\":{\"type\":\"string\"}",
+                listOf("presentationId", "title")
+            )
+        ),
+        // ---- Calendar -----------------------------------------------------
+        action(
+            repository, "google.calendar.list", "calendar.list", "Listing calendar events",
+            "Lists upcoming events on the user's primary Google Calendar. Optional filters: " +
+                "query (search text), timeMin (ISO-8601 start date/time), timeMax, maxResults.",
+            schema(
+                "\"query\":{\"type\":\"string\"},\"timeMin\":{\"type\":\"string\"}," +
+                    "\"timeMax\":{\"type\":\"string\"},\"maxResults\":{\"type\":\"integer\"}",
+                emptyList()
+            )
+        ),
+        action(
+            repository, "google.calendar.create", "calendar.create", "Creating calendar event",
+            "Creates a new event on Google Calendar. Requires summary (title), startTime and endTime " +
+                "(ISO-8601 strings, e.g. '2026-11-20T14:00:00Z'). Optional description and location.",
+            schema(
+                "\"summary\":{\"type\":\"string\"},\"startTime\":{\"type\":\"string\"}," +
+                    "\"endTime\":{\"type\":\"string\"},\"description\":{\"type\":\"string\"}," +
+                    "\"location\":{\"type\":\"string\"}",
+                listOf("summary", "startTime", "endTime")
+            )
+        ),
+        action(
+            repository, "google.calendar.delete", "calendar.delete", "Deleting calendar event",
+            "PERMANENTLY deletes an event from Google Calendar by eventId. Always ask user confirmation first.",
+            schema("\"eventId\":{\"type\":\"string\"}", listOf("eventId")),
+            risk = RiskLevel.DESTRUCTIVE
         )
     )
 

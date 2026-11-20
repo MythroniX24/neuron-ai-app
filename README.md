@@ -65,7 +65,8 @@ schema; no tool logic lives in the UI.
 | Files (sandbox root) | `fs.read`, `fs.search` |
 | Workspace | `fs.list`, `fs.readfile`, `fs.writefile`, `fs.mkdir`, `fs.rename`, `fs.move`, `fs.copy`, `fs.delete`, `fs.searchfiles`, `fs.metadata` |
 | Web | `web.search` (keyless multi-engine), `web.read` |
-| Google | `google.drive.*`, `google.gmail.*`, `google.sheets.*`, `google.docs.*` — thin proxies; every Google call runs on the connector Worker (`backend/`). Settings → Connectors links each service separately (Gmail, Drive, Docs, Sheets), supports several Google accounts, and shows the signing SHA-1 plus a backend probe for diagnosing sign-in failures |
+| Google | `google.drive.*`, `google.gmail.*`, `google.sheets.*`, `google.docs.*`, `google.slides.*`, `google.calendar.*` — thin proxies; every Google call runs on the connector Worker (`backend/`). Settings → Connected Apps links each service separately (Gmail, Drive, Docs, Sheets, Slides, Calendar), supports multiple Google accounts, and shows backend health diagnostics |
+| GitHub | `github.user.get`, `github.repo.search`, `github.repo.get`, `github.repo.readme`, `github.issues.list`, `github.issues.create`, `github.pulls.list`, `github.file.get` — on-device GitHub REST API connector with secure Keystore PAT storage |
 | Browser | `browser.open`, `browser.read`, `browser.find`, `browser.links`, `browser.click`, `browser.type`, `browser.select` |
 | Terminal & code | `terminal.run`, `code.edit`, `code.patch`, `code.diff`, `code.build`, `code.test` |
 | Memory | `memory.remember`, `memory.recall`, `memory.forget` |

@@ -14,6 +14,7 @@ class ConnectedAppsViewModelFactory(private val container: AppContainer) :
         }
         return ConnectedAppsViewModel(
             repository = container.googleConnectorRepository,
+            gitHubRepository = container.gitHubRepository,
             diagnostics = container.googleConnectorDiagnostics,
             dispatchers = container.dispatchers
         ) as T

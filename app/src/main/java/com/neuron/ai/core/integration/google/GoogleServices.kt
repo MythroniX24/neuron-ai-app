@@ -47,6 +47,20 @@ enum class GoogleService(
         summary = "Read and write spreadsheets",
         scopes = listOf(GoogleScopes.SPREADSHEETS),
         requiredScope = GoogleScopes.SPREADSHEETS
+    ),
+    SLIDES(
+        id = "slides",
+        label = "Slides",
+        summary = "Read, create and edit presentations",
+        scopes = listOf(GoogleScopes.PRESENTATIONS),
+        requiredScope = GoogleScopes.PRESENTATIONS
+    ),
+    CALENDAR(
+        id = "calendar",
+        label = "Calendar",
+        summary = "View, create and manage calendar events",
+        scopes = listOf(GoogleScopes.CALENDAR),
+        requiredScope = GoogleScopes.CALENDAR
     );
 
     companion object {

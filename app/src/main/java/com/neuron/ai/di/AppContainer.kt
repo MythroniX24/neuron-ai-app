@@ -183,6 +183,17 @@ class AppContainer(context: Context) {
         com.neuron.ai.data.tool.GoogleConnectorTools.all(googleConnectorRepository)
     }
 
+    val gitHubRepository: com.neuron.ai.core.integration.github.GitHubRepository by lazy {
+        com.neuron.ai.data.github.GitHubRepositoryImpl(
+            credentials = secureCredentials,
+            dispatchers = dispatchers
+        )
+    }
+
+    val gitHubTools: List<com.neuron.ai.core.agent.Tool> by lazy {
+        com.neuron.ai.data.tool.GitHubConnectorTools.all(gitHubRepository)
+    }
+
     val permissionManager: PermissionManager = SessionPermissionManager()
 
     val toolRegistry: ToolRegistry = InMemoryToolRegistry()
@@ -318,6 +329,8 @@ class AppContainer(context: Context) {
             // Google connectors. ELEVATED: Capability.GOOGLE is granted on
             // demand, and the two destructive actions re-prompt every time.
             googleTools.forEach { toolRegistry.register(it) }
+            // GitHub connectors. Capability.GITHUB is granted on demand.
+            gitHubTools.forEach { toolRegistry.register(it) }
             // Refresh the linked-account list from the backend, if any.
             if (googleConnectorRepository.configured) googleConnectorRepository.syncAccounts()
         }

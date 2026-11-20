@@ -67,8 +67,15 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import android.content.Intent
+import android.net.Uri
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.ui.platform.LocalContext
 import coil.compose.AsyncImage
 import com.neuron.ai.R
+import com.neuron.ai.core.integration.github.GitHubAccount
 import com.neuron.ai.core.integration.google.GoogleAccount
 import com.neuron.ai.core.integration.google.GoogleService
 import com.neuron.ai.core.integration.google.canUse
@@ -105,11 +112,14 @@ fun ConnectedAppsScreen(
     val message by viewModel.message.collectAsStateWithLifecycle()
     val messageIsError by viewModel.messageIsError.collectAsStateWithLifecycle()
     val health by viewModel.health.collectAsStateWithLifecycle()
+    val gitHubAccount by viewModel.gitHubAccount.collectAsStateWithLifecycle()
 
     val scope = rememberCoroutineScope()
     var pendingService by remember { mutableStateOf<GoogleService?>(null) }
     var confirmDisconnect by remember { mutableStateOf<GoogleAccount?>(null) }
     var diagnosticsOpen by remember { mutableStateOf(false) }
+    var showGitHubDialog by remember { mutableStateOf(false) }
+    var gitHubTokenInput by remember { mutableStateOf("") }
     val clipboard = LocalClipboardManager.current
 
     val launcher = rememberLauncherForActivityResult(
@@ -223,6 +233,22 @@ fun ConnectedAppsScreen(
                 )
             }
 
+            Spacer(Modifier.height(Spacing.lg))
+            Text(
+                text = "Developer Connectors",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(horizontal = Spacing.xs)
+            )
+            Spacer(Modifier.height(Spacing.sm))
+            GitHubServiceCard(
+                account = gitHubAccount,
+                busy = busy,
+                onConnect = { showGitHubDialog = true },
+                onDisconnect = { viewModel.disconnectGitHub() }
+            )
+
             message?.let { text ->
                 Spacer(Modifier.height(Spacing.md))
                 NoticeCard(
@@ -292,7 +318,7 @@ fun ConnectedAppsScreen(
             title = { Text("Disconnect ${account.label}?") },
             text = {
                 Text(
-                    "This revokes the Google grant for Gmail, Drive, Docs and Sheets on this " +
+                    "This revokes the Google grant for Gmail, Drive, Docs, Sheets, Slides and Calendar on this " +
                         "account. Other linked accounts stay connected."
                 )
             },
@@ -304,6 +330,70 @@ fun ConnectedAppsScreen(
             },
             dismissButton = {
                 TextButton(onClick = { confirmDisconnect = null }) { Text("Cancel") }
+            }
+        )
+    }
+
+    if (showGitHubDialog) {
+        val context = LocalContext.current
+        AlertDialog(
+            onDismissRequest = { showGitHubDialog = false },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Image(
+                        painter = painterResource(R.drawable.ic_brand_github),
+                        contentDescription = "GitHub",
+                        modifier = Modifier.size(28.dp)
+                    )
+                    Text("Connect GitHub Account")
+                }
+            },
+            text = {
+                Column {
+                    Text(
+                        text = "Enter a GitHub Personal Access Token (classic or fine-grained) to allow the agent to search repositories, inspect issues, read READMEs and code.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(Modifier.height(Spacing.md))
+                    OutlinedTextField(
+                        value = gitHubTokenInput,
+                        onValueChange = { gitHubTokenInput = it },
+                        label = { Text("Personal Access Token") },
+                        placeholder = { Text("ghp_... or github_pat_...") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Spacer(Modifier.height(Spacing.sm))
+                    TextButton(
+                        onClick = {
+                            val intent = Intent(
+                                Intent.ACTION_VIEW,
+                                Uri.parse("https://github.com/settings/tokens/new?scopes=repo,read:user&description=Neuron-AI")
+                            )
+                            context.startActivity(intent)
+                        }
+                    ) {
+                        Text("Generate new token on GitHub ↗", style = MaterialTheme.typography.labelMedium)
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showGitHubDialog = false
+                        viewModel.connectGitHub(gitHubTokenInput)
+                        gitHubTokenInput = ""
+                    },
+                    enabled = gitHubTokenInput.isNotBlank()
+                ) {
+                    Text("Connect")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showGitHubDialog = false }) {
+                    Text("Cancel")
+                }
             }
         )
     }
@@ -672,4 +762,122 @@ private fun GoogleService.iconRes(): Int = when (this) {
     GoogleService.DRIVE -> R.drawable.ic_brand_drive
     GoogleService.DOCS -> R.drawable.ic_brand_docs
     GoogleService.SHEETS -> R.drawable.ic_brand_sheets
+    GoogleService.SLIDES -> R.drawable.ic_brand_slides
+    GoogleService.CALENDAR -> R.drawable.ic_brand_calendar
+}
+
+@Composable
+private fun GitHubServiceCard(
+    account: GitHubAccount?,
+    busy: Boolean,
+    onConnect: () -> Unit,
+    onDisconnect: () -> Unit
+) {
+    Surface(
+        shape = RoundedCornerShape(20.dp),
+        color = MaterialTheme.colorScheme.surface,
+        border = androidx.compose.foundation.BorderStroke(
+            width = 1.dp,
+            color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)
+        )
+    ) {
+        Column(Modifier.padding(Spacing.lg)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .size(42.dp)
+                        .clip(RoundedCornerShape(13.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Image(
+                        painter = painterResource(R.drawable.ic_brand_github),
+                        contentDescription = "GitHub",
+                        modifier = Modifier.size(26.dp)
+                    )
+                }
+                Spacer(Modifier.width(Spacing.md))
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        text = "GitHub",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        text = "Search repos, read code, view and create issues & pull requests",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                if (account != null) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            Icons.Outlined.CheckCircle,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Text(
+                            text = "1",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(Spacing.md))
+
+            if (account == null) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = "Not connected yet.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Button(
+                        onClick = onConnect,
+                        enabled = !busy,
+                        contentPadding = PaddingValues(horizontal = Spacing.md, vertical = Spacing.xs)
+                    ) {
+                        Text("Connect")
+                    }
+                }
+            } else {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column {
+                        Text(
+                            text = "@${account.login}",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        account.name?.let {
+                            Text(
+                                text = it,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                    OutlinedButton(
+                        onClick = onDisconnect,
+                        enabled = !busy,
+                        contentPadding = PaddingValues(horizontal = Spacing.md, vertical = Spacing.xs)
+                    ) {
+                        Text("Disconnect")
+                    }
+                }
+            }
+        }
+    }
 }

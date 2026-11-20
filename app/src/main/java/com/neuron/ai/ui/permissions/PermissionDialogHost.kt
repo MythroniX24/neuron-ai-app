@@ -37,6 +37,7 @@ object PermissionUiMapper {
         Capability.NOTIFICATIONS -> "Notifications"
         Capability.MEMORY -> "Memory changes"
         Capability.GOOGLE -> "Google account access"
+        Capability.GITHUB -> "GitHub account access"
     }
 }
 
