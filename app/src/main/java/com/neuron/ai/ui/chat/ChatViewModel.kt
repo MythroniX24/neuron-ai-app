@@ -180,6 +180,12 @@ class ChatViewModel(
         StateFlow<List<com.neuron.ai.core.conversation.ComparisonPlacement>> =
         _liveComparisonBlocks.asStateFlow()
 
+    /** Web sources emitted by search / browser tools during this turn (Perplexica search engine). */
+    private val _liveWebSources =
+        MutableStateFlow<List<com.neuron.ai.core.conversation.WebSource>>(emptyList())
+    val liveWebSources: StateFlow<List<com.neuron.ai.core.conversation.WebSource>> =
+        _liveWebSources.asStateFlow()
+
     /**
      * Resolved card images, keyed by the model's imageQuery phrase. Shared by
      * live and persisted messages, so history never shows placeholder art for
@@ -1050,6 +1056,7 @@ class ChatViewModel(
         _timeline.value = emptyList()
         _liveRichRecommendations.value = emptyList()
         _liveComparisonBlocks.value = emptyList()
+        _liveWebSources.value = emptyList()
         _liveReplySpacing.value = ReplySpacingProfile()
         // The routing resolution is the FIRST timeline row: which model runs,
         // with what capabilities, and what was degraded (incl. live thermal
@@ -1072,6 +1079,8 @@ class ChatViewModel(
             emptyList<com.neuron.ai.core.conversation.RichRecommendationSet>()
         var finishedComparisons =
             emptyList<com.neuron.ai.core.conversation.ComparisonPlacement>()
+        var finishedWebSources =
+            emptyList<com.neuron.ai.core.conversation.WebSource>()
         var finishedSpacing = ReplySpacingProfile()
 
         val effectiveToolPolicy = if (toolsEnabled && capabilityModel.supportsTools) {
@@ -1196,6 +1205,15 @@ class ChatViewModel(
                             _activeQuestionCard.value = event.payload
                         }
 
+                        is AgentEvent.WebSources -> {
+                            val current = _liveWebSources.value
+                            val existingUrls = current.map { it.url }.toSet()
+                            val newItems = event.sources.filterNot { it.url in existingUrls }
+                            if (newItems.isNotEmpty()) {
+                                _liveWebSources.value = current + newItems
+                            }
+                        }
+
                         is AgentEvent.ReplySpacing -> {
                             // Spacing is the AI's decision, per reply and per
                             // block kind; the user never tunes it.
@@ -1290,6 +1308,7 @@ class ChatViewModel(
                             assistantBuffer = StringBuilder(summary)
                             finishedRich = _liveRichRecommendations.value
                             finishedComparisons = _liveComparisonBlocks.value
+                            finishedWebSources = _liveWebSources.value
                             finishedSpacing = _liveReplySpacing.value
                             // Keep live rich recommendations and comparison blocks active while streaming
                             // finishes so the UI doesn't momentarily flash raw code or empty cards.
@@ -1348,6 +1367,7 @@ class ChatViewModel(
                                     .ifEmpty { finishedRich },
                                 comparisonBlocks = _liveComparisonBlocks.value
                                     .ifEmpty { finishedComparisons },
+                                webSources = _liveWebSources.value,
                                 paragraphSpacing = _liveReplySpacing.value.paragraph.name,
                                 listSpacing = _liveReplySpacing.value.list.name,
                                 blockGapSpacing = _liveReplySpacing.value.gap.name
@@ -1359,6 +1379,7 @@ class ChatViewModel(
                 _activity.value = emptyList()
                 _liveRichRecommendations.value = emptyList()
                 _liveComparisonBlocks.value = emptyList()
+                _liveWebSources.value = emptyList()
                 _liveReplySpacing.value = ReplySpacingProfile()
             }
             throw cancelled
@@ -1389,6 +1410,7 @@ class ChatViewModel(
                     agentSteps = finishedSteps.ifEmpty { persistableSteps() },
                     richRecommendations = finishedRich,
                     comparisonBlocks = finishedComparisons,
+                    webSources = finishedWebSources.ifEmpty { _liveWebSources.value },
                     paragraphSpacing = finishedSpacing.paragraph.name,
                     listSpacing = finishedSpacing.list.name,
                     blockGapSpacing = finishedSpacing.gap.name
@@ -1404,6 +1426,7 @@ class ChatViewModel(
         _activity.value = emptyList()
         _liveRichRecommendations.value = emptyList()
         _liveComparisonBlocks.value = emptyList()
+        _liveWebSources.value = emptyList()
         _liveReplySpacing.value = finishedSpacing
         // Keep the finished timeline visible until the next turn begins.
         if (_generation.value is GenerationState.Streaming) {
@@ -1584,5 +1607,30 @@ class ChatViewModel(
         private val GENERIC_THINKING_LABELS = listOf(
             "Understanding request", "Continuing", "Thinking"
         )
+
+        /**
+         * Extracts web sources from message metadata, or falls back to parsing
+         * tool steps and text markers for backwards compatibility with earlier turns.
+         */
+        fun extractSourcesFromMetadata(
+            metadata: com.neuron.ai.core.conversation.MessageMetadata?
+        ): List<com.neuron.ai.core.conversation.WebSource> {
+            if (metadata == null) return emptyList()
+            if (metadata.webSources.isNotEmpty()) return metadata.webSources
+
+            val sources = mutableListOf<com.neuron.ai.core.conversation.WebSource>()
+            val seen = mutableSetOf<String>()
+            for (step in metadata.agentSteps) {
+                if (step.toolId == "web.search" || step.toolId == "web.read" ||
+                    step.type == com.neuron.ai.core.conversation.AgentStepRecord.TYPE_WEB_SEARCH
+                ) {
+                    val parsed = com.neuron.ai.data.tool.WebTools.extractWebSources(step.detail.orEmpty())
+                    for (s in parsed) {
+                        if (seen.add(s.url)) sources.add(s)
+                    }
+                }
+            }
+            return sources
+        }
     }
 }

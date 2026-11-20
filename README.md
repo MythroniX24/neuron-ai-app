@@ -99,17 +99,23 @@ stay symmetrical. A half-streamed block is hidden behind a compact skeleton, so
 raw JSON brackets never appear in the chat. Blocks are persisted with the
 message, so history renders identically after a restart.
 
-### Web search — keyless, on your own connection
+### Web search — Perplexica multi-mode engine (keyless, on your own connection)
 
-- Three independent adapters: **DuckDuckGo** HTML, **Bing** HTML and **Mojeek**,
-  fanned out in parallel behind one `SearchProvider` interface.
-- Per-provider circuit breakers, a 10-minute TTL cache and result
-  dedup/reranking; adding another engine is one registry entry.
+- Powered by the open-source search architecture of **[Perplexica](https://github.com/ItzCrazyKns/Perplexica)**:
+  - **Fast Search mode** (`mode: "fast"`): instant 1-2s lookup, parallel engine queries, top deduped snippets.
+  - **Deep Research mode** (`mode: "deep"`): autonomous multi-query decomposition (3–5 targeted queries), parallel fan-out across engines, deep Readability page scraping, and high-density factual extraction.
+  - The AI autonomously selects whether a request needs a fast fact check or a deep multi-angle investigation.
+- **Keyless multi-engine fan-out**: queries run concurrently across **SearXNG** JSON endpoints, **DuckDuckGo** HTML, **Bing** HTML, and **Mojeek** without needing any paid search API keys.
+- **Interactive Sources Viewer**:
+  - Whenever the agent conducts a web search, an interactive **"Sources · N"** pill appears at the bottom-right of the reply.
+  - Tapping it opens the **Sources Sheet** showing all visited links, domain names, site favicons, and content excerpts.
+  - Tapping any source card opens it directly in Google Chrome / default Android browser.
+- Per-provider circuit breakers, a 10-minute TTL cache, and cross-corroboration reranking.
 - Pages are fetched with a 512 KB cap, extracted to readable text, and fenced as
   `<<<UNTRUSTED_WEB_DATA>>>` so page content is treated as data — never as
   instructions (prompt-injection defense).
-- Sources come back as `[n]` indices and are persisted as TOOL messages, so
-  citations stay attached to the answer that used them.
+- Sources come back as `[n]` indices and are persisted with message metadata, so
+  citations stay permanently attached to the answer that used them.
 
 ### Memory
 

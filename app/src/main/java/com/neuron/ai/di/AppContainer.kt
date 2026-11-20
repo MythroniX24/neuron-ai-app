@@ -222,6 +222,7 @@ class AppContainer(context: Context) {
             registry = com.neuron.ai.data.web.SearchProviderRegistry(
                 providers = listOf(
                     searchProvider, // DuckDuckGo HTML — keyless scrape
+                    com.neuron.ai.data.web.SearxngSearchProvider(dispatchers), // SearXNG JSON — Perplexica engine
                     com.neuron.ai.data.web.BingHtmlSearchProvider(dispatchers), // keyless scrape
                     com.neuron.ai.data.web.MojeekSearchProvider(dispatchers) // keyless, independent index
                 ),

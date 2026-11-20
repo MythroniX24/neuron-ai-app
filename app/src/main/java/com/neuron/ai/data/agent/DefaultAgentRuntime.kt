@@ -71,7 +71,8 @@ class DefaultAgentRuntime(
                         is AgentEvent.IntermediateMessage, is AgentEvent.RichContent,
                         is AgentEvent.ComparisonBlocks, is AgentEvent.QuestionCard,
                         is AgentEvent.ReplySpacing, is AgentEvent.TextDelta,
-                        is AgentEvent.TextBuffer, is AgentEvent.Finished -> Unit
+                        is AgentEvent.TextBuffer, is AgentEvent.Finished,
+                        is AgentEvent.WebSources -> Unit
                     }
                 }
                 update(runId) {

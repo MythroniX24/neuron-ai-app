@@ -77,8 +77,9 @@ class ToolUsingAgent(
                 "You are Neuron, a capable AI agent running on the user's phone. " +
                     "Answer clearly, directly, and comprehensively; use Markdown for structure, tables, and code.\n" +
                     "TOOLS: Use the provided tools when they help (web search, browser, files, " +
-                    "terminal, memory). Prefer web.search for anything current or verifiable, " +
-                    "and cite sources as [n] matching the search result indices.\n" +
+                    "terminal, memory). Prefer web.search (Perplexica search engine) for anything current or verifiable. " +
+                    "You can select mode: \"fast\" for quick 1-2s lookups, or mode: \"deep\" with multiple decomposed queries ['q1', 'q2', 'q3'] " +
+                    "for deep multi-angle research. Cite sources as [n] matching the search result indices.\n" +
                     "TOOL CALL FORMAT: Call tools via native function calling or emit: " +
                     "<tool_call>{\"name\":\"tool_id\",\"arguments\":{...}}</tool_call>\n" +
                     "LOOP: alternate freely between thinking, calling tools, and short progress " +
@@ -665,6 +666,40 @@ class ToolUsingAgent(
                     com.neuron.ai.core.conversation.QuestionCardParser
                         .parse(call.argumentsJson)
                         ?.let { send(AgentEvent.QuestionCard(it)) }
+                }
+                // Web sources visited or cited (Perplexica search engine):
+                if ((call.toolId == "web.search" || call.toolId == "web.read") &&
+                    result is com.neuron.ai.core.agent.ToolResult.Success
+                ) {
+                    val sources = com.neuron.ai.data.tool.WebTools.extractWebSources(result.output)
+                    if (sources.isNotEmpty()) send(AgentEvent.WebSources(sources))
+                }
+                // Browser tools visited links:
+                if (call.toolId.startsWith("browser.") &&
+                    result is com.neuron.ai.core.agent.ToolResult.Success
+                ) {
+                    val rawUrl = runCatching {
+                        json.parseToJsonElement(call.argumentsJson)
+                            .let { it as? kotlinx.serialization.json.JsonObject }
+                            ?.get("url")?.let { it as? kotlinx.serialization.json.JsonPrimitive }?.content
+                    }.getOrNull()
+                    if (!rawUrl.isNullOrBlank() && (rawUrl.startsWith("http://") || rawUrl.startsWith("https://"))) {
+                        val domain = runCatching { java.net.URI(rawUrl).host?.removePrefix("www.") }.getOrNull()
+                        val encoded = runCatching { java.net.URLEncoder.encode(rawUrl, "UTF-8") }.getOrDefault("")
+                        val favicon = "https://s2.googleusercontent.com/s2/favicons?domain_url=$encoded&sz=64"
+                        send(
+                            AgentEvent.WebSources(
+                                listOf(
+                                    com.neuron.ai.core.conversation.WebSource(
+                                        title = domain ?: rawUrl,
+                                        url = rawUrl,
+                                        domain = domain,
+                                        faviconUrl = favicon
+                                    )
+                                )
+                            )
+                        )
+                    }
                 }
 
                 send(

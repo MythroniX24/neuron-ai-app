@@ -165,6 +165,8 @@ fun ChatScreen(
     val queuedMessage by viewModel.queuedMessage.collectAsStateWithLifecycle()
     val conversation by viewModel.conversation.collectAsStateWithLifecycle()
     val activeQuestionCard by viewModel.activeQuestionCard.collectAsStateWithLifecycle()
+    val liveWebSources by viewModel.liveWebSources.collectAsStateWithLifecycle()
+    var activeSourcesSheet by remember { mutableStateOf<List<com.neuron.ai.core.conversation.WebSource>?>(null) }
     // TOOL rows are agent plumbing, not chat messages. Their output is shown
     // inside the new timeline rows; rendering them here produced the old
     // standalone "Ran command / Web search" cards beside the new UI.
@@ -378,7 +380,8 @@ fun ChatScreen(
                         },
                         comparisonImages = comparisonImages,
                         missingImages = missingImages,
-                        onImagesNeeded = viewModel::requestComparisonImages
+                        onImagesNeeded = viewModel::requestComparisonImages,
+                        onShowSources = { activeSourcesSheet = it }
                     )
                 }
             }
@@ -391,9 +394,11 @@ fun ChatScreen(
                         replySpacing = liveReplySpacing,
                         richRecommendations = liveRichRecommendations,
                         comparisonBlocks = liveComparisonBlocks,
+                        liveWebSources = liveWebSources,
                         comparisonImages = comparisonImages,
                         missingImages = missingImages,
-                        onImagesNeeded = viewModel::requestComparisonImages
+                        onImagesNeeded = viewModel::requestComparisonImages,
+                        onShowSources = { activeSourcesSheet = it }
                     )
                 }
 
@@ -628,6 +633,13 @@ fun ChatScreen(
                 )
             }
         }
+    }
+
+    activeSourcesSheet?.let { sources ->
+        SourcesSheet(
+            sources = sources,
+            onDismiss = { activeSourcesSheet = null }
+        )
     }
     }
     }
@@ -993,7 +1005,8 @@ private fun MessageRow(
     fullResultResolver: (String) -> String? = { null },
     comparisonImages: Map<String, String> = emptyMap(),
     missingImages: Set<String> = emptySet(),
-    onImagesNeeded: (List<String>) -> Unit = {}
+    onImagesNeeded: (List<String>) -> Unit = {},
+    onShowSources: ((List<com.neuron.ai.core.conversation.WebSource>) -> Unit)? = null
 ) {
     val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
     var showMenu by remember { mutableStateOf(false) }
@@ -1154,6 +1167,24 @@ private fun MessageRow(
                         modifier = Modifier.padding(top = Spacing.md)
                     )
                 }
+
+            // Interactive Sources box (Perplexica search engine) at the bottom right of the reply
+            val sources = remember(message.metadata) {
+                ChatViewModel.extractSourcesFromMetadata(message.metadata)
+            }
+            if (sources.isNotEmpty()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = Spacing.xs, end = Spacing.xs),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    SourcesBadge(
+                        sources = sources,
+                        onClick = { onShowSources?.invoke(sources) }
+                    )
+                }
+            }
         }
 
         Message.Role.SYSTEM -> Unit
@@ -1172,9 +1203,11 @@ private fun LiveAgentTurn(
     replySpacing: ReplySpacingProfile,
     richRecommendations: List<com.neuron.ai.core.conversation.RichRecommendationSet> = emptyList(),
     comparisonBlocks: List<com.neuron.ai.core.conversation.ComparisonPlacement> = emptyList(),
+    liveWebSources: List<com.neuron.ai.core.conversation.WebSource> = emptyList(),
     comparisonImages: Map<String, String> = emptyMap(),
     missingImages: Set<String> = emptySet(),
-    onImagesNeeded: (List<String>) -> Unit = {}
+    onImagesNeeded: (List<String>) -> Unit = {},
+    onShowSources: ((List<com.neuron.ai.core.conversation.WebSource>) -> Unit)? = null
 ) {
     var expanded by remember { mutableStateOf(true) }
     Column(Modifier.fillMaxWidth()) {
@@ -1228,6 +1261,20 @@ private fun LiveAgentTurn(
                 onImagesNeeded = onImagesNeeded,
                 modifier = Modifier.padding(top = Spacing.md)
             )
+        }
+        // Interactive live Sources box at the bottom right
+        if (liveWebSources.isNotEmpty()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = Spacing.xs, end = Spacing.sm),
+                horizontalArrangement = Arrangement.End
+            ) {
+                SourcesBadge(
+                    sources = liveWebSources,
+                    onClick = { onShowSources?.invoke(liveWebSources) }
+                )
+            }
         }
     }
 }

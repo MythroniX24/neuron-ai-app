@@ -124,6 +124,15 @@ sealed class AgentEvent {
     ) : AgentEvent()
 
     /**
+     * Web sources (Perplexica search engine) visited or cited during search.
+     * Emitted when search tools run so the UI and message metadata capture
+     * the visited links, titles, and icons.
+     */
+    data class WebSources(
+        val sources: List<com.neuron.ai.core.conversation.WebSource>
+    ) : AgentEvent()
+
+    /**
      * Replaces the accumulated visible text buffer for this turn. Emitted
      * when the agent repairs the stream (e.g. a tool call recovered from
      * plain-text markup must not stay in the visible chat bubble). The UI

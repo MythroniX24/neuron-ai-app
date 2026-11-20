@@ -66,6 +66,20 @@ data class AgentStepRecord(
     }
 }
 
+/**
+ * A web source visited or cited during search (Perplexica search engine).
+ * Stored with message metadata so the user can inspect visited links, favicons,
+ * and open them directly in the browser.
+ */
+@Serializable
+data class WebSource(
+    val title: String,
+    val url: String,
+    val snippet: String? = null,
+    val domain: String? = null,
+    val faviconUrl: String? = null
+)
+
 /** Optional, transport-agnostic facts about how a message was produced. */
 @Serializable
 data class MessageMetadata(
@@ -82,6 +96,8 @@ data class MessageMetadata(
     val richRecommendations: List<RichRecommendationSet> = emptyList(),
     /** Native comparison sections, each anchored where it appeared in the answer. */
     val comparisonBlocks: List<ComparisonPlacement> = emptyList(),
+    /** Web sources visited / cited by the AI for this reply (Perplexica search engine). */
+    val webSources: List<WebSource> = emptyList(),
     /** Legacy whole-reply AI spacing, kept for already-stored messages. */
     val replySpacing: String? = null,
     /** AI-selected line spacing for prose paragraphs. */
