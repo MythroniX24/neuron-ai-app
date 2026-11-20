@@ -98,8 +98,8 @@ class GitHubRepositoryImpl(
     }
 
     override suspend fun disconnect(): Result<Unit> = withContext(io) {
-        credentials.delete(KEY_TOKEN)
-        credentials.delete(KEY_ACCOUNT_JSON)
+        credentials.remove(KEY_TOKEN)
+        credentials.remove(KEY_ACCOUNT_JSON)
         _account.value = null
         Result.success(Unit)
     }
