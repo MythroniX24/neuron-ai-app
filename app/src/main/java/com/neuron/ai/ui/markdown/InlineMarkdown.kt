@@ -123,7 +123,7 @@ object InlineMarkdown {
         Regex("""(?<!!)\[([^\]]+)]\(([^)\s]+)\)""").findAll(text).forEach {
             add(it.range, ContentType.LINK, it.groupValues[2], it.groupValues[1])
         }
-        Regex("""\$([^$\n]+?)\$""").findAll(text).forEach {
+        Regex("""(?<!\\)\$(?!\s)([^\$\n]+?)(?<!\s)\$""").findAll(text).forEach {
             add(it.range, ContentType.MATH, it.groupValues[1])
         }
 

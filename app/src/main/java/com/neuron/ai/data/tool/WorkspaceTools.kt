@@ -60,7 +60,7 @@ object WorkspaceTools {
         val workspace = env.activeWorkspace()
             ?: return ToolResult.Failure(
                 "No file access. Ask the user to grant \"All files access\" in " +
-                    "Neuron-AI → Settings → Storage access, then retry."
+                    "Neuron-AI → Settings → Storage Access, then retry."
             )
         return block(workspace)
     }

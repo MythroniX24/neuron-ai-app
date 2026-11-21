@@ -156,10 +156,12 @@ object QuestionCardParser {
 
         if (trailingItems.size in 2..6 && itemStartIndex > 0) {
             var leadInLine = ""
+            var leadInIndex = -1
             for (idx in (itemStartIndex - 1) downTo 0) {
                 val line = lines[idx].trim()
                 if (line.isNotBlank()) {
                     leadInLine = line
+                    leadInIndex = idx
                     break
                 }
             }
@@ -171,7 +173,7 @@ object QuestionCardParser {
                     leadInLine.contains(it, ignoreCase = true)
                 }
 
-            if (looksLikeQuestion && leadInLine.isNotBlank()) {
+            if (looksLikeQuestion && leadInLine.isNotBlank() && leadInIndex >= 0) {
                 val cleanQuestion = leadInLine.trimEnd(':').trim()
                 val question = InteractiveQuestion(
                     question = cleanQuestion,
@@ -179,7 +181,7 @@ object QuestionCardParser {
                     allowCustom = true
                 )
                 val payload = QuestionCardPayload(questions = listOf(question))
-                val remainingLines = lines.take(itemStartIndex).joinToString("\n").trim()
+                val remainingLines = lines.take(leadInIndex).joinToString("\n").trim()
                 return payload to remainingLines
             }
         }
@@ -204,7 +206,7 @@ object QuestionCardParser {
                 )
                 val payload = QuestionCardPayload(questions = listOf(question))
                 val remaining = trimmed.removeSuffix(lastSentence).trim()
-                return payload to (if (remaining.isNotBlank()) remaining else lastSentence)
+                return payload to remaining
             }
         }
 

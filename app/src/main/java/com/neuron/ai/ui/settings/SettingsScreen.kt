@@ -29,10 +29,12 @@ import androidx.compose.material.icons.outlined.BrightnessAuto
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.DarkMode
 import androidx.compose.material.icons.outlined.Extension
+import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.Hub
 import androidx.compose.material.icons.outlined.LightMode
 import androidx.compose.material.icons.outlined.Memory
 import androidx.compose.material.icons.outlined.Palette
+import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material.icons.outlined.Terminal
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -55,12 +57,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.neuron.ai.core.settings.ThemeMode
+import com.neuron.ai.data.storage.DeviceStorage
 import com.neuron.ai.di.AppContainer
 import com.neuron.ai.ui.components.BrandMark
 
@@ -84,6 +88,7 @@ fun SettingsScreen(
         viewModel(factory = SettingsViewModelFactory(container))
     val themeMode by viewModel.themeMode.collectAsStateWithLifecycle()
     val isConnectorsConnected by viewModel.isConnectorsConnected.collectAsStateWithLifecycle()
+    val context = LocalContext.current
 
     var showAppearanceSheet by remember { mutableStateOf(false) }
 
@@ -202,6 +207,16 @@ fun SettingsScreen(
                     },
                     onClick = onOpenConnectedApps
                 )
+
+                RowDivider(borderColor = cardBorderColor)
+
+                // 4. Tasks
+                SettingsItemRow(
+                    icon = Icons.Outlined.Schedule,
+                    iconTint = Color(0xFFE11D48),
+                    title = "Tasks",
+                    onClick = onOpenTasks
+                )
             }
 
             Spacer(Modifier.height(12.dp))
@@ -246,7 +261,42 @@ fun SettingsScreen(
 
                 RowDivider(borderColor = cardBorderColor)
 
-                // 2. Debug Console
+                // 2. Storage Access
+                val hasStorageAccess = remember(themeMode) { DeviceStorage.hasAccess(context) }
+                SettingsItemRow(
+                    icon = Icons.Outlined.Folder,
+                    iconTint = Color(0xFF0EA5E9),
+                    title = "Storage Access",
+                    trailing = {
+                        Text(
+                            text = if (hasStorageAccess) "Granted" else "Action needed",
+                            style = MaterialTheme.typography.bodyMedium.copy(
+                                fontWeight = FontWeight.Normal,
+                                fontSize = 14.sp
+                            ),
+                            color = if (hasStorageAccess) Color(0xFF10B981) else MaterialTheme.colorScheme.error
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Outlined.KeyboardArrowRight,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                            modifier = Modifier.size(20.dp)
+                        )
+                    },
+                    onClick = {
+                        val intent = DeviceStorage.accessIntent(context)
+                            ?: android.content.Intent(
+                                android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                android.net.Uri.parse("package:${context.packageName}")
+                            )
+                        runCatching { context.startActivity(intent) }
+                    }
+                )
+
+                RowDivider(borderColor = cardBorderColor)
+
+                // 3. Debug Console
                 SettingsItemRow(
                     icon = Icons.Outlined.Terminal,
                     iconTint = Color(0xFFF59E0B),
@@ -278,7 +328,7 @@ fun SettingsScreen(
                 )
                 Spacer(Modifier.height(2.dp))
                 Text(
-                    text = "Version 1.2.2",
+                    text = "Version ${com.neuron.ai.BuildConfig.VERSION_NAME}",
                     style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
                 )

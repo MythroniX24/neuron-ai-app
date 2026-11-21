@@ -97,7 +97,22 @@ fun SourcesBadge(
                                 model = source.faviconUrl,
                                 contentDescription = null,
                                 contentScale = ContentScale.Crop,
-                                modifier = Modifier.size(14.dp).clip(CircleShape)
+                                modifier = Modifier.size(14.dp).clip(CircleShape),
+                                placeholder = {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                                    )
+                                },
+                                error = {
+                                    Icon(
+                                        imageVector = Icons.Outlined.Language,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(10.dp)
+                                    )
+                                }
                             )
                         } else {
                             Icon(
@@ -284,7 +299,22 @@ private fun SourceCardItem(
                         model = source.faviconUrl,
                         contentDescription = null,
                         contentScale = ContentScale.Fit,
-                        modifier = Modifier.size(24.dp).clip(RoundedCornerShape(4.dp))
+                        modifier = Modifier.size(24.dp).clip(RoundedCornerShape(4.dp)),
+                        placeholder = {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
+                            )
+                        },
+                        error = {
+                            Icon(
+                                imageVector = Icons.Outlined.Language,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
                     )
                 } else {
                     Icon(

@@ -41,10 +41,10 @@ class RoomMemoryStore(
     override val enabled: Flow<Boolean> = _enabled.asStateFlow()
 
     init {
-        // Enforce memory is ON by default at system level.
+        // Defaults to ON. Restores the user's saved preference.
         kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + io).launch {
-            _enabled.value = true
-            dataStore.edit { it[KEY_ENABLED] = true }
+            val saved = dataStore.data.first()[KEY_ENABLED] ?: true
+            _enabled.value = saved
         }
     }
 
@@ -88,9 +88,8 @@ class RoomMemoryStore(
     override suspend fun clearAll() = withContext(io) { dao.clearAll(); Unit }
 
     override suspend fun setEnabled(enabled: Boolean) {
-        // Enforce memory permanently ON at system level.
-        dataStore.edit { it[KEY_ENABLED] = true }
-        _enabled.value = true
+        dataStore.edit { it[KEY_ENABLED] = enabled }
+        _enabled.value = enabled
     }
 
     private fun checkEnabled() {

@@ -383,6 +383,18 @@ class ChatViewModel(
                 _conversation.value = conversations.getConversation(conversationId)
             }
         }
+
+        // Restore active question card if the last message was an assistant question that wasn't answered yet.
+        viewModelScope.launch(dispatchers.io) {
+            messages.collect { msgList ->
+                if (_activeQuestionCard.value == null && _generation.value is GenerationState.Idle) {
+                    val lastMsg = msgList.lastOrNull()
+                    if (lastMsg != null && lastMsg.role == Message.Role.ASSISTANT && lastMsg.metadata?.questionCard != null) {
+                        _activeQuestionCard.value = lastMsg.metadata.questionCard
+                    }
+                }
+            }
+        }
     }
 
     /** Task-system mirror of the current agent turn (Milestone 1). */
@@ -1081,6 +1093,7 @@ class ChatViewModel(
             emptyList<com.neuron.ai.core.conversation.ComparisonPlacement>()
         var finishedWebSources =
             emptyList<com.neuron.ai.core.conversation.WebSource>()
+        var finishedQuestionCard: com.neuron.ai.core.conversation.QuestionCardPayload? = null
         var finishedSpacing = ReplySpacingProfile()
 
         val effectiveToolPolicy = if (capabilityModel.supportsTools) {
@@ -1316,6 +1329,7 @@ class ChatViewModel(
                             finishedRich = _liveRichRecommendations.value
                             finishedComparisons = _liveComparisonBlocks.value
                             finishedWebSources = _liveWebSources.value
+                            finishedQuestionCard = _activeQuestionCard.value
                             finishedSpacing = _liveReplySpacing.value
                             // Keep live rich recommendations and comparison blocks active while streaming
                             // finishes so the UI doesn't momentarily flash raw code or empty cards.
@@ -1375,6 +1389,7 @@ class ChatViewModel(
                                 comparisonBlocks = _liveComparisonBlocks.value
                                     .ifEmpty { finishedComparisons },
                                 webSources = _liveWebSources.value,
+                                questionCard = finishedQuestionCard ?: _activeQuestionCard.value,
                                 paragraphSpacing = _liveReplySpacing.value.paragraph.name,
                                 listSpacing = _liveReplySpacing.value.list.name,
                                 blockGapSpacing = _liveReplySpacing.value.gap.name
@@ -1418,6 +1433,7 @@ class ChatViewModel(
                     richRecommendations = finishedRich,
                     comparisonBlocks = finishedComparisons,
                     webSources = finishedWebSources.ifEmpty { _liveWebSources.value },
+                    questionCard = finishedQuestionCard ?: _activeQuestionCard.value,
                     paragraphSpacing = finishedSpacing.paragraph.name,
                     listSpacing = finishedSpacing.list.name,
                     blockGapSpacing = finishedSpacing.gap.name

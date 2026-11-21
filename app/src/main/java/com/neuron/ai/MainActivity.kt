@@ -1,5 +1,6 @@
 package com.neuron.ai
 
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
@@ -79,16 +80,20 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        // If permission wasn't granted yet and wasn't prompted, check on resume
-        if (!hasPromptedStorageOnLaunch && !DeviceStorage.hasAccess(this)) {
+        if (!hasPromptedStorageOnLaunch) {
             checkStoragePermissionOnLaunch()
         }
     }
 
     private fun checkStoragePermissionOnLaunch() {
-        if (!hasPromptedStorageOnLaunch && !DeviceStorage.hasAccess(this)) {
+        if (!hasPromptedStorageOnLaunch) {
             hasPromptedStorageOnLaunch = true
-            promptStorageAccess()
+            val prefs = getSharedPreferences("neuron_launch_prefs", Context.MODE_PRIVATE)
+            val alreadyPrompted = prefs.getBoolean("has_prompted_storage_launch", false)
+            if (!alreadyPrompted && !DeviceStorage.hasAccess(this)) {
+                prefs.edit().putBoolean("has_prompted_storage_launch", true).apply()
+                promptStorageAccess()
+            }
         }
     }
 

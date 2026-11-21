@@ -98,6 +98,8 @@ data class MessageMetadata(
     val comparisonBlocks: List<ComparisonPlacement> = emptyList(),
     /** Web sources visited / cited by the AI for this reply (Perplexica search engine). */
     val webSources: List<WebSource> = emptyList(),
+    /** Interactive multiple-choice question card attached to this reply. */
+    val questionCard: QuestionCardPayload? = null,
     /** Legacy whole-reply AI spacing, kept for already-stored messages. */
     val replySpacing: String? = null,
     /** AI-selected line spacing for prose paragraphs. */
