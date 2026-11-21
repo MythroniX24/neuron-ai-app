@@ -16,8 +16,8 @@ android {
         applicationId = "com.neuron.ai"
         minSdk = 26
         targetSdk = 34
-        versionCode = 13
-        versionName = "1.2.5"
+        versionCode = 14
+        versionName = "1.2.7"
 
         // Google connectors: the Android OAuth client is matched by package
         // name + signing certificate, so it is never passed in code. The WEB

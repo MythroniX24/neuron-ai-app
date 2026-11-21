@@ -192,7 +192,7 @@ object QuestionCardParser {
         if (match != null) {
             val inside = match.groupValues[1].trim()
             val rawTokens = inside.split(Regex(""",|\s+या\s+|\s+or\s+|\/"""))
-                .map { it.replace(Regex("""^[1-9]\.?\s*"""), "").trim() }
+                .map { it.trim().replace(Regex("""^[1-9][0-9]?[.)]\s+"""), "").trim() }
                 .filter { it.length in 2..40 }
 
             if (rawTokens.size in 2..6) {
