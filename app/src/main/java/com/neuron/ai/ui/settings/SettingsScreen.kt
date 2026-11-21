@@ -1,45 +1,73 @@
 package com.neuron.ai.ui.settings
 
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
+import androidx.compose.material.icons.outlined.BrightnessAuto
+import androidx.compose.material.icons.outlined.Check
+import androidx.compose.material.icons.outlined.DarkMode
+import androidx.compose.material.icons.outlined.Extension
+import androidx.compose.material.icons.outlined.Hub
+import androidx.compose.material.icons.outlined.LightMode
+import androidx.compose.material.icons.outlined.Memory
+import androidx.compose.material.icons.outlined.Palette
+import androidx.compose.material.icons.outlined.Terminal
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.RadioButton
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.neuron.ai.core.settings.ThemeMode
-import com.neuron.ai.data.storage.DeviceStorage
 import com.neuron.ai.di.AppContainer
 import com.neuron.ai.ui.components.BrandMark
-import com.neuron.ai.ui.theme.Spacing
 
-private val THEME_OPTIONS = listOf(ThemeMode.LIGHT, ThemeMode.DARK, ThemeMode.SYSTEM)
-
+/**
+ * Executive-grade, minimal Settings screen for Neuron-AI.
+ * Inspired by clean, production-grade AI interfaces (ChatGPT / Claude mobile).
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
@@ -55,269 +83,501 @@ fun SettingsScreen(
     val viewModel: SettingsViewModel =
         viewModel(factory = SettingsViewModelFactory(container))
     val themeMode by viewModel.themeMode.collectAsStateWithLifecycle()
-    val memoryEntries by viewModel.memoryEntries.collectAsStateWithLifecycle()
-    val memoryEnabled by viewModel.memoryEnabled.collectAsStateWithLifecycle()
+    val isConnectorsConnected by viewModel.isConnectorsConnected.collectAsStateWithLifecycle()
+
+    var showAppearanceSheet by remember { mutableStateOf(false) }
+
+    val isDark = isSystemInDarkTheme() || themeMode == ThemeMode.DARK
+    val screenBg = if (isDark) MaterialTheme.colorScheme.background else Color(0xFFF6F7F9)
+    val cardBg = if (isDark) MaterialTheme.colorScheme.surface else Color(0xFFFFFFFF)
+    val cardBorderColor = if (isDark) Color(0xFF2A2F37) else Color(0xFFE5E7EB)
+
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .background(screenBg)
             .systemBarsPadding()
     ) {
         TopAppBar(
             title = {
-                Text("Settings", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    text = "Settings",
+                    style = MaterialTheme.typography.titleLarge.copy(
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 20.sp
+                    ),
+                    color = MaterialTheme.colorScheme.onSurface
+                )
             },
             navigationIcon = {
                 IconButton(onClick = onBack) {
                     Icon(
                         imageVector = Icons.AutoMirrored.Outlined.ArrowBack,
-                        contentDescription = "Back"
+                        contentDescription = "Back",
+                        tint = MaterialTheme.colorScheme.onSurface
                     )
                 }
             },
             colors = TopAppBarDefaults.topAppBarColors(
-                containerColor = MaterialTheme.colorScheme.background
-            )
+                containerColor = screenBg,
+                scrolledContainerColor = screenBg
+            ),
+            scrollBehavior = scrollBehavior
         )
+
+        // Subtle divider on scroll
+        if (scrollBehavior.state.contentOffset < -5f) {
+            HorizontalDivider(
+                color = cardBorderColor.copy(alpha = 0.6f),
+                thickness = 0.8.dp
+            )
+        }
 
         Column(
             modifier = Modifier
+                .fillMaxSize()
                 .verticalScroll(rememberScrollState())
-                .padding(Spacing.lg)
+                .padding(horizontal = 16.dp)
         ) {
-            Text(
-                text = "Appearance",
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onSurface
-            )
-            THEME_OPTIONS.forEach { option ->
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { viewModel.setThemeMode(option) }
-                        .padding(vertical = Spacing.sm),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    RadioButton(
-                        selected = themeMode == option,
-                        onClick = { viewModel.setThemeMode(option) }
-                    )
-                    Text(
-                        text = option.label,
-                        style = MaterialTheme.typography.bodyLarge
-                    )
-                }
-            }
+            // =================================================================
+            // Group 1: AI & Tools
+            // =================================================================
+            SectionLabel(text = "AI & Tools")
 
-            HorizontalDivider(modifier = Modifier.padding(vertical = Spacing.lg))
-
-            Text(
-                text = "Data",
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onSurface
-            )
-
-            SettingsLink("Conversations", "Search, rename and delete chats") {
-                onOpenConversations()
-            }
-            SettingsLink("Tasks", "See and stop running agent tasks") {
-                onOpenTasks()
-            }
-
-            HorizontalDivider(modifier = Modifier.padding(vertical = Spacing.lg))
-
-            // ---- Storage access: the agent works on real device files -------
-            Text(
-                text = "Storage access",
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onSurface
-            )
-            val context = LocalContext.current
-            var storageGranted by remember { mutableStateOf(DeviceStorage.hasAccess(context)) }
-            // Coming back from the system screen must refresh the state — the
-            // permission lives outside this process.
-            val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
-            DisposableEffect(lifecycleOwner, context) {
-                val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
-                    if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
-                        storageGranted = DeviceStorage.hasAccess(context)
-                    }
-                }
-                lifecycleOwner.lifecycle.addObserver(observer)
-                onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
-            }
-            SettingsLink(
-                title = if (storageGranted) {
-                    "All files access — granted"
-                } else {
-                    "All files access — tap to grant"
-                },
-                subtitle = if (storageGranted) {
-                    "The AI can read and edit any file on this phone: Downloads, " +
-                        "Documents, DCIM, project folders."
-                } else {
-                    "Without it the file tools can only see the app's own folder. " +
-                        "Grant it so the AI can read and edit your files."
-                }
+            SettingsGroupCard(
+                backgroundColor = cardBg,
+                borderColor = cardBorderColor
             ) {
-                val target = DeviceStorage.accessIntent(context)
-                    ?: android.content.Intent(
-                        android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-                        android.net.Uri.parse("package:" + context.packageName)
-                    )
-                runCatching { context.startActivity(target) }
-                storageGranted = DeviceStorage.hasAccess(context)
-            }
+                // 1. AI Providers
+                SettingsItemRow(
+                    icon = Icons.Outlined.Hub,
+                    iconTint = MaterialTheme.colorScheme.primary,
+                    title = "AI Providers",
+                    onClick = onOpenProviders
+                )
 
-            HorizontalDivider(modifier = Modifier.padding(vertical = Spacing.lg))
+                RowDivider(borderColor = cardBorderColor)
 
-            // ---- Memory (Milestone 3): inspect, disable, delete ----------------
-            Text(
-                text = "Memory",
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onSurface
-            )
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = Spacing.sm)
-            ) {
-                Column(Modifier.weight(1f)) {
-                    Text("Remember saved facts", style = MaterialTheme.typography.bodyLarge)
-                    Text(
-                        "Nothing is saved automatically. Secrets are never stored.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                androidx.compose.material3.Switch(
-                    checked = memoryEnabled,
-                    onCheckedChange = { viewModel.setMemoryEnabled(it) }
+                // 2. Local AI
+                SettingsItemRow(
+                    icon = Icons.Outlined.Memory,
+                    iconTint = Color(0xFF10B981),
+                    title = "Local AI",
+                    onClick = onOpenLocalAi
+                )
+
+                RowDivider(borderColor = cardBorderColor)
+
+                // 3. Connectors
+                SettingsItemRow(
+                    icon = Icons.Outlined.Extension,
+                    iconTint = Color(0xFF3B82F6),
+                    title = "Connectors",
+                    trailing = {
+                        if (isConnectorsConnected) {
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+                            ) {
+                                Text(
+                                    text = "Connected",
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        fontWeight = FontWeight.SemiBold,
+                                        fontSize = 11.sp
+                                    ),
+                                    color = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                )
+                            }
+                            Spacer(Modifier.width(4.dp))
+                        }
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Outlined.KeyboardArrowRight,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                            modifier = Modifier.size(20.dp)
+                        )
+                    },
+                    onClick = onOpenConnectedApps
                 )
             }
-            if (memoryEntries.isNotEmpty()) {
-                memoryEntries.take(20).forEach { entry ->
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = Spacing.xs)
-                    ) {
-                        Column(Modifier.weight(1f)) {
-                            Text(
-                                entry.key,
-                                style = MaterialTheme.typography.bodyMedium
-                            )
-                            Text(
-                                entry.value,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 2
-                            )
-                        }
-                        androidx.compose.material3.TextButton(onClick = {
-                            viewModel.deleteMemory(entry.id)
-                        }) { Text("Delete") }
-                    }
-                }
-                androidx.compose.material3.TextButton(onClick = {
-                    viewModel.clearAllMemory()
-                }) { Text("Clear all memory", color = MaterialTheme.colorScheme.error) }
+
+            Spacer(Modifier.height(12.dp))
+
+            // =================================================================
+            // Group 2: App Preferences
+            // =================================================================
+            SectionLabel(text = "App Preferences")
+
+            SettingsGroupCard(
+                backgroundColor = cardBg,
+                borderColor = cardBorderColor
+            ) {
+                // 1. Appearance
+                SettingsItemRow(
+                    icon = Icons.Outlined.Palette,
+                    iconTint = Color(0xFF8B5CF6),
+                    title = "Appearance",
+                    trailing = {
+                        Text(
+                            text = when (themeMode) {
+                                ThemeMode.LIGHT -> "Light"
+                                ThemeMode.DARK -> "Dark"
+                                ThemeMode.SYSTEM -> "System"
+                            },
+                            style = MaterialTheme.typography.bodyMedium.copy(
+                                fontWeight = FontWeight.Normal,
+                                fontSize = 14.sp
+                            ),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Outlined.KeyboardArrowRight,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                            modifier = Modifier.size(20.dp)
+                        )
+                    },
+                    onClick = { showAppearanceSheet = true }
+                )
+
+                RowDivider(borderColor = cardBorderColor)
+
+                // 2. Debug Console
+                SettingsItemRow(
+                    icon = Icons.Outlined.Terminal,
+                    iconTint = Color(0xFFF59E0B),
+                    title = "Debug Console",
+                    onClick = onOpenDebugConsole
+                )
             }
 
-            HorizontalDivider(modifier = Modifier.padding(vertical = Spacing.lg))
+            // =================================================================
+            // Footer
+            // =================================================================
+            Spacer(Modifier.height(44.dp))
 
-            // ---- Connected Apps: Google Drive/Gmail/Sheets/Docs ---------------
-            Text(
-                text = "Connected Apps",
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onSurface
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 32.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                BrandMark(modifier = Modifier.size(34.dp))
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    text = "Neuron-AI",
+                    style = MaterialTheme.typography.titleSmall.copy(
+                        fontWeight = FontWeight.SemiBold,
+                        letterSpacing = 0.3.sp
+                    ),
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    text = "Version 1.2.2",
+                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
+                )
+            }
+        }
+    }
+
+    // Appearance Modal Bottom Sheet
+    if (showAppearanceSheet) {
+        AppearanceBottomSheet(
+            currentTheme = themeMode,
+            onSelectTheme = { selectedMode ->
+                viewModel.setThemeMode(selectedMode)
+                showAppearanceSheet = false
+            },
+            onDismiss = { showAppearanceSheet = false },
+            isDark = isDark,
+            cardBorderColor = cardBorderColor
+        )
+    }
+}
+
+/**
+ * Small muted section label (12sp–13sp) with clean uppercase styling.
+ */
+@Composable
+private fun SectionLabel(text: String) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.labelMedium.copy(
+            fontSize = 12.sp,
+            fontWeight = FontWeight.SemiBold,
+            letterSpacing = 0.5.sp
+        ),
+        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
+        modifier = Modifier.padding(start = 4.dp, bottom = 8.dp, top = 16.dp)
+    )
+}
+
+/**
+ * Pure white (or dark surface) grouped card container with 16dp rounded corners and subtle border.
+ */
+@Composable
+private fun SettingsGroupCard(
+    backgroundColor: Color,
+    borderColor: Color,
+    content: @Composable () -> Unit
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        color = backgroundColor,
+        border = BorderStroke(1.dp, borderColor)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 4.dp)
+        ) {
+            content()
+        }
+    }
+}
+
+/**
+ * Uniform 56dp–60dp settings row with leading tinted icon container, title, and trailing action.
+ */
+@Composable
+private fun SettingsItemRow(
+    icon: ImageVector,
+    iconTint: Color,
+    title: String,
+    trailing: @Composable () -> Unit = {
+        Icon(
+            imageVector = Icons.AutoMirrored.Outlined.KeyboardArrowRight,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+            modifier = Modifier.size(20.dp)
+        )
+    },
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 56.dp)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        // Leading icon inside subtle rounded tinted container
+        Box(
+            modifier = Modifier
+                .size(36.dp)
+                .background(iconTint.copy(alpha = 0.12f), RoundedCornerShape(10.dp)),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = iconTint,
+                modifier = Modifier.size(20.dp)
             )
-            SettingsLink(
-                "Google account",
-                "Drive, Gmail, Sheets and Docs tools — Google calls run on the connector " +
-                    "backend, never on this phone"
-            ) {
-                onOpenConnectedApps()
-            }
+        }
 
-            HorizontalDivider(modifier = Modifier.padding(vertical = Spacing.lg))
+        Spacer(Modifier.width(14.dp))
 
-            Text(
-                text = "AI Providers",
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onSurface
-            )
-            SettingsLink(
-                "Manage providers",
-                "OpenAI-compatible endpoints, keys stored in the Android Keystore"
-            ) {
-                onOpenProviders()
-            }
+        // Concise title (no multi-line subtitles)
+        Text(
+            text = title,
+            style = MaterialTheme.typography.bodyLarge.copy(
+                fontWeight = FontWeight.Medium,
+                fontSize = 15.sp
+            ),
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.weight(1f)
+        )
 
-            HorizontalDivider(modifier = Modifier.padding(vertical = Spacing.lg))
-
-            Text(
-                text = "Local AI",
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onSurface
-            )
-            SettingsLink(
-                "On-device models",
-                "Run AI models fully on this phone — no API key, no internet at inference time"
-            ) {
-                onOpenLocalAi()
-            }
-            SettingsLink(
-                "Debug console",
-                "Engine build, device memory, model files and llama.cpp's own log — " +
-                    "the reason a local model refused to load"
-            ) {
-                onOpenDebugConsole()
-            }
-
-            HorizontalDivider(modifier = Modifier.padding(vertical = Spacing.lg))
-
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                BrandMark()
-                Column(modifier = Modifier.padding(start = Spacing.md)) {
-                    Text(
-                        text = "Neuron-AI",
-                        style = MaterialTheme.typography.titleMedium
-                    )
-                    Text(
-                        text = "Version 1.2.2",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
+        // Trailing status badge or chevron
+        Row(
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            trailing()
         }
     }
 }
 
 @Composable
-private fun SettingsLink(title: String, subtitle: String, onClick: () -> Unit) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(vertical = Spacing.md),
-        verticalAlignment = Alignment.CenterVertically
+private fun RowDivider(borderColor: Color) {
+    HorizontalDivider(
+        modifier = Modifier.padding(start = 66.dp, end = 16.dp),
+        thickness = 0.6.dp,
+        color = borderColor.copy(alpha = 0.5f)
+    )
+}
+
+/**
+ * Clean Modal Bottom Sheet for appearance selection (Light / Dark / System).
+ * Displays 3 horizontal selectable icon cards.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun AppearanceBottomSheet(
+    currentTheme: ThemeMode,
+    onSelectTheme: (ThemeMode) -> Unit,
+    onDismiss: () -> Unit,
+    isDark: Boolean,
+    cardBorderColor: Color
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+        containerColor = if (isDark) MaterialTheme.colorScheme.surface else Color.White,
+        dragHandle = {
+            Box(
+                modifier = Modifier
+                    .padding(vertical = 12.dp)
+                    .size(width = 36.dp, height = 4.dp)
+                    .background(
+                        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f),
+                        CircleShape
+                    )
+            )
+        }
     ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(title, style = MaterialTheme.typography.bodyLarge)
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp)
+                .navigationBarsPadding()
+                .padding(bottom = 24.dp)
+        ) {
             Text(
-                subtitle,
+                text = "Appearance",
+                style = MaterialTheme.typography.titleMedium.copy(
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 18.sp
+                ),
+                color = MaterialTheme.colorScheme.onSurface
+            )
+
+            Spacer(Modifier.height(4.dp))
+
+            Text(
+                text = "Choose how Neuron-AI looks on your device",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+
+            Spacer(Modifier.height(20.dp))
+
+            // 3 Horizontal Selectable Icon Cards
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                ThemeCard(
+                    title = "Light",
+                    icon = Icons.Outlined.LightMode,
+                    selected = currentTheme == ThemeMode.LIGHT,
+                    onClick = { onSelectTheme(ThemeMode.LIGHT) },
+                    cardBorderColor = cardBorderColor,
+                    modifier = Modifier.weight(1f)
+                )
+
+                ThemeCard(
+                    title = "Dark",
+                    icon = Icons.Outlined.DarkMode,
+                    selected = currentTheme == ThemeMode.DARK,
+                    onClick = { onSelectTheme(ThemeMode.DARK) },
+                    cardBorderColor = cardBorderColor,
+                    modifier = Modifier.weight(1f)
+                )
+
+                ThemeCard(
+                    title = "System",
+                    icon = Icons.Outlined.BrightnessAuto,
+                    selected = currentTheme == ThemeMode.SYSTEM,
+                    onClick = { onSelectTheme(ThemeMode.SYSTEM) },
+                    cardBorderColor = cardBorderColor,
+                    modifier = Modifier.weight(1f)
+                )
+            }
         }
-        Text(
-            "›",
-            style = MaterialTheme.typography.titleLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
+    }
+}
+
+/**
+ * Individual selectable theme card inside the Appearance Bottom Sheet.
+ */
+@Composable
+private fun ThemeCard(
+    title: String,
+    icon: ImageVector,
+    selected: Boolean,
+    onClick: () -> Unit,
+    cardBorderColor: Color,
+    modifier: Modifier = Modifier
+) {
+    val brandPurple = MaterialTheme.colorScheme.primary
+    val borderColor = if (selected) brandPurple else cardBorderColor
+    val borderWidth = if (selected) 2.dp else 1.dp
+    val cardBackground = if (selected) {
+        brandPurple.copy(alpha = 0.08f)
+    } else {
+        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+    }
+
+    Surface(
+        modifier = modifier
+            .height(96.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .clickable(onClick = onClick),
+        shape = RoundedCornerShape(14.dp),
+        color = cardBackground,
+        border = BorderStroke(borderWidth, borderColor)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(vertical = 12.dp, horizontal = 8.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = if (selected) brandPurple else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(24.dp)
+                )
+            }
+
+            Spacer(Modifier.height(8.dp))
+
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.labelLarge.copy(
+                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                        fontSize = 13.sp
+                    ),
+                    color = if (selected) brandPurple else MaterialTheme.colorScheme.onSurface
+                )
+                if (selected) {
+                    Icon(
+                        imageVector = Icons.Outlined.Check,
+                        contentDescription = "Selected",
+                        tint = brandPurple,
+                        modifier = Modifier.size(13.dp)
+                    )
+                }
+            }
+        }
     }
 }

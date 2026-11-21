@@ -1,6 +1,10 @@
 package com.neuron.ai
 
+import android.content.Intent
+import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -8,6 +12,7 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.getValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.neuron.ai.core.settings.ThemeMode
+import com.neuron.ai.data.storage.DeviceStorage
 import com.neuron.ai.di.AppContainer
 import com.neuron.ai.ui.NeuronApp
 import com.neuron.ai.ui.theme.NeuronTheme
@@ -15,11 +20,15 @@ import com.neuron.ai.ui.theme.NeuronTheme
 class MainActivity : ComponentActivity() {
 
     private lateinit var container: AppContainer
+    private var hasPromptedStorageOnLaunch = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         container = (application as NeuronApplication).container
+
+        // Startup storage permission flow: prompt user immediately on app launch if missing
+        checkStoragePermissionOnLaunch()
 
         setContent {
             val settings = container.settingsRepository
@@ -65,6 +74,40 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             }
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // If permission wasn't granted yet and wasn't prompted, check on resume
+        if (!hasPromptedStorageOnLaunch && !DeviceStorage.hasAccess(this)) {
+            checkStoragePermissionOnLaunch()
+        }
+    }
+
+    private fun checkStoragePermissionOnLaunch() {
+        if (!hasPromptedStorageOnLaunch && !DeviceStorage.hasAccess(this)) {
+            hasPromptedStorageOnLaunch = true
+            promptStorageAccess()
+        }
+    }
+
+    private fun promptStorageAccess() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val intent = DeviceStorage.accessIntent(this)
+                ?: Intent(
+                    Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                    Uri.parse("package:$packageName")
+                )
+            runCatching { startActivity(intent) }
+        } else {
+            requestPermissions(
+                arrayOf(
+                    android.Manifest.permission.READ_EXTERNAL_STORAGE,
+                    android.Manifest.permission.WRITE_EXTERNAL_STORAGE
+                ),
+                1001
+            )
         }
     }
 }
