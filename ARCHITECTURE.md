@@ -58,6 +58,8 @@ com.neuron.ai
 │   ├── integration/              # BrowserSession, TerminalSession seams
 │   ├── settings/                 # SettingsRepository, ThemeMode,
 │   │                             #   ResponseSpacing, ReplySpacingProfile
+│   ├── update/                   # AppUpdateInfo, ReleaseAsset, VersionComparator,
+│   │                             #   DownloadState, InstallResult
 │   ├── security/                 # SecureCredentialStore (+ Keystore factory)
 │   ├── error/                    # NeuronError, CrashRecorder
 │   ├── log/                      # Logger facade + secret redaction
@@ -85,6 +87,7 @@ com.neuron.ai
 │   ├── terminal/                 # TerminalManager/TerminalSession
 │   ├── task/                     # DefaultTaskManager, TaskRecordStore
 │   ├── permissions/              # SessionPermissionManager
+│   ├── update/                   # AppUpdateManager (releases, downloads, installer)
 │   ├── attachment/               # AttachmentStore (app-private files)
 │   └── local/                    # On-device inference (see §13)
 ├── context/
@@ -109,6 +112,8 @@ com.neuron.ai
     ├── providers/                # ProvidersScreen, ProviderEditScreen
     ├── settings/                 # Settings, LocalAi, LocalModelSettings,
     │                             #   DebugConsole screens + ViewModels
+    ├── update/                   # AppUpdateScreen, AppUpdateViewModel,
+    │                             #   UpdatePromptGate, UpdatePromptDialog
     ├── tasks/                    # TasksScreen + ViewModel
     ├── permissions/              # PermissionDialogHost
     ├── markdown/                 # parser, renderer, highlighter, inline Markdown

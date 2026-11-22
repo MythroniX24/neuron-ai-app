@@ -46,10 +46,21 @@ import kotlinx.coroutines.launch
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun NeuronApp(container: AppContainer) {
+fun NeuronApp(
+    container: AppContainer,
+    pendingNavigationRoute: kotlinx.coroutines.flow.StateFlow<String?>? = null
+) {
     val navController = rememberNavController()
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
+
+    androidx.compose.runtime.LaunchedEffect(pendingNavigationRoute) {
+        pendingNavigationRoute?.collect { route ->
+            if (!route.isNullOrBlank()) {
+                navController.navigate(route)
+            }
+        }
+    }
 
     val openDrawer: () -> Unit = {
         scope.launch { drawerState.open() }
@@ -105,6 +116,10 @@ fun NeuronApp(container: AppContainer) {
                 .background(MaterialTheme.colorScheme.background)
         ) {
         PermissionDialogHost(container.permissionManager) {
+            com.neuron.ai.ui.update.UpdatePromptGate(
+                container = container,
+                onOpenUpdate = { navController.navigate(Routes.APP_UPDATE) }
+            )
             NavHost(
                 navController = navController,
                 startDestination = Routes.HOME,
@@ -177,7 +192,8 @@ fun NeuronApp(container: AppContainer) {
                         onOpenTasks = { navController.navigate(Routes.TASKS) },
                         onOpenLocalAi = { navController.navigate(Routes.LOCAL_AI) },
                         onOpenDebugConsole = { navController.navigate(Routes.DEBUG_CONSOLE) },
-                        onOpenConnectedApps = { navController.navigate(Routes.CONNECTED_APPS) }
+                        onOpenConnectedApps = { navController.navigate(Routes.CONNECTED_APPS) },
+                        onOpenAppUpdate = { navController.navigate(Routes.APP_UPDATE) }
                     )
                 }
 
@@ -270,6 +286,13 @@ fun NeuronApp(container: AppContainer) {
 
                 composable(Routes.TASKS) {
                     TasksScreen(
+                        container = container,
+                        onBack = { navController.popBackStack() }
+                    )
+                }
+
+                composable(Routes.APP_UPDATE) {
+                    com.neuron.ai.ui.update.AppUpdateScreen(
                         container = container,
                         onBack = { navController.popBackStack() }
                     )

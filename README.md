@@ -201,6 +201,20 @@ Run GGUF models on the phone through a bundled llama.cpp bridge.
   carrying `FILESYSTEM_DELETE`) always re-prompts; grants can be remembered for
   once / session / workspace / always and are revocable.
 
+### In-App Updates
+
+- **Direct GitHub release updates:** Queries the latest release from the repository,
+  compares versions via semantic versioning, and notifies when an update is available.
+- **Dedicated Update screen (`Settings → Check for Updates`):** Current vs latest
+  version comparison, release date, asset download size, and full Markdown changelog
+  notes.
+- **Direct in-app installation:** Streams `.apk` downloads into cache with live
+  byte and percentage progress, then prompts the Android Package Installer via `FileProvider`.
+- **One-time launch popup:** Alert prompt on app launch offering "Update Now" and
+  "Later" options, appearing strictly once per release tag.
+- **System notifications:** Alerts the user when a new release is published and
+  tracks background download progress.
+
 ### Rendering
 
 Hand-rolled Markdown (headings, lists, quotes, tables, links, code blocks with

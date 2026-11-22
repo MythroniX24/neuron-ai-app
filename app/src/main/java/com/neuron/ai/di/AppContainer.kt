@@ -194,6 +194,17 @@ class AppContainer(context: Context) {
         com.neuron.ai.data.tool.GitHubConnectorTools.all(gitHubRepository)
     }
 
+    /** In-app GitHub release updater with streaming downloads and package installation. */
+    val appUpdateManager: com.neuron.ai.data.update.AppUpdateManager by lazy {
+        com.neuron.ai.data.update.AppUpdateManager(
+            context = context,
+            dispatchers = dispatchers,
+            gitHubTokenProvider = {
+                secureCredentials.get("github_token")
+            }
+        )
+    }
+
     val permissionManager: PermissionManager = SessionPermissionManager()
 
     val toolRegistry: ToolRegistry = InMemoryToolRegistry()

@@ -22,11 +22,17 @@ class MainActivity : ComponentActivity() {
 
     private lateinit var container: AppContainer
     private var hasPromptedStorageOnLaunch = false
+    private val pendingNavigationRoute = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         container = (application as NeuronApplication).container
+
+        // Handle navigation deep-link from notifications
+        intent?.getStringExtra("navigate_to")?.let {
+            pendingNavigationRoute.value = it
+        }
 
         // Startup storage permission flow: prompt user immediately on app launch if missing
         checkStoragePermissionOnLaunch()
@@ -67,7 +73,10 @@ class MainActivity : ComponentActivity() {
                 // cards can open a file without leaving the app.
                 com.neuron.ai.ui.files.FileViewerHost {
                     com.neuron.ai.ui.components.ImageViewerHost {
-                        NeuronApp(container = container)
+                        NeuronApp(
+                            container = container,
+                            pendingNavigationRoute = pendingNavigationRoute
+                        )
                         // Full-screen report left by the PREVIOUS run when it crashed.
                         // Rendered as a dialog so it sits above every screen, and it
                         // shows nothing at all after a clean launch.
@@ -75,6 +84,13 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        intent.getStringExtra("navigate_to")?.let {
+            pendingNavigationRoute.value = it
         }
     }
 

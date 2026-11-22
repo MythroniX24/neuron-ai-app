@@ -35,6 +35,7 @@ import androidx.compose.material.icons.outlined.LightMode
 import androidx.compose.material.icons.outlined.Memory
 import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material.icons.outlined.Schedule
+import androidx.compose.material.icons.outlined.SystemUpdate
 import androidx.compose.material.icons.outlined.Terminal
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -82,12 +83,14 @@ fun SettingsScreen(
     onOpenTasks: () -> Unit = {},
     onOpenLocalAi: () -> Unit = {},
     onOpenDebugConsole: () -> Unit = {},
-    onOpenConnectedApps: () -> Unit = {}
+    onOpenConnectedApps: () -> Unit = {},
+    onOpenAppUpdate: () -> Unit = {}
 ) {
     val viewModel: SettingsViewModel =
         viewModel(factory = SettingsViewModelFactory(container))
     val themeMode by viewModel.themeMode.collectAsStateWithLifecycle()
     val isConnectorsConnected by viewModel.isConnectorsConnected.collectAsStateWithLifecycle()
+    val isUpdateAvailable by viewModel.isUpdateAvailable.collectAsStateWithLifecycle()
     val context = LocalContext.current
 
     var showAppearanceSheet by remember { mutableStateOf(false) }
@@ -303,6 +306,50 @@ fun SettingsScreen(
                     title = "Debug Console",
                     onClick = onOpenDebugConsole
                 )
+
+                RowDivider(borderColor = cardBorderColor)
+
+                // 4. Software Update
+                SettingsItemRow(
+                    icon = Icons.Outlined.SystemUpdate,
+                    iconTint = Color(0xFF6366F1),
+                    title = "Check for Updates",
+                    trailing = {
+                        if (isUpdateAvailable) {
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = Color(0xFF6366F1).copy(alpha = 0.12f)
+                            ) {
+                                Text(
+                                    text = "Update",
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 11.sp
+                                    ),
+                                    color = Color(0xFF6366F1),
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                )
+                            }
+                        } else {
+                            Text(
+                                text = "v${com.neuron.ai.BuildConfig.VERSION_NAME}",
+                                style = MaterialTheme.typography.bodyMedium.copy(
+                                    fontWeight = FontWeight.Normal,
+                                    fontSize = 13.sp
+                                ),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                            )
+                        }
+                        Spacer(Modifier.width(4.dp))
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Outlined.KeyboardArrowRight,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                            modifier = Modifier.size(20.dp)
+                        )
+                    },
+                    onClick = onOpenAppUpdate
+                )
             }
 
             // =================================================================
@@ -313,6 +360,7 @@ fun SettingsScreen(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .clickable(onClick = onOpenAppUpdate)
                     .padding(bottom = 32.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {

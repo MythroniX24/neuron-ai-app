@@ -15,7 +15,8 @@ class SettingsViewModelFactory(private val container: AppContainer) : ViewModelP
             settings = container.settingsRepository,
             googleRepository = container.googleConnectorRepository,
             gitHubRepository = container.gitHubRepository,
-            dispatchers = container.dispatchers
+            dispatchers = container.dispatchers,
+            updateManager = container.appUpdateManager
         ) as T
     }
 }

@@ -30,6 +30,8 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <!-- Android 13+ needs this before the progress notification is visible. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Required on Android 8.0+ to prompt package installer for in-app updates. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <application
         android:name=".NeuronApplication"
