@@ -55,4 +55,45 @@ class MarkdownParserTest {
         assertEquals("https://example.com/photo.jpg", img.url)
         assertEquals("Alt text", img.alt)
     }
+
+    @Test
+    fun `parses rich_items fence as RichItemsBlock and not CodeBlock`() {
+        val markdown = """
+            ```rich_items
+            {"title":"Top Movies","items":[{"title":"Dune"}]}
+            ```
+        """.trimIndent()
+
+        val blocks = MarkdownParser.parse(markdown)
+        assertEquals(1, blocks.size)
+        assertTrue(blocks.first() is MdBlock.RichItemsBlock)
+    }
+
+    @Test
+    fun `parses question fence as QuestionBlock and not CodeBlock`() {
+        val markdown = """
+            ```question
+            {"title":"Next Step","questions":[{"question":"Choose option","options":["A","B"]}]}
+            ```
+        """.trimIndent()
+
+        val blocks = MarkdownParser.parse(markdown)
+        assertEquals(1, blocks.size)
+        assertTrue(blocks.first() is MdBlock.QuestionBlock)
+    }
+
+    @Test
+    fun `parses normal programming language as CodeBlock`() {
+        val markdown = """
+            ```kotlin
+            fun main() { println("Hello") }
+            ```
+        """.trimIndent()
+
+        val blocks = MarkdownParser.parse(markdown)
+        assertEquals(1, blocks.size)
+        assertTrue(blocks.first() is MdBlock.CodeBlock)
+        val code = blocks.first() as MdBlock.CodeBlock
+        assertEquals("kotlin", code.language)
+    }
 }

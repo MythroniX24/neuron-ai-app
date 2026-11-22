@@ -162,4 +162,26 @@ class QuestionToolTest {
         assertTrue(payload.questions.first().options.contains("50 ग्राम"))
         assertTrue(payload.questions.first().options.contains("1 किलो"))
     }
+
+    @Test
+    fun `extractFenced removes question code block from visible text`() {
+        val prose = """
+            Got it! Let me ask you a few questions.
+            ```question
+            {"title": "Let's Get Started!", "questions": [{"question": "What's your current goal?", "options": ["Option 1", "Option 2"]}]}
+            ```
+            Hope this helps!
+        """.trimIndent()
+
+        val extracted = QuestionCardParser.extractFenced(prose)
+        assertNotNull(extracted)
+        val (payload, visible) = extracted!!
+        assertEquals("Let's Get Started!", payload.title)
+        assertEquals("What's your current goal?", payload.questions.first().question)
+        assertEquals(2, payload.questions.first().options.size)
+        assertTrue(!visible.contains("```question"))
+        assertTrue(!visible.contains("Option 1"))
+        assertTrue(visible.contains("Got it! Let me ask you a few questions."))
+        assertTrue(visible.contains("Hope this helps!"))
+    }
 }

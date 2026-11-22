@@ -1277,27 +1277,25 @@ class ChatViewModel(
                         }
 
                         is AgentEvent.Finished -> {
-                            // Fallback for models that cannot call the UI tool:
-                            // a fenced recommendation JSON block is removed from
-                            // the visible answer and rendered as cards instead.
+                            // Fallback for models that output recommendation cards directly in markdown:
+                            // a fenced recommendation JSON block is removed from the visible answer and rendered as cards instead.
                             var summary = event.summary
-                            if (_liveRichRecommendations.value.isEmpty()) {
-                                com.neuron.ai.core.conversation.RichItemsParser
-                                    .extractFenced(summary)
-                                    ?.let { (set, visible) ->
+                            com.neuron.ai.core.conversation.RichItemsParser
+                                .extractFenced(summary)
+                                ?.let { (set, visible) ->
+                                    if (_liveRichRecommendations.value.isEmpty()) {
                                         _liveRichRecommendations.value = listOf(set)
-                                        summary = visible
                                     }
-                            }
-                            // Same fallback for comparisons: a fenced block is
-                            // pulled out of the visible text and rendered as
-                            // native sections at its original position.
-                            if (_liveComparisonBlocks.value.isEmpty()) {
-                                com.neuron.ai.core.conversation.ComparisonBlocksParser
-                                    .extractFenced(summary)
-                                    ?.let { fenced ->
+                                    summary = visible
+                                }
+
+                            // Same fallback for comparisons: a fenced block is pulled out of the visible text
+                            // and rendered as native sections at its original position.
+                            com.neuron.ai.core.conversation.ComparisonBlocksParser
+                                .extractFenced(summary)
+                                ?.let { fenced ->
+                                    if (_liveComparisonBlocks.value.isEmpty()) {
                                         _liveComparisonBlocks.value = fenced.placements
-                                        summary = fenced.text
                                         requestComparisonImages(
                                             fenced.placements.flatMap { placement ->
                                                 com.neuron.ai.core.conversation.ComparisonLayout
@@ -1305,15 +1303,20 @@ class ChatViewModel(
                                             }
                                         )
                                     }
-                            }
+                                    summary = fenced.text
+                                }
+
                             // Fallback for interactive question blocks in text:
-                            if (_activeQuestionCard.value == null) {
-                                com.neuron.ai.core.conversation.QuestionCardParser
-                                    .extractFenced(summary)
-                                    ?.let { (card, visible) ->
+                            // ALWAYS strip fenced question blocks from visible summary so raw JSON never leaks into the chat bubble!
+                            com.neuron.ai.core.conversation.QuestionCardParser
+                                .extractFenced(summary)
+                                ?.let { (card, visible) ->
+                                    if (_activeQuestionCard.value == null) {
                                         _activeQuestionCard.value = card
-                                        summary = visible
-                                    } ?: run {
+                                    }
+                                    summary = visible
+                                } ?: run {
+                                    if (_activeQuestionCard.value == null) {
                                         com.neuron.ai.core.conversation.QuestionCardParser
                                             .extractFromProse(summary)
                                             ?.let { (card, visible) ->
@@ -1321,7 +1324,7 @@ class ChatViewModel(
                                                 summary = visible
                                             }
                                     }
-                            }
+                                }
                             // When fenced blocks (recommendations, comparisons, question cards) were extracted,
                             // summary is legitimately shorter than assistantBuffer. Update assistantBuffer
                             // to the clean visible summary so raw JSON blocks never leak into the saved message!
@@ -1419,7 +1422,7 @@ class ChatViewModel(
                 openDiagnostics = openDiagnosticsOnFailure
             )
         } else if (assistantBuffer.isNotBlank() || finishedRich.isNotEmpty() ||
-            finishedComparisons.isNotEmpty()
+            finishedComparisons.isNotEmpty() || finishedQuestionCard != null || _activeQuestionCard.value != null
         ) {
             conversations.appendMessage(
                 conversationId,

@@ -302,6 +302,11 @@ fun ChatScreen(
             { request: com.neuron.ai.ui.a2ui.A2uiActionRequest ->
                 viewModel.send(request.toUserMessage())
             }
+        },
+        com.neuron.ai.ui.chat.LocalQuestionSubmit provides androidx.compose.runtime.remember {
+            { answer: String ->
+                viewModel.submitQuestionAnswer(answer)
+            }
         }
     ) {
     Box(Modifier.fillMaxSize()) {

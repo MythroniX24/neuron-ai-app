@@ -35,6 +35,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateMapOf
@@ -52,8 +53,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.neuron.ai.core.conversation.InteractiveQuestion
 import com.neuron.ai.core.conversation.QuestionCardPayload
+import com.neuron.ai.ui.markdown.InlineMarkdown
 import com.neuron.ai.ui.theme.Radius
 import com.neuron.ai.ui.theme.Spacing
+
+val LocalQuestionSubmit = compositionLocalOf<(String) -> Unit> { {} }
 
 /**
  * Interactive Question Card matching Claude's tappable multiple-choice UI:
@@ -176,7 +180,7 @@ fun InteractiveQuestionCard(
                 Column(modifier = Modifier.fillMaxWidth()) {
                     // Question text
                     Text(
-                        text = q.question,
+                        text = InlineMarkdown.toAnnotatedString(q.question),
                         style = MaterialTheme.typography.titleMedium.copy(
                             fontWeight = FontWeight.SemiBold,
                             fontSize = 17.sp,
@@ -228,7 +232,7 @@ fun InteractiveQuestionCard(
                             Spacer(modifier = Modifier.width(Spacing.md))
 
                             Text(
-                                text = option,
+                                text = InlineMarkdown.toAnnotatedString(option),
                                 style = MaterialTheme.typography.bodyMedium.copy(
                                     fontSize = 15.sp,
                                     lineHeight = 20.sp

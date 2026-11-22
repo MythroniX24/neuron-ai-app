@@ -144,6 +144,36 @@ private fun BlockView(block: MdBlock, spacing: ReplySpacingProfile) {
         // Agent-authored UI (A2UI): native cards, file lists, forms.
         is MdBlock.A2ui -> com.neuron.ai.ui.a2ui.A2uiBlockView(block.json)
 
+        // Native rich recommendations (movies, tools, products, books, etc.)
+        is MdBlock.RichItemsBlock -> {
+            val set = remember(block.json) {
+                com.neuron.ai.core.conversation.RichItemsParser.parse(block.json)
+            }
+            if (set != null) {
+                com.neuron.ai.ui.chat.RichRecommendationSection(
+                    recommendations = listOf(set),
+                    responseSpacing = spacing.paragraph,
+                    modifier = Modifier.padding(vertical = Spacing.xs)
+                )
+            }
+        }
+
+        // Native interactive question card
+        is MdBlock.QuestionBlock -> {
+            val payload = remember(block.json) {
+                com.neuron.ai.core.conversation.QuestionCardParser.parse(block.json)
+            }
+            if (payload != null) {
+                val onSubmit = com.neuron.ai.ui.chat.LocalQuestionSubmit.current
+                com.neuron.ai.ui.chat.InteractiveQuestionCard(
+                    payload = payload,
+                    onOptionSelected = { onSubmit(it) },
+                    onDismiss = {},
+                    modifier = Modifier.padding(vertical = Spacing.xs)
+                )
+            }
+        }
+
         is MdBlock.CodeBlock -> CodeBlockView(block)
 
         is MdBlock.LatexBlock -> LatexBlockView(block.latex)

@@ -121,4 +121,22 @@ class RichItemsParserTest {
         assertTrue(visible.contains("Here are my picks."))
         assertTrue(visible.contains("Enjoy!"))
     }
+
+    @Test
+    fun `fenced rich_items tag is extracted and removed from visible text`() {
+        val text = """
+            Here are my movie picks.
+            ```rich_items
+            {"title":"Latest Movies","items":[{"title":"Deadpool & Wolverine","year":"2026"}]}
+            ```
+            Let me know which you prefer!
+        """.trimIndent()
+
+        val (set, visible) = RichItemsParser.extractFenced(text)!!
+        assertEquals("Deadpool & Wolverine", set.items.single().title)
+        assertTrue(!visible.contains("```rich_items"))
+        assertTrue(!visible.contains("Deadpool"))
+        assertTrue(visible.contains("Here are my movie picks."))
+        assertTrue(visible.contains("Let me know which you prefer!"))
+    }
 }

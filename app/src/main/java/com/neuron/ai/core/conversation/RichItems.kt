@@ -67,22 +67,30 @@ object RichItemsParser {
     }.getOrNull()
 
     /**
-     * Finds one fenced JSON block containing recommendation items and returns
-     * the parsed set together with the visible text with that block removed.
-     * Used as a fallback for models that cannot call the UI tool.
+     * Finds fenced JSON blocks containing recommendation items and returns
+     * the parsed set together with the visible text with those blocks removed.
+     * Used as a fallback for models that output recommendation cards directly in markdown.
      */
     fun extractFenced(text: String): Pair<RichRecommendationSet, String>? {
         if (text.isBlank()) return null
-        FENCE.findAll(text).forEach { match ->
+        val matches = FENCE.findAll(text).toList()
+        if (matches.isEmpty()) return null
+        var foundSet: RichRecommendationSet? = null
+        var cleanedText = text
+        for (match in matches.reversed()) {
             val body = match.groupValues.getOrNull(1).orEmpty()
-            val set = parse(body) ?: return@forEach
-            val visible = (text.removeRange(match.range)).trim()
-            return set to visible
+            val set = parse(body)
+            if (set != null) {
+                if (foundSet == null) {
+                    foundSet = set
+                }
+                cleanedText = cleanedText.removeRange(match.range).trim()
+            }
         }
-        return null
+        return if (foundSet != null) foundSet to cleanedText else null
     }
 
-    private val FENCE = Regex("```(?:json|neuron-rich-items)?\\s*([\\s\\S]*?)```")
+    private val FENCE = Regex("""```(?:json|rich_items|rich-items|neuron-rich-items|ui\.rich_items)?\s*([\s\S]*?)```""", RegexOption.IGNORE_CASE)
 
     private fun parseElement(element: JsonElement): RichRecommendationSet? {
         // A bare array is accepted as a recommendation list.

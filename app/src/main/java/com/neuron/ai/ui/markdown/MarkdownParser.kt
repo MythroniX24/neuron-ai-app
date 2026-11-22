@@ -29,6 +29,16 @@ sealed class MdBlock {
     data class A2ui(val json: String) : MdBlock()
 
     /**
+     * A fenced `rich_items` recommendation block: films, products, books, etc.
+     */
+    data class RichItemsBlock(val json: String) : MdBlock()
+
+    /**
+     * A fenced `question` interactive choice block.
+     */
+    data class QuestionBlock(val json: String) : MdBlock()
+
+    /**
      * One list row. [number] carries the number the model actually wrote
      * (`3.` → 3) so a list that the parser splits into several blocks — nested
      * bullets in between do that — keeps counting 1, 2, 3 instead of
@@ -81,6 +91,12 @@ object MarkdownParser {
                 val isA2uiFence = langLower in listOf(
                     "a2ui", "a2ui-json", "ui", "card", "neuron-card", "neuron-ui", "custom-card"
                 )
+                val isRichItemsFence = langLower in listOf(
+                    "rich_items", "rich-items", "neuron-rich-items", "ui.rich_items"
+                )
+                val isQuestionFence = langLower in listOf(
+                    "question", "ask_question", "ui.ask_question", "interactive_question"
+                )
 
                 val body = StringBuilder()
                 i++
@@ -91,10 +107,9 @@ object MarkdownParser {
                 if (i < lines.size) i++
 
                 val content = body.toString().trim()
-                // A2UI blocks are UI, not code: they are handed to the
-                // renderer, and an unfinished block while streaming becomes a
-                // placeholder instead of a wall of raw JSON. Also detect JSON blocks
-                // that contain UI components/surfaces.
+                // A2UI, rich_items and question blocks are UI, not code: they are handed to their
+                // native renderers, and an unfinished block while streaming becomes a
+                // placeholder instead of a wall of raw JSON.
                 val looksLikeA2ui = isA2uiFence || (
                     (langLower == "json" || langLower == null) &&
                     (content.contains(""""createSurface"""") ||
@@ -102,10 +117,21 @@ object MarkdownParser {
                      (content.contains(""""component"""") && content.contains(""""Card"""")))
                 )
 
-                if (looksLikeA2ui) {
-                    blocks += MdBlock.A2ui(content)
-                } else {
-                    blocks += MdBlock.CodeBlock(language, content)
+                val looksLikeRichItems = isRichItemsFence || (
+                    (langLower == "json" || langLower == null) &&
+                    content.contains(""""items"""") && (content.contains(""""title"""") || content.contains(""""intro""""))
+                )
+
+                val looksLikeQuestion = isQuestionFence || (
+                    (langLower == "json" || langLower == null) &&
+                    (content.contains(""""questions"""") || (content.contains(""""question"""") && content.contains(""""options"""")))
+                )
+
+                when {
+                    looksLikeA2ui -> blocks += MdBlock.A2ui(content)
+                    looksLikeRichItems -> blocks += MdBlock.RichItemsBlock(content)
+                    looksLikeQuestion -> blocks += MdBlock.QuestionBlock(content)
+                    else -> blocks += MdBlock.CodeBlock(language, content)
                 }
                 continue
             }

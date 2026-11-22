@@ -56,9 +56,13 @@ object QuestionCardParser {
         val optionsElem = obj["options"]
         if (optionsElem is JsonArray) {
             for (item in optionsElem) {
-                val opt = (item as? JsonObject)?.get("label")?.jsonPrimitive?.content
-                    ?: item.jsonPrimitive.content
-                if (opt.isNotBlank()) optionsList.add(opt)
+                val opt = runCatching {
+                    (item as? JsonObject)?.get("label")?.jsonPrimitive?.content
+                        ?: (item as? JsonObject)?.get("text")?.jsonPrimitive?.content
+                        ?: (item as? JsonObject)?.get("option")?.jsonPrimitive?.content
+                        ?: item.jsonPrimitive.content
+                }.getOrNull()
+                if (!opt.isNullOrBlank()) optionsList.add(opt)
             }
         }
         val allowCustom = obj["allowCustom"]?.jsonPrimitive?.content?.toBooleanStrictOrNull() ?: true
@@ -80,7 +84,7 @@ object QuestionCardParser {
      * (used as fallback when models output question cards directly in text).
      */
     fun parseFromText(text: String): QuestionCardPayload? {
-        val fenceRegex = Regex("""```(?:question|ask_question)\s*([\s\S]*?)```""")
+        val fenceRegex = Regex("""```(?:question|ask_question|ui\.ask_question|interactive_question)\s*([\s\S]*?)```""", RegexOption.IGNORE_CASE)
         val match = fenceRegex.find(text) ?: return null
         val body = match.groupValues[1].trim()
         return parse(body)
@@ -88,36 +92,60 @@ object QuestionCardParser {
 
     /**
      * Extracts a fenced question block (or XML tag or JSON block) and returns the payload paired with the
-     * remaining visible text (with the fenced block removed).
+     * remaining visible text (with all matching question blocks removed).
      */
     fun extractFenced(text: String): Pair<QuestionCardPayload, String>? {
         if (text.isBlank()) return null
 
-        // 1. Standard markdown fence ```question or ```ask_question
-        val fence = Regex("""```(?:question|ask_question)\s*([\s\S]*?)```""")
-        fence.findAll(text).forEach { match ->
-            val body = match.groupValues.getOrNull(1).orEmpty()
-            val payload = parse(body) ?: return@forEach
-            val visible = text.removeRange(match.range).trim()
-            return payload to visible
+        // 1. Standard markdown fence ```question or ```ask_question or ```ui.ask_question
+        val fence = Regex("""```(?:question|ask_question|ui\.ask_question|interactive_question)\s*([\s\S]*?)```""", RegexOption.IGNORE_CASE)
+        val fenceMatches = fence.findAll(text).toList()
+        if (fenceMatches.isNotEmpty()) {
+            var foundPayload: QuestionCardPayload? = null
+            var cleanedText = text
+            for (match in fenceMatches.reversed()) {
+                val body = match.groupValues.getOrNull(1).orEmpty()
+                val payload = parse(body)
+                if (payload != null) {
+                    if (foundPayload == null) foundPayload = payload
+                    cleanedText = cleanedText.removeRange(match.range).trim()
+                }
+            }
+            if (foundPayload != null) return foundPayload to cleanedText
         }
 
         // 2. XML tags <question>...</question> or <ask_question>...</ask_question> or <interactive_question>...</interactive_question>
-        val xmlRegex = Regex("""<(?:question|ask_question|interactive_question)>\s*([\s\S]*?)\s*</(?:question|ask_question|interactive_question)>""")
-        xmlRegex.findAll(text).forEach { match ->
-            val body = match.groupValues.getOrNull(1).orEmpty()
-            val payload = parse(body) ?: return@forEach
-            val visible = text.removeRange(match.range).trim()
-            return payload to visible
+        val xmlRegex = Regex("""<(?:question|ask_question|interactive_question)>\s*([\s\S]*?)\s*</(?:question|ask_question|interactive_question)>""", RegexOption.IGNORE_CASE)
+        val xmlMatches = xmlRegex.findAll(text).toList()
+        if (xmlMatches.isNotEmpty()) {
+            var foundPayload: QuestionCardPayload? = null
+            var cleanedText = text
+            for (match in xmlMatches.reversed()) {
+                val body = match.groupValues.getOrNull(1).orEmpty()
+                val payload = parse(body)
+                if (payload != null) {
+                    if (foundPayload == null) foundPayload = payload
+                    cleanedText = cleanedText.removeRange(match.range).trim()
+                }
+            }
+            if (foundPayload != null) return foundPayload to cleanedText
         }
 
         // 3. Fenced json ```json with "questions" or "question"
-        val jsonFence = Regex("""```(?:json)?\s*(\{\s*"(?:questions|question)"[\s\S]*?\})\s*```""")
-        jsonFence.findAll(text).forEach { match ->
-            val body = match.groupValues.getOrNull(1).orEmpty()
-            val payload = parse(body) ?: return@forEach
-            val visible = text.removeRange(match.range).trim()
-            return payload to visible
+        val jsonFence = Regex("""```(?:json)?\s*(\{\s*"(?:questions|question)"[\s\S]*?\})\s*```""", RegexOption.IGNORE_CASE)
+        val jsonMatches = jsonFence.findAll(text).toList()
+        if (jsonMatches.isNotEmpty()) {
+            var foundPayload: QuestionCardPayload? = null
+            var cleanedText = text
+            for (match in jsonMatches.reversed()) {
+                val body = match.groupValues.getOrNull(1).orEmpty()
+                val payload = parse(body)
+                if (payload != null) {
+                    if (foundPayload == null) foundPayload = payload
+                    cleanedText = cleanedText.removeRange(match.range).trim()
+                }
+            }
+            if (foundPayload != null) return foundPayload to cleanedText
         }
 
         return null
