@@ -62,7 +62,7 @@ class SpeechToTextManager(
         onError: (String) -> Unit
     ) {
         mainHandler.post {
-            stopListening()
+            destroyRecognizer()
 
             if (!SpeechRecognizer.isRecognitionAvailable(context)) {
                 _isListening.value = false
@@ -96,6 +96,7 @@ class SpeechToTextManager(
                         override fun onError(error: Int) {
                             _isListening.value = false
                             _audioLevel.value = 0f
+                            destroyRecognizer()
                             val message = when (error) {
                                 SpeechRecognizer.ERROR_AUDIO -> "Audio recording error"
                                 SpeechRecognizer.ERROR_CLIENT -> "Client error"
@@ -117,6 +118,7 @@ class SpeechToTextManager(
                             _audioLevel.value = 0f
                             val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                             val recognizedText = matches?.firstOrNull()?.trim().orEmpty()
+                            destroyRecognizer()
                             if (recognizedText.isNotBlank()) {
                                 onFinal(recognizedText)
                             }
@@ -139,12 +141,16 @@ class SpeechToTextManager(
                     putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
                     putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
                     putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault())
+                    if (engineType == SttEngineType.AI_MODEL) {
+                        putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
+                    }
                 }
 
                 recognizer?.startListening(intent)
                 _isListening.value = true
             } catch (e: Exception) {
                 _isListening.value = false
+                destroyRecognizer()
                 logger?.w("SpeechToTextManager", "Failed to start listening: ${e.message}", e)
                 onError("Failed to start voice input: ${e.message}")
             }
@@ -153,17 +159,21 @@ class SpeechToTextManager(
 
     fun stopListening() {
         mainHandler.post {
-            try {
-                recognizer?.stopListening()
-                recognizer?.cancel()
-                recognizer?.destroy()
-            } catch (e: Exception) {
-                logger?.w("SpeechToTextManager", "Error stopping recognizer: ${e.message}", e)
-            } finally {
-                recognizer = null
-                _isListening.value = false
-                _audioLevel.value = 0f
-            }
+            destroyRecognizer()
+        }
+    }
+
+    private fun destroyRecognizer() {
+        try {
+            recognizer?.stopListening()
+            recognizer?.cancel()
+            recognizer?.destroy()
+        } catch (e: Exception) {
+            logger?.w("SpeechToTextManager", "Error stopping recognizer: ${e.message}", e)
+        } finally {
+            recognizer = null
+            _isListening.value = false
+            _audioLevel.value = 0f
         }
     }
 }

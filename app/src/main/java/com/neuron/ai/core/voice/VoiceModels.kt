@@ -89,10 +89,10 @@ data class VoiceModelDefinition(
                 id = "kokoro-tts-82m",
                 name = "Kokoro-82M Voice Pack",
                 category = VoiceModelCategory.TTS,
-                description = "Studio-quality neural text-to-speech. Natural prosody and warm expression (~82 MB).",
-                sizeBytes = 86_000_000L,
-                downloadUrl = "https://huggingface.co/hexgrad/Kokoro-82M/resolve/main/kokoro-v0_19.onnx",
-                fileName = "kokoro-v0_19.onnx"
+                description = "Studio-quality neural text-to-speech. Natural prosody and warm expression (~88 MB).",
+                sizeBytes = 92_360_543L,
+                downloadUrl = "https://huggingface.co/onnx-community/Kokoro-82M-ONNX/resolve/main/onnx/model_quantized.onnx",
+                fileName = "kokoro-v0_19-quantized.onnx"
             ),
             VoiceModelDefinition(
                 id = "piper-voice-en",
@@ -125,6 +125,7 @@ data class VoiceSettings(
     val ttsEngine: TtsEngineType = TtsEngineType.SYSTEM,
     val activeSttModelId: String = "whisper-tiny-gguf",
     val activeTtsModelId: String = "kokoro-tts-82m",
+    val activeVoiceName: String? = null,
     val speechRate: Float = 1.0f,
     val speechPitch: Float = 1.0f
 )
@@ -136,5 +137,6 @@ data class TtsSpokenProgress(
     val utteranceId: String,
     val start: Int,
     val end: Int,
-    val word: String
+    val word: String,
+    val wordOccurrence: Int = 0
 )

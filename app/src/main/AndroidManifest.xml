@@ -35,6 +35,16 @@
     <!-- Required for speech-to-text / voice input. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
+    <!-- Android 11+ package visibility query for SpeechRecognizer service & TTS engines -->
+    <queries>
+        <intent>
+            <action android:name="android.speech.RecognitionService" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.TTS_SERVICE" />
+        </intent>
+    </queries>
+
     <application
         android:name=".NeuronApplication"
         android:allowBackup="true"

@@ -1,5 +1,7 @@
 package com.neuron.ai.ui.chat
 
+import android.content.Intent
+import android.speech.RecognizerIntent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
@@ -273,8 +275,32 @@ fun ChatScreen(
         }
     }
 
+    val speechIntentLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == android.app.Activity.RESULT_OK) {
+            val spoken = result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()?.trim()
+            if (!spoken.isNullOrBlank()) {
+                draft = if (draft.isBlank()) spoken else "${draft.trim()} $spoken"
+            }
+        }
+    }
+
     val keyboardController = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
     val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
+
+    fun launchSpeechIntentFallback() {
+        runCatching {
+            val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                putExtra(RecognizerIntent.EXTRA_PROMPT, "Speak to Neuron…")
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE, java.util.Locale.getDefault())
+            }
+            speechIntentLauncher.launch(intent)
+        }.onFailure { e ->
+            android.widget.Toast.makeText(context, "Voice input not supported: ${e.message}", android.widget.Toast.LENGTH_SHORT).show()
+        }
+    }
 
     fun toggleVoiceInput() {
         if (isVoiceListening) {
@@ -288,22 +314,30 @@ fun ChatScreen(
             if (hasPermission) {
                 keyboardController?.hide()
                 focusManager.clearFocus()
-                sttManager.startListening(
-                    onPartial = { partial ->
-                        if (draft.isBlank()) {
-                            draft = partial
-                        } else {
-                            val base = draft.substringBeforeLast(" ").trim()
-                            draft = if (base.isEmpty()) partial else "$base $partial"
+                if (!sttManager.isRecognitionAvailable()) {
+                    launchSpeechIntentFallback()
+                } else {
+                    sttManager.startListening(
+                        onPartial = { partial ->
+                            if (draft.isBlank()) {
+                                draft = partial
+                            } else {
+                                val base = draft.substringBeforeLast(" ").trim()
+                                draft = if (base.isEmpty()) partial else "$base $partial"
+                            }
+                        },
+                        onFinal = { finalResult ->
+                            draft = if (draft.isBlank()) finalResult else "${draft.trim()} $finalResult"
+                        },
+                        onError = { error ->
+                            if (error.contains("not available", ignoreCase = true) || error.contains("Client error", ignoreCase = true)) {
+                                launchSpeechIntentFallback()
+                            } else {
+                                android.widget.Toast.makeText(context, error, android.widget.Toast.LENGTH_SHORT).show()
+                            }
                         }
-                    },
-                    onFinal = { finalResult ->
-                        draft = if (draft.isBlank()) finalResult else "${draft.trim()} $finalResult"
-                    },
-                    onError = { error ->
-                        android.widget.Toast.makeText(context, error, android.widget.Toast.LENGTH_SHORT).show()
-                    }
-                )
+                    )
+                }
             } else {
                 recordAudioPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
             }
@@ -468,10 +502,12 @@ fun ChatScreen(
                 ) {
                     val isSpeakingThis = isTtsSpeaking && ttsUtteranceId == message.id
                     val activeWord = if (isSpeakingThis) activeSpeechProgress?.word else null
+                    val activeOccurrence = if (isSpeakingThis) activeSpeechProgress?.wordOccurrence ?: 0 else 0
                     MessageRow(
                         message = message,
                         isSpeakingThisMessage = isSpeakingThis,
                         activeHighlightWord = activeWord,
+                        activeHighlightOccurrence = activeOccurrence,
                         onReadAloud = {
                             if (isSpeakingThis) {
                                 ttsManager.stop()
@@ -1128,6 +1164,7 @@ private fun MessageRow(
     message: Message,
     isSpeakingThisMessage: Boolean = false,
     activeHighlightWord: String? = null,
+    activeHighlightOccurrence: Int = 0,
     onReadAloud: (() -> Unit)? = null,
     onRetryFromHere: (() -> Unit)? = null,
     onEditAndResend: (() -> Unit)? = null,
@@ -1277,7 +1314,8 @@ private fun MessageRow(
                     imageUrls = comparisonImages,
                     missingQueries = missingImages,
                     onImagesNeeded = onImagesNeeded,
-                    highlightWord = activeHighlightWord
+                    highlightWord = activeHighlightWord,
+                    highlightOccurrence = activeHighlightOccurrence
                 )
             }
             message.metadata?.richRecommendations

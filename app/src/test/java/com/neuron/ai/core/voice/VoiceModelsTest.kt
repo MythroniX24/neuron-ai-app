@@ -79,11 +79,72 @@ class VoiceModelsTest {
             utteranceId = "msg-123",
             start = 5,
             end = 10,
-            word = "Hello"
+            word = "Hello",
+            wordOccurrence = 2
         )
         assertEquals("msg-123", progress.utteranceId)
         assertEquals(5, progress.start)
         assertEquals(10, progress.end)
         assertEquals("Hello", progress.word)
+        assertEquals(2, progress.wordOccurrence)
+    }
+
+    @Test
+    fun testVoiceSettingsDefaultsAndActiveVoice() {
+        val defaultSettings = VoiceSettings()
+        assertEquals(SttEngineType.SYSTEM, defaultSettings.sttEngine)
+        assertEquals(TtsEngineType.SYSTEM, defaultSettings.ttsEngine)
+        assertEquals("whisper-tiny-gguf", defaultSettings.activeSttModelId)
+        assertEquals("kokoro-tts-82m", defaultSettings.activeTtsModelId)
+        assertEquals(null, defaultSettings.activeVoiceName)
+        assertEquals(1.0f, defaultSettings.speechRate)
+        assertEquals(1.0f, defaultSettings.speechPitch)
+
+        val updated = defaultSettings.copy(
+            ttsEngine = TtsEngineType.AI_MODEL,
+            activeVoiceName = "en-us-x-sfg-network",
+            speechRate = 1.15f
+        )
+        assertEquals(TtsEngineType.AI_MODEL, updated.ttsEngine)
+        assertEquals("en-us-x-sfg-network", updated.activeVoiceName)
+        assertEquals(1.15f, updated.speechRate)
+    }
+
+    @Test
+    fun testKokoroModelUrlIntegrity() {
+        val kokoro = VoiceModelDefinition.PRESET_MODELS.first { it.id == "kokoro-tts-82m" }
+        assertEquals("Kokoro-82M Voice Pack", kokoro.name)
+        assertEquals(VoiceModelCategory.TTS, kokoro.category)
+        assertTrue(kokoro.downloadUrl.contains("onnx-community/Kokoro-82M-ONNX"))
+        assertTrue(kokoro.downloadUrl.endsWith("model_quantized.onnx"))
+        assertTrue(kokoro.sizeBytes > 90_000_000L)
+    }
+
+    @Test
+    fun testOccurrenceIndexCalculation() {
+        val text = "What is what? That is what we know."
+        val word = "what"
+        val pattern = Regex("""(?i)\b${Regex.escape(word)}\b""")
+
+        val matches = pattern.findAll(text).toList()
+        assertEquals(3, matches.size)
+
+        // 1st occurrence ("What")
+        val firstStart = matches[0].range.first
+        val firstPrior = text.substring(0, firstStart)
+        val firstOcc = pattern.findAll(firstPrior).count()
+        assertEquals(0, firstOcc)
+
+        // 2nd occurrence ("what")
+        val secondStart = matches[1].range.first
+        val secondPrior = text.substring(0, secondStart)
+        val secondOcc = pattern.findAll(secondPrior).count()
+        assertEquals(1, secondOcc)
+
+        // 3rd occurrence ("what")
+        val thirdStart = matches[2].range.first
+        val thirdPrior = text.substring(0, thirdStart)
+        val thirdOcc = pattern.findAll(thirdPrior).count()
+        assertEquals(2, thirdOcc)
     }
 }

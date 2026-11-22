@@ -56,6 +56,12 @@ class VoiceSettingsViewModel(
         }
     }
 
+    fun setActiveVoiceName(voiceName: String?) {
+        viewModelScope.launch {
+            voiceRepo.setActiveVoiceName(voiceName)
+        }
+    }
+
     fun setSpeechRate(rate: Float) {
         viewModelScope.launch {
             voiceRepo.setSpeechRate(rate)
@@ -84,7 +90,17 @@ class VoiceSettingsViewModel(
         if (ttsManager.isSpeaking.value) {
             ttsManager.stop()
         } else {
-            ttsManager.speak("Hello! This is Neuron AI. How can I help you today?")
+            val settings = voiceSettings.value
+            val sampleText = if (settings.ttsEngine == TtsEngineType.AI_MODEL) {
+                when (settings.activeTtsModelId) {
+                    "kokoro-tts-82m" -> "Hello! Kokoro Studio Neural Voice is active. How can I help you today?"
+                    "piper-voice-en" -> "Hello! Piper Natural Voice Pack is active. Ready to assist you."
+                    else -> "Hello! On-device AI voice synthesis is active."
+                }
+            } else {
+                "Hello! System Text-to-Speech is active. How can I help you today?"
+            }
+            ttsManager.speak(sampleText)
         }
     }
 

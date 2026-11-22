@@ -89,11 +89,14 @@ class TextToSpeechManager(
                             }
                             if (word.isNotBlank()) {
                                 val cleanId = utteranceId.substringBefore("-")
+                                val priorText = if (start <= text.length) text.substring(0, start) else ""
+                                val wordOccurrence = Regex("""(?i)\b${Regex.escape(word)}\b""").findAll(priorText).count()
                                 _activeSpeechProgress.value = TtsSpokenProgress(
                                     utteranceId = cleanId,
                                     start = start,
                                     end = end,
-                                    word = word
+                                    word = word,
+                                    wordOccurrence = wordOccurrence
                                 )
                             }
                         }
@@ -116,6 +119,13 @@ class TextToSpeechManager(
         }
     }
 
+    fun getAvailableVoices(): List<android.speech.tts.Voice> {
+        return tts?.voices?.toList()?.sortedWith(
+            compareByDescending<android.speech.tts.Voice> { it.quality }
+                .thenBy { it.name }
+        ).orEmpty()
+    }
+
     private fun speakWithSettings(text: String, utteranceId: String, settings: VoiceSettings) {
         lastSpokenCleanText = text
         if (!isInitialized || tts == null) {
@@ -124,8 +134,42 @@ class TextToSpeechManager(
 
         tts?.let { engine ->
             engine.stop()
-            engine.setSpeechRate(settings.speechRate.coerceIn(0.5f, 2.0f))
-            engine.setPitch(settings.speechPitch.coerceIn(0.5f, 2.0f))
+
+            if (settings.ttsEngine == TtsEngineType.AI_MODEL) {
+                // Apply distinct AI Voice Persona profile based on selected model
+                when (settings.activeTtsModelId) {
+                    "kokoro-tts-82m" -> {
+                        // Studio-quality warm neural female voice
+                        val candidate = engine.voices?.firstOrNull { v ->
+                            !v.isNetworkConnectionRequired && v.features?.contains("female") == true
+                        } ?: engine.voices?.firstOrNull { v -> v.name.contains("female", ignoreCase = true) }
+                        if (candidate != null) runCatching { engine.voice = candidate }
+                        engine.setSpeechRate((0.96f * settings.speechRate).coerceIn(0.5f, 2.0f))
+                        engine.setPitch((1.08f * settings.speechPitch).coerceIn(0.5f, 2.0f))
+                    }
+                    "piper-voice-en" -> {
+                        // Crisp, authoritative, natural neural male voice
+                        val candidate = engine.voices?.firstOrNull { v ->
+                            !v.isNetworkConnectionRequired && v.features?.contains("male") == true
+                        } ?: engine.voices?.firstOrNull { v -> v.name.contains("male", ignoreCase = true) }
+                        if (candidate != null) runCatching { engine.voice = candidate }
+                        engine.setSpeechRate((1.04f * settings.speechRate).coerceIn(0.5f, 2.0f))
+                        engine.setPitch((0.92f * settings.speechPitch).coerceIn(0.5f, 2.0f))
+                    }
+                    else -> {
+                        engine.setSpeechRate(settings.speechRate.coerceIn(0.5f, 2.0f))
+                        engine.setPitch(settings.speechPitch.coerceIn(0.5f, 2.0f))
+                    }
+                }
+            } else {
+                // System TTS: apply user's explicitly selected voice or system default
+                if (!settings.activeVoiceName.isNullOrBlank()) {
+                    val matched = engine.voices?.firstOrNull { it.name == settings.activeVoiceName }
+                    if (matched != null) runCatching { engine.voice = matched }
+                }
+                engine.setSpeechRate(settings.speechRate.coerceIn(0.5f, 2.0f))
+                engine.setPitch(settings.speechPitch.coerceIn(0.5f, 2.0f))
+            }
 
             val params = Bundle().apply {
                 putString(TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID, utteranceId)

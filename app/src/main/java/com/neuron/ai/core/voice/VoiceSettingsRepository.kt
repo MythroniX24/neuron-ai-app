@@ -15,6 +15,7 @@ interface VoiceSettingsRepository {
     suspend fun setTtsEngine(engine: TtsEngineType)
     suspend fun setActiveSttModelId(modelId: String)
     suspend fun setActiveTtsModelId(modelId: String)
+    suspend fun setActiveVoiceName(voiceName: String?)
     suspend fun setSpeechRate(rate: Float)
     suspend fun setSpeechPitch(pitch: Float)
 }
@@ -34,6 +35,7 @@ class VoiceSettingsRepositoryImpl(
             ttsEngine = TtsEngineType.fromNameOrDefault(prefs[KEY_TTS_ENGINE]),
             activeSttModelId = prefs[KEY_ACTIVE_STT_MODEL] ?: "whisper-tiny-gguf",
             activeTtsModelId = prefs[KEY_ACTIVE_TTS_MODEL] ?: "kokoro-tts-82m",
+            activeVoiceName = prefs[KEY_ACTIVE_VOICE_NAME],
             speechRate = prefs[KEY_SPEECH_RATE] ?: 1.0f,
             speechPitch = prefs[KEY_SPEECH_PITCH] ?: 1.0f
         )
@@ -55,6 +57,16 @@ class VoiceSettingsRepositoryImpl(
         dataStore.edit { prefs -> prefs[KEY_ACTIVE_TTS_MODEL] = modelId }
     }
 
+    override suspend fun setActiveVoiceName(voiceName: String?) {
+        dataStore.edit { prefs ->
+            if (voiceName != null) {
+                prefs[KEY_ACTIVE_VOICE_NAME] = voiceName
+            } else {
+                prefs.remove(KEY_ACTIVE_VOICE_NAME)
+            }
+        }
+    }
+
     override suspend fun setSpeechRate(rate: Float) {
         dataStore.edit { prefs -> prefs[KEY_SPEECH_RATE] = rate }
     }
@@ -68,6 +80,7 @@ class VoiceSettingsRepositoryImpl(
         val KEY_TTS_ENGINE = stringPreferencesKey("voice_tts_engine")
         val KEY_ACTIVE_STT_MODEL = stringPreferencesKey("voice_active_stt_model")
         val KEY_ACTIVE_TTS_MODEL = stringPreferencesKey("voice_active_tts_model")
+        val KEY_ACTIVE_VOICE_NAME = stringPreferencesKey("voice_active_voice_name")
         val KEY_SPEECH_RATE = floatPreferencesKey("voice_speech_rate")
         val KEY_SPEECH_PITCH = floatPreferencesKey("voice_speech_pitch")
     }

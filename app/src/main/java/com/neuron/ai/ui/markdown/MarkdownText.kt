@@ -74,12 +74,46 @@ fun MarkdownText(
     /** AI-selected spacing, independently for prose and lists. */
     spacing: ReplySpacingProfile = ReplySpacingProfile(),
     /** Active word to highlight for real-time karaoke read-aloud. */
-    highlightWord: String? = null
+    highlightWord: String? = null,
+    /** Exact occurrence index of highlightWord to highlight (0-indexed). */
+    highlightOccurrence: Int = 0
 ) {
     val blocks = remember(markdown) { MarkdownParser.parse(markdown) }
+
+    var targetBlockIndex = -1
+    var occurrenceInTargetBlock = -1
+
+    if (!highlightWord.isNullOrBlank()) {
+        var globalMatchesSeen = 0
+        val pattern = Regex("""(?i)\b${Regex.escape(highlightWord.trim())}\b""")
+        for (i in blocks.indices) {
+            val block = blocks[i]
+            val blockText = when (block) {
+                is MdBlock.Paragraph -> block.text
+                is MdBlock.Heading -> block.text
+                is MdBlock.Quote -> block.text
+                is MdBlock.ListBlock -> block.items.joinToString(" ") { it.text }
+                else -> ""
+            }
+            val countInBlock = pattern.findAll(blockText).count()
+            if (countInBlock > 0 && highlightOccurrence < globalMatchesSeen + countInBlock) {
+                targetBlockIndex = i
+                occurrenceInTargetBlock = highlightOccurrence - globalMatchesSeen
+                break
+            }
+            globalMatchesSeen += countInBlock
+        }
+    }
+
     Column(modifier = modifier) {
         blocks.forEachIndexed { index, block ->
-            BlockView(block, spacing, highlightWord)
+            val isTarget = index == targetBlockIndex
+            BlockView(
+                block = block,
+                spacing = spacing,
+                highlightWord = if (isTarget) highlightWord else null,
+                highlightOccurrence = if (isTarget) occurrenceInTargetBlock else 0
+            )
             if (index != blocks.lastIndex) {
                 // The paragraph-gap choice is its own setting: it never rides
                 // along with the line-spacing choice.
@@ -114,12 +148,21 @@ private fun TextStyle.withResponseSpacing(spacing: ResponseSpacing): TextStyle {
 private const val DEFAULT_LINE_HEIGHT_RATIO = 1.5f
 
 @Composable
-private fun BlockView(block: MdBlock, spacing: ReplySpacingProfile, highlightWord: String? = null) {
+private fun BlockView(
+    block: MdBlock,
+    spacing: ReplySpacingProfile,
+    highlightWord: String? = null,
+    highlightOccurrence: Int = 0
+) {
     val paragraph = spacing.paragraph
     val list = spacing.list
     when (block) {
         is MdBlock.Heading -> Text(
-            text = InlineMarkdown.toAnnotatedString(block.text, highlightWord = highlightWord),
+            text = InlineMarkdown.toAnnotatedString(
+                block.text,
+                highlightWord = highlightWord,
+                highlightOccurrence = highlightOccurrence
+            ),
             style = when (block.level) {
                 1 -> MaterialTheme.typography.headlineSmall.withResponseSpacing(paragraph)
                 2 -> MaterialTheme.typography.titleLarge.withResponseSpacing(paragraph)
@@ -129,7 +172,11 @@ private fun BlockView(block: MdBlock, spacing: ReplySpacingProfile, highlightWor
         )
 
         is MdBlock.Paragraph -> Text(
-            text = InlineMarkdown.toAnnotatedString(block.text, highlightWord = highlightWord),
+            text = InlineMarkdown.toAnnotatedString(
+                block.text,
+                highlightWord = highlightWord,
+                highlightOccurrence = highlightOccurrence
+            ),
             style = MaterialTheme.typography.bodyLarge.withResponseSpacing(paragraph)
         )
 
@@ -195,7 +242,11 @@ private fun BlockView(block: MdBlock, spacing: ReplySpacingProfile, highlightWor
                     .background(MaterialTheme.colorScheme.primary, RoundedCornerShape(1.5.dp))
             )
             Text(
-                text = InlineMarkdown.toAnnotatedString(block.text, highlightWord = highlightWord),
+                text = InlineMarkdown.toAnnotatedString(
+                    block.text,
+                    highlightWord = highlightWord,
+                    highlightOccurrence = highlightOccurrence
+                ),
                 style = MaterialTheme.typography.bodyLarge.withResponseSpacing(paragraph),
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -223,7 +274,11 @@ private fun BlockView(block: MdBlock, spacing: ReplySpacingProfile, highlightWor
                         modifier = Modifier.padding(end = Spacing.sm)
                     )
                     Text(
-                        text = InlineMarkdown.toAnnotatedString(item.text, highlightWord = highlightWord),
+                        text = InlineMarkdown.toAnnotatedString(
+                            item.text,
+                            highlightWord = highlightWord,
+                            highlightOccurrence = highlightOccurrence
+                        ),
                         style = MaterialTheme.typography.bodyLarge.withResponseSpacing(list)
                     )
                 }

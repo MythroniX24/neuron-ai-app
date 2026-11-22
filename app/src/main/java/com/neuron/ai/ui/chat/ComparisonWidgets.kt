@@ -86,6 +86,7 @@ fun ComparisonContent(
     missingQueries: Set<String> = emptySet(),
     onImagesNeeded: (List<String>) -> Unit = {},
     highlightWord: String? = null,
+    highlightOccurrence: Int = 0,
     modifier: Modifier = Modifier
 ) {
     val segments = remember(markdown, placements) {
@@ -100,7 +101,8 @@ fun ComparisonContent(
                 is ComparisonSegment.Text -> MarkdownText(
                     markdown = segment.text,
                     spacing = spacing,
-                    highlightWord = highlightWord
+                    highlightWord = highlightWord,
+                    highlightOccurrence = highlightOccurrence
                 )
                 is ComparisonSegment.Block -> ComparisonBlockWidget(
                     block = segment.block,
