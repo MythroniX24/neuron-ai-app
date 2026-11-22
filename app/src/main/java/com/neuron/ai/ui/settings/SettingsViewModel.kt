@@ -56,4 +56,17 @@ class SettingsViewModel(
             settings.setThemeMode(mode)
         }
     }
+
+    val customInstructions: StateFlow<String> = settings.customInstructions
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = ""
+        )
+
+    fun setCustomInstructions(instructions: String) {
+        viewModelScope.launch(dispatchers.io) {
+            settings.setCustomInstructions(instructions)
+        }
+    }
 }

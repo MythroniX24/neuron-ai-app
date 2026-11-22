@@ -71,10 +71,8 @@ class ToolUsingAgent(
         // Keep the elaborate policy only when tools are actually configured.
         val toolsConfigured = goal.toolPolicy !=
             com.neuron.ai.core.agent.ToolPolicy.Only(emptySet())
-        val systemMessage = ChatMessage(
-            role = ChatMessage.Role.SYSTEM,
-            content = if (toolsConfigured) {
-                "You are Neuron, a world-class autonomous AI agent running on the user's phone. " +
+        val baseSystemContent = if (toolsConfigured) {
+            "You are Neuron, a world-class autonomous AI agent running on the user's phone. " +
                     "Answer clearly, directly, and comprehensively; use Markdown for structure, synchronized tables, and code.\n" +
                     "PROACTIVE AGENT POLICY (AUTONOMOUS INITIATIVE): Do NOT wait for the user to ask for tools or cards. " +
                     "Proactively use tools, rich visual cards, interactive question surfaces, and structured comparison layouts at the right time.\n" +
@@ -147,6 +145,16 @@ class ToolUsingAgent(
                     "and the system will immediately prompt you to continue seamlessly.\n" +
                     com.neuron.ai.core.a2ui.A2uiCatalog.prompt
             }
+
+        val fullSystemContent = if (!goal.systemPromptSuffix.isNullOrBlank()) {
+            "$baseSystemContent\n\nUSER CUSTOM SYSTEM INSTRUCTIONS (MUST ALWAYS ADHERE TO THESE):\n${goal.systemPromptSuffix.trim()}"
+        } else {
+            baseSystemContent
+        }
+
+        val systemMessage = ChatMessage(
+            role = ChatMessage.Role.SYSTEM,
+            content = fullSystemContent
         )
         // Prior turns give the model real multi-turn context.
         val history = mutableListOf(systemMessage)

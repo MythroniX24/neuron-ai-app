@@ -7,6 +7,7 @@ import android.speech.tts.UtteranceProgressListener
 import com.neuron.ai.core.coroutines.DispatcherProvider
 import com.neuron.ai.core.log.Logger
 import com.neuron.ai.core.voice.TtsEngineType
+import com.neuron.ai.core.voice.TtsSpokenProgress
 import com.neuron.ai.core.voice.VoiceModelDefinition
 import com.neuron.ai.core.voice.VoiceSettings
 import com.neuron.ai.core.voice.VoiceSettingsRepository
@@ -38,6 +39,12 @@ class TextToSpeechManager(
     private val _currentUtteranceId = MutableStateFlow<String?>(null)
     val currentUtteranceId: StateFlow<String?> = _currentUtteranceId.asStateFlow()
 
+    private val _activeSpeechProgress = MutableStateFlow<TtsSpokenProgress?>(null)
+    val activeSpeechProgress: StateFlow<TtsSpokenProgress?> = _activeSpeechProgress.asStateFlow()
+
+    @Volatile
+    private var lastSpokenCleanText: String = ""
+
     init {
         initTts()
     }
@@ -55,18 +62,41 @@ class TextToSpeechManager(
                     override fun onDone(utteranceId: String?) {
                         _isSpeaking.value = false
                         _currentUtteranceId.value = null
+                        _activeSpeechProgress.value = null
                     }
 
                     @Deprecated("Deprecated in Java")
                     override fun onError(utteranceId: String?) {
                         _isSpeaking.value = false
                         _currentUtteranceId.value = null
+                        _activeSpeechProgress.value = null
                     }
 
                     override fun onError(utteranceId: String?, errorCode: Int) {
                         _isSpeaking.value = false
                         _currentUtteranceId.value = null
+                        _activeSpeechProgress.value = null
                         logger?.w("TextToSpeechManager", "TTS error code $errorCode for utterance $utteranceId")
+                    }
+
+                    override fun onRangeStart(utteranceId: String?, start: Int, end: Int, frame: Int) {
+                        if (utteranceId != null && start >= 0) {
+                            val text = lastSpokenCleanText
+                            val word = if (end <= text.length && start < end) {
+                                text.substring(start, end).trim()
+                            } else {
+                                ""
+                            }
+                            if (word.isNotBlank()) {
+                                val cleanId = utteranceId.substringBefore("-")
+                                _activeSpeechProgress.value = TtsSpokenProgress(
+                                    utteranceId = cleanId,
+                                    start = start,
+                                    end = end,
+                                    word = word
+                                )
+                            }
+                        }
                     }
                 })
                 isInitialized = true
@@ -87,6 +117,7 @@ class TextToSpeechManager(
     }
 
     private fun speakWithSettings(text: String, utteranceId: String, settings: VoiceSettings) {
+        lastSpokenCleanText = text
         if (!isInitialized || tts == null) {
             initTts()
         }
@@ -121,6 +152,7 @@ class TextToSpeechManager(
         tts?.stop()
         _isSpeaking.value = false
         _currentUtteranceId.value = null
+        _activeSpeechProgress.value = null
     }
 
     fun shutdown() {
@@ -128,6 +160,7 @@ class TextToSpeechManager(
         tts?.shutdown()
         tts = null
         isInitialized = false
+        _activeSpeechProgress.value = null
     }
 
     companion object {

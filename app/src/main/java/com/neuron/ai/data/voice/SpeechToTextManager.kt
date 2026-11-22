@@ -37,6 +37,9 @@ class SpeechToTextManager(
     private val _isListening = MutableStateFlow(false)
     val isListening: StateFlow<Boolean> = _isListening.asStateFlow()
 
+    private val _audioLevel = MutableStateFlow(0f)
+    val audioLevel: StateFlow<Float> = _audioLevel.asStateFlow()
+
     fun isRecognitionAvailable(): Boolean {
         return SpeechRecognizer.isRecognitionAvailable(context)
     }
@@ -79,17 +82,20 @@ class SpeechToTextManager(
                         }
 
                         override fun onRmsChanged(rmsdB: Float) {
-                            // Can be used for audio waveform animation
+                            val normalized = ((rmsdB + 2f) / 12f).coerceIn(0.08f, 1f)
+                            _audioLevel.value = normalized
                         }
 
                         override fun onBufferReceived(buffer: ByteArray?) {}
 
                         override fun onEndOfSpeech() {
                             _isListening.value = false
+                            _audioLevel.value = 0f
                         }
 
                         override fun onError(error: Int) {
                             _isListening.value = false
+                            _audioLevel.value = 0f
                             val message = when (error) {
                                 SpeechRecognizer.ERROR_AUDIO -> "Audio recording error"
                                 SpeechRecognizer.ERROR_CLIENT -> "Client error"
@@ -108,6 +114,7 @@ class SpeechToTextManager(
 
                         override fun onResults(results: Bundle?) {
                             _isListening.value = false
+                            _audioLevel.value = 0f
                             val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                             val recognizedText = matches?.firstOrNull()?.trim().orEmpty()
                             if (recognizedText.isNotBlank()) {
@@ -155,6 +162,7 @@ class SpeechToTextManager(
             } finally {
                 recognizer = null
                 _isListening.value = false
+                _audioLevel.value = 0f
             }
         }
     }

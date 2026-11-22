@@ -35,14 +35,15 @@ object InlineMarkdown {
     @Composable
     fun toAnnotatedString(
         text: String,
-        mathContent: Map<String, InlineTextContent> = emptyMap()
+        mathContent: Map<String, InlineTextContent> = emptyMap(),
+        highlightWord: String? = null
     ): AnnotatedString {
         // Theme-aware inline colors, read once per call.
         val codeBackground = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.12f)
-        val highlightBackground = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)
+        val highlightBackground = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.65f)
         val highlightColor = MaterialTheme.colorScheme.primary
         val linkColor = MaterialTheme.colorScheme.primary
-        val tokens = collectTokens(text)
+        val tokens = collectTokens(text, highlightWord)
 
         return buildAnnotatedString {
             var cursor = 0
@@ -95,12 +96,21 @@ object InlineMarkdown {
         }
     }
 
-    private fun collectTokens(text: String): List<Token> {
+    private fun collectTokens(text: String, highlightWord: String? = null): List<Token> {
         val tokens = mutableListOf<Token>()
 
         fun add(range: IntRange, type: ContentType, payload: String, label: String? = null) {
             if (range.first >= 0 && range.last < text.length) {
                 tokens += Token(range, type, payload, label)
+            }
+        }
+
+        // Real-time Karaoke speech highlighting (matches active spoken word)
+        if (!highlightWord.isNullOrBlank() && highlightWord.length >= 2) {
+            runCatching {
+                Regex("""(?i)\b${Regex.escape(highlightWord.trim())}\b""").findAll(text).forEach {
+                    add(it.range, ContentType.HIGHLIGHT, it.value)
+                }
             }
         }
 

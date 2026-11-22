@@ -22,6 +22,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
@@ -31,13 +32,18 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
+import com.neuron.ai.ui.components.rememberHapticFeedback
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
@@ -66,12 +72,14 @@ fun MarkdownText(
     markdown: String,
     modifier: Modifier = Modifier,
     /** AI-selected spacing, independently for prose and lists. */
-    spacing: ReplySpacingProfile = ReplySpacingProfile()
+    spacing: ReplySpacingProfile = ReplySpacingProfile(),
+    /** Active word to highlight for real-time karaoke read-aloud. */
+    highlightWord: String? = null
 ) {
     val blocks = remember(markdown) { MarkdownParser.parse(markdown) }
     Column(modifier = modifier) {
         blocks.forEachIndexed { index, block ->
-            BlockView(block, spacing)
+            BlockView(block, spacing, highlightWord)
             if (index != blocks.lastIndex) {
                 // The paragraph-gap choice is its own setting: it never rides
                 // along with the line-spacing choice.
@@ -106,12 +114,12 @@ private fun TextStyle.withResponseSpacing(spacing: ResponseSpacing): TextStyle {
 private const val DEFAULT_LINE_HEIGHT_RATIO = 1.5f
 
 @Composable
-private fun BlockView(block: MdBlock, spacing: ReplySpacingProfile) {
+private fun BlockView(block: MdBlock, spacing: ReplySpacingProfile, highlightWord: String? = null) {
     val paragraph = spacing.paragraph
     val list = spacing.list
     when (block) {
         is MdBlock.Heading -> Text(
-            text = InlineMarkdown.toAnnotatedString(block.text),
+            text = InlineMarkdown.toAnnotatedString(block.text, highlightWord = highlightWord),
             style = when (block.level) {
                 1 -> MaterialTheme.typography.headlineSmall.withResponseSpacing(paragraph)
                 2 -> MaterialTheme.typography.titleLarge.withResponseSpacing(paragraph)
@@ -121,7 +129,7 @@ private fun BlockView(block: MdBlock, spacing: ReplySpacingProfile) {
         )
 
         is MdBlock.Paragraph -> Text(
-            text = InlineMarkdown.toAnnotatedString(block.text),
+            text = InlineMarkdown.toAnnotatedString(block.text, highlightWord = highlightWord),
             style = MaterialTheme.typography.bodyLarge.withResponseSpacing(paragraph)
         )
 
@@ -187,7 +195,7 @@ private fun BlockView(block: MdBlock, spacing: ReplySpacingProfile) {
                     .background(MaterialTheme.colorScheme.primary, RoundedCornerShape(1.5.dp))
             )
             Text(
-                text = InlineMarkdown.toAnnotatedString(block.text),
+                text = InlineMarkdown.toAnnotatedString(block.text, highlightWord = highlightWord),
                 style = MaterialTheme.typography.bodyLarge.withResponseSpacing(paragraph),
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -215,7 +223,7 @@ private fun BlockView(block: MdBlock, spacing: ReplySpacingProfile) {
                         modifier = Modifier.padding(end = Spacing.sm)
                     )
                     Text(
-                        text = InlineMarkdown.toAnnotatedString(item.text),
+                        text = InlineMarkdown.toAnnotatedString(item.text, highlightWord = highlightWord),
                         style = MaterialTheme.typography.bodyLarge.withResponseSpacing(list)
                     )
                 }
@@ -229,16 +237,21 @@ private fun BlockView(block: MdBlock, spacing: ReplySpacingProfile) {
 @Composable
 private fun CodeBlockView(block: MdBlock.CodeBlock) {
     val clipboard = LocalClipboardManager.current
-    // Follow the APP theme (LocalAppDarkMode), not the OS flag — app-dark +
-    // system-light previously rendered code blocks with the light palette.
-    val isDark = com.neuron.ai.ui.theme.LocalAppDarkMode.current
-    // Dark code blocks use a slightly deeper panel than surfaceVariant so the
-    // lifted-luminance token colors keep contrast; light uses surfaceVariant.
-    val codeBackground = if (isDark) {
-        MaterialTheme.colorScheme.surface
-    } else {
-        MaterialTheme.colorScheme.surfaceVariant
+    val haptic = rememberHapticFeedback()
+    var copied by remember { mutableStateOf(false) }
+
+    LaunchedEffect(copied) {
+        if (copied) {
+            kotlinx.coroutines.delay(2000)
+            copied = false
+        }
     }
+
+    val isDark = com.neuron.ai.ui.theme.LocalAppDarkMode.current
+    val codeBackground = if (isDark) Color(0xFF16191E) else Color(0xFFF1F3F5)
+    val headerBackground = if (isDark) Color(0xFF1E222A) else Color(0xFFE5E7EB)
+    val borderColor = if (isDark) Color(0xFF2A2F37) else Color(0xFFD1D5DB)
+
     val highlighted = remember(block.code, block.language, isDark) {
         SyntaxHighlighter.highlight(
             code = block.code,
@@ -247,50 +260,116 @@ private fun CodeBlockView(block: MdBlock.CodeBlock) {
         )
     }
 
+    val lines = remember(block.code) { block.code.lines() }
+    val showLineNumbers = lines.size > 1
+
     Column(
         Modifier
             .fillMaxWidth()
-            .background(
-                codeBackground,
-                RoundedCornerShape(Radius.md)
-            )
-            .border(
-                BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
-                RoundedCornerShape(Radius.md)
-            )
+            .clip(RoundedCornerShape(Radius.md))
+            .background(codeBackground)
+            .border(BorderStroke(1.dp, borderColor), RoundedCornerShape(Radius.md))
     ) {
+        // Sleek Header Bar
         Row(
             Modifier
                 .fillMaxWidth()
+                .background(headerBackground)
                 .padding(horizontal = Spacing.md, vertical = Spacing.xs),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(
-                text = block.language ?: "code",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            IconButton(onClick = { clipboard.setText(AnnotatedString(block.code)) }) {
+            // Language Badge / Pill
+            Surface(
+                shape = RoundedCornerShape(4.dp),
+                color = if (isDark) Color(0xFF2B313C) else Color(0xFFD6DAE1)
+            ) {
+                Text(
+                    text = (block.language?.takeIf { it.isNotBlank() } ?: "CODE").uppercase(),
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 10.sp
+                    ),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                )
+            }
+
+            // Copy Code Button with Animated Status & Haptic
+            Row(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(6.dp))
+                    .clickable {
+                        clipboard.setText(AnnotatedString(block.code))
+                        copied = true
+                        haptic.confirmation()
+                    }
+                    .padding(horizontal = 6.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
                 Icon(
-                    Icons.Outlined.ContentCopy,
-                    contentDescription = "Copy code",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    imageVector = if (copied) Icons.Outlined.Check else Icons.Outlined.ContentCopy,
+                    contentDescription = if (copied) "Copied" else "Copy code",
+                    tint = if (copied) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(13.dp)
+                )
+                Text(
+                    text = if (copied) "Copied!" else "Copy",
+                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium),
+                    color = if (copied) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         }
+
+        // Code Body with Line Numbers
         SelectionContainer {
-            Text(
-                text = highlighted,
-                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+            Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState())
-                    .padding(horizontal = Spacing.md)
-            )
+                    .padding(vertical = Spacing.xs)
+            ) {
+                if (showLineNumbers) {
+                    Column(
+                        modifier = Modifier.padding(start = Spacing.sm, end = Spacing.xs),
+                        horizontalAlignment = Alignment.End
+                    ) {
+                        lines.indices.forEach { lineIdx ->
+                            Text(
+                                text = "${lineIdx + 1}",
+                                style = MaterialTheme.typography.bodySmall.copy(
+                                    fontFamily = FontFamily.Monospace,
+                                    fontSize = 12.sp
+                                ),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f)
+                            )
+                        }
+                    }
+                    // Vertical subtle divider between line numbers and code
+                    Box(
+                        modifier = Modifier
+                            .width(1.dp)
+                            .height(IntrinsicSize.Min)
+                            .background(borderColor.copy(alpha = 0.5f))
+                    )
+                }
+
+                Text(
+                    text = highlighted,
+                    style = MaterialTheme.typography.bodySmall.copy(
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 12.sp
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState())
+                        .padding(horizontal = Spacing.sm)
+                )
+            }
         }
-        // Bottom breathing room.
-        androidx.compose.foundation.layout.Spacer(Modifier.height(Spacing.sm))
+
+        Spacer(Modifier.height(Spacing.xs))
     }
 }
 

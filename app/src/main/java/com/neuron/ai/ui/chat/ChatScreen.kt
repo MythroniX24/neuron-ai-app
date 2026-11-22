@@ -103,11 +103,13 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import com.neuron.ai.core.conversation.Attachment
+import com.neuron.ai.ui.components.AudioWaveformVisualizer
 import com.neuron.ai.ui.components.BrandMark
 import com.neuron.ai.ui.components.SkeletonBar
 import com.neuron.ai.ui.components.entrancePop
 import com.neuron.ai.ui.components.messageEntrance
 import com.neuron.ai.ui.components.neuronPulse
+import com.neuron.ai.ui.components.rememberHapticFeedback
 import com.neuron.ai.ui.components.pressScale
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -219,7 +221,7 @@ fun ChatScreen(
         if (target > 0 && !userScrolledUp && !listState.isScrollInProgress) {
             val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
             if (lastVisible >= target - 3) {
-                listState.animateScrollToItem(target - 1, 100000)
+                listState.animateScrollToItem(target - 1)
             }
         }
     }
@@ -228,20 +230,23 @@ fun ChatScreen(
             val target = visibleMessages.size + 1
             val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
             if (lastVisible >= target - 3) {
-                listState.scrollToItem(target - 1, 100000)
+                listState.scrollToItem(target - 1)
             }
         }
     }
 
     val isStreaming = generation is GenerationState.Streaming
     val context = androidx.compose.ui.platform.LocalContext.current
+    val haptic = rememberHapticFeedback()
 
     // ---- Voice & Speech (STT & TTS) -----------------------------------------------
     val sttManager = container.speechToTextManager
     val isVoiceListening by sttManager.isListening.collectAsStateWithLifecycle()
+    val audioLevel by sttManager.audioLevel.collectAsStateWithLifecycle()
     val ttsManager = container.textToSpeechManager
     val isTtsSpeaking by ttsManager.isSpeaking.collectAsStateWithLifecycle()
     val ttsUtteranceId by ttsManager.currentUtteranceId.collectAsStateWithLifecycle()
+    val activeSpeechProgress by ttsManager.activeSpeechProgress.collectAsStateWithLifecycle()
 
     val recordAudioPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -462,9 +467,11 @@ fun ChatScreen(
                     )
                 ) {
                     val isSpeakingThis = isTtsSpeaking && ttsUtteranceId == message.id
+                    val activeWord = if (isSpeakingThis) activeSpeechProgress?.word else null
                     MessageRow(
                         message = message,
                         isSpeakingThisMessage = isSpeakingThis,
+                        activeHighlightWord = activeWord,
                         onReadAloud = {
                             if (isSpeakingThis) {
                                 ttsManager.stop()
@@ -625,14 +632,25 @@ fun ChatScreen(
             onDraftChange = { draft = it },
             onAttach = { showAttachmentSheet = true },
             onSend = {
+                haptic.click()
                 userScrolledUp = false
                 viewModel.send(draft)
                 draft = ""
             },
-            onStop = viewModel::stop,
-            onRegenerate = viewModel::regenerate,
-            onToggleVoiceInput = ::toggleVoiceInput,
+            onStop = {
+                haptic.click()
+                viewModel.stop()
+            },
+            onRegenerate = {
+                haptic.click()
+                viewModel.regenerate()
+            },
+            onToggleVoiceInput = {
+                haptic.click()
+                toggleVoiceInput()
+            },
             isVoiceListening = isVoiceListening,
+            audioLevel = audioLevel,
             // The composer stays USABLE while streaming: the user can keep
             // typing and attaching; sending queues the next turn instead of
             // dropping it. Only the send action swaps to Stop.
@@ -655,10 +673,11 @@ fun ChatScreen(
     ) {
         Surface(
             onClick = {
+                haptic.click()
                 userScrolledUp = false
                 screenScope.launch {
                     val last = (listState.layoutInfo.totalItemsCount - 1).coerceAtLeast(0)
-                    listState.animateScrollToItem(last, 100000)
+                    listState.animateScrollToItem(last)
                 }
             },
             shape = RoundedCornerShape(50),
@@ -1108,6 +1127,7 @@ private fun MessageAttachmentTile(attachment: Attachment) {
 private fun MessageRow(
     message: Message,
     isSpeakingThisMessage: Boolean = false,
+    activeHighlightWord: String? = null,
     onReadAloud: (() -> Unit)? = null,
     onRetryFromHere: (() -> Unit)? = null,
     onEditAndResend: (() -> Unit)? = null,
@@ -1256,7 +1276,8 @@ private fun MessageRow(
                     spacing = replySpacing,
                     imageUrls = comparisonImages,
                     missingQueries = missingImages,
-                    onImagesNeeded = onImagesNeeded
+                    onImagesNeeded = onImagesNeeded,
+                    highlightWord = activeHighlightWord
                 )
             }
             message.metadata?.richRecommendations
@@ -1450,6 +1471,7 @@ private fun AssistantMessageBottomBar(
     modifier: Modifier = Modifier
 ) {
     var copied by remember { mutableStateOf(false) }
+    val haptic = rememberHapticFeedback()
 
     LaunchedEffect(copied) {
         if (copied) {
@@ -1467,6 +1489,7 @@ private fun AssistantMessageBottomBar(
     ) {
         IconButton(
             onClick = {
+                haptic.confirmation()
                 onCopy()
                 copied = true
             },
@@ -1481,7 +1504,10 @@ private fun AssistantMessageBottomBar(
         }
 
         IconButton(
-            onClick = onReadAloud,
+            onClick = {
+                haptic.click()
+                onReadAloud()
+            },
             modifier = Modifier.size(32.dp)
         ) {
             Icon(
@@ -1493,7 +1519,10 @@ private fun AssistantMessageBottomBar(
         }
 
         IconButton(
-            onClick = onRetry,
+            onClick = {
+                haptic.click()
+                onRetry()
+            },
             modifier = Modifier.size(32.dp)
         ) {
             Icon(
@@ -1516,6 +1545,7 @@ private fun ComposerBar(
     onRegenerate: () -> Unit,
     onToggleVoiceInput: () -> Unit = {},
     isVoiceListening: Boolean = false,
+    audioLevel: Float = 0f,
     isStreaming: Boolean,
     modifier: Modifier = Modifier
 ) {
@@ -1555,7 +1585,23 @@ private fun ComposerBar(
                 value = draft,
                 onValueChange = onDraftChange,
                 modifier = Modifier.weight(1f),
-                placeholder = { Text("Ask Neuron…") },
+                placeholder = {
+                    if (isVoiceListening) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text(
+                                "Listening…",
+                                color = MaterialTheme.colorScheme.primary,
+                                style = MaterialTheme.typography.bodyLarge
+                            )
+                            AudioWaveformVisualizer(audioLevel = audioLevel)
+                        }
+                    } else {
+                        Text("Ask Neuron…")
+                    }
+                },
                 // Typing stays available during streaming — the send queues.
                 enabled = true,
                 minLines = 1,
@@ -1568,7 +1614,13 @@ private fun ComposerBar(
                 textStyle = MaterialTheme.typography.bodyLarge
             )
 
-            // Voice input (Microphone) button
+            // Voice input (Microphone) waveform animation and button
+            if (isVoiceListening) {
+                AudioWaveformVisualizer(
+                    audioLevel = audioLevel,
+                    modifier = Modifier.padding(end = 4.dp)
+                )
+            }
             IconButton(
                 onClick = onToggleVoiceInput
             ) {

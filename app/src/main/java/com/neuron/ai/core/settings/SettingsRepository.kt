@@ -105,6 +105,9 @@ interface SettingsRepository {
     val lastModelSelection: Flow<Pair<String, String>?>
     suspend fun setLastModelSelection(providerId: String, modelId: String)
 
+    /** User's custom system instructions / persona applied to every conversation. */
+    val customInstructions: Flow<String>
+    suspend fun setCustomInstructions(instructions: String)
 }
 
 private val Context.neuronDataStore by preferencesDataStore(name = "neuron_settings")
@@ -138,9 +141,19 @@ class SettingsRepositoryImpl(
         }
     }
 
+    override val customInstructions: Flow<String> = dataStore.data
+        .map { prefs -> prefs[KEY_CUSTOM_INSTRUCTIONS].orEmpty() }
+
+    override suspend fun setCustomInstructions(instructions: String) {
+        dataStore.edit { prefs ->
+            prefs[KEY_CUSTOM_INSTRUCTIONS] = instructions
+        }
+    }
+
     private companion object {
         val KEY_THEME_MODE = stringPreferencesKey("theme_mode")
         val KEY_LAST_PROVIDER = stringPreferencesKey("last_provider_id")
         val KEY_LAST_MODEL = stringPreferencesKey("last_model_id")
+        val KEY_CUSTOM_INSTRUCTIONS = stringPreferencesKey("custom_instructions")
     }
 }

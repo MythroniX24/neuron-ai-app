@@ -72,4 +72,18 @@ class VoiceModelsTest {
         assertTrue("Italic text should remain without asterisks", clean.contains("italic"))
         assertTrue("Header text should remain without hash", clean.contains("Header Title") && !clean.contains("#"))
     }
+
+    @Test
+    fun testTtsSpokenProgress() {
+        val progress = TtsSpokenProgress(
+            utteranceId = "msg-123",
+            start = 5,
+            end = 10,
+            word = "Hello"
+        )
+        assertEquals("msg-123", progress.utteranceId)
+        assertEquals(5, progress.start)
+        assertEquals(10, progress.end)
+        assertEquals("Hello", progress.word)
+    }
 }

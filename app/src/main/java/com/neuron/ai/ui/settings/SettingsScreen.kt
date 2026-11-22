@@ -38,7 +38,14 @@ import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material.icons.outlined.SystemUpdate
 import androidx.compose.material.icons.outlined.Terminal
+import androidx.compose.material.icons.outlined.Tune
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
+import com.neuron.ai.ui.components.rememberHapticFeedback
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -93,9 +100,12 @@ fun SettingsScreen(
     val themeMode by viewModel.themeMode.collectAsStateWithLifecycle()
     val isConnectorsConnected by viewModel.isConnectorsConnected.collectAsStateWithLifecycle()
     val isUpdateAvailable by viewModel.isUpdateAvailable.collectAsStateWithLifecycle()
+    val customInstructions by viewModel.customInstructions.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    val haptic = rememberHapticFeedback()
 
     var showAppearanceSheet by remember { mutableStateOf(false) }
+    var showCustomInstructionsSheet by remember { mutableStateOf(false) }
 
     val isDark = isSystemInDarkTheme() || themeMode == ThemeMode.DARK
     val screenBg = if (isDark) MaterialTheme.colorScheme.background else Color(0xFFF6F7F9)
@@ -261,12 +271,45 @@ fun SettingsScreen(
                             modifier = Modifier.size(20.dp)
                         )
                     },
-                    onClick = { showAppearanceSheet = true }
+                    onClick = {
+                        haptic.click()
+                        showAppearanceSheet = true
+                    }
                 )
 
                 RowDivider(borderColor = cardBorderColor)
 
-                // 2. Voice & Speech
+                // 2. Custom Instructions (User Persona)
+                SettingsItemRow(
+                    icon = Icons.Outlined.Tune,
+                    iconTint = Color(0xFFF59E0B),
+                    title = "Custom Instructions",
+                    trailing = {
+                        Text(
+                            text = if (customInstructions.isNotBlank()) "Active" else "Default",
+                            style = MaterialTheme.typography.bodyMedium.copy(
+                                fontWeight = FontWeight.Normal,
+                                fontSize = 14.sp
+                            ),
+                            color = if (customInstructions.isNotBlank()) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Outlined.KeyboardArrowRight,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                            modifier = Modifier.size(20.dp)
+                        )
+                    },
+                    onClick = {
+                        haptic.click()
+                        showCustomInstructionsSheet = true
+                    }
+                )
+
+                RowDivider(borderColor = cardBorderColor)
+
+                // 3. Voice & Speech
                 SettingsItemRow(
                     icon = Icons.Outlined.Mic,
                     iconTint = Color(0xFF06B6D4),
@@ -414,6 +457,18 @@ fun SettingsScreen(
             },
             onDismiss = { showAppearanceSheet = false },
             isDark = isDark,
+            cardBorderColor = cardBorderColor
+        )
+    }
+
+    // Custom Instructions (Persona) Modal Bottom Sheet
+    if (showCustomInstructionsSheet) {
+        CustomInstructionsBottomSheet(
+            currentInstructions = customInstructions,
+            onSave = { instructions ->
+                viewModel.setCustomInstructions(instructions)
+            },
+            onDismiss = { showCustomInstructionsSheet = false },
             cardBorderColor = cardBorderColor
         )
     }
@@ -694,6 +749,165 @@ private fun ThemeCard(
                         tint = brandPurple,
                         modifier = Modifier.size(13.dp)
                     )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Custom System Instructions Modal Bottom Sheet allowing users to define persistent AI personas and presets.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun CustomInstructionsBottomSheet(
+    currentInstructions: String,
+    onSave: (String) -> Unit,
+    onDismiss: () -> Unit,
+    cardBorderColor: Color
+) {
+    var text by remember(currentInstructions) { mutableStateOf(currentInstructions) }
+    val haptic = rememberHapticFeedback()
+
+    val presets = remember {
+        listOf(
+            "Always in Hindi" to "हमेशा सरल, स्पष्ट और स्वाभाविक हिंदी में ही उत्तर दें।",
+            "Concise & Direct" to "Be extremely concise, direct, and avoid any conversational fluff or filler.",
+            "Senior Architect" to "Act as a Principal Software Architect. Prioritize design patterns, clean architecture, security, and trade-offs.",
+            "Step-by-step Tutor" to "Explain concepts step-by-step with simple real-world analogies and clear code examples.",
+            "Clean Code" to "Write production-ready, idiomatic code adhering to Google engineering guidelines and SOLID principles."
+        )
+    }
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        containerColor = MaterialTheme.colorScheme.surface,
+        dragHandle = {
+            Box(
+                modifier = Modifier
+                    .padding(vertical = 12.dp)
+                    .size(width = 36.dp, height = 4.dp)
+                    .background(
+                        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f),
+                        CircleShape
+                    )
+            )
+        }
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp)
+                .navigationBarsPadding()
+                .imePadding()
+                .padding(bottom = 24.dp)
+        ) {
+            Text(
+                text = "Custom System Instructions",
+                style = MaterialTheme.typography.titleMedium.copy(
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 18.sp
+                ),
+                color = MaterialTheme.colorScheme.onSurface
+            )
+
+            Spacer(Modifier.height(4.dp))
+
+            Text(
+                text = "Customize how Neuron AI thinks and responds across every conversation.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            Spacer(Modifier.height(14.dp))
+
+            Text(
+                text = "Quick Presets",
+                style = MaterialTheme.typography.labelMedium.copy(
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 12.sp
+                ),
+                color = MaterialTheme.colorScheme.primary
+            )
+
+            Spacer(Modifier.height(8.dp))
+
+            LazyRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                items(presets.size) { index ->
+                    val (label, prompt) = presets[index]
+                    Surface(
+                        shape = RoundedCornerShape(20.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                        border = BorderStroke(1.dp, cardBorderColor),
+                        modifier = Modifier.clickable {
+                            haptic.click()
+                            text = if (text.isBlank()) prompt else "$text\n$prompt"
+                        }
+                    ) {
+                        Text(
+                            text = "+ $label",
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontWeight = FontWeight.Medium,
+                                fontSize = 11.sp
+                            ),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                        )
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(14.dp))
+
+            OutlinedTextField(
+                value = text,
+                onValueChange = { text = it },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 120.dp, max = 200.dp),
+                placeholder = {
+                    Text(
+                        "e.g., Always reply in Hindi, prioritize clean code, never write long introductions...",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                    )
+                },
+                shape = RoundedCornerShape(12.dp),
+                textStyle = MaterialTheme.typography.bodyMedium
+            )
+
+            Spacer(Modifier.height(16.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                if (text.isNotBlank()) {
+                    OutlinedButton(
+                        onClick = {
+                            haptic.click()
+                            text = ""
+                        },
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("Clear")
+                    }
+                }
+                Button(
+                    onClick = {
+                        haptic.confirmation()
+                        onSave(text.trim())
+                        onDismiss()
+                    },
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.weight(if (text.isNotBlank()) 1f else 2f)
+                ) {
+                    Text("Save Instructions")
                 }
             }
         }

@@ -128,3 +128,13 @@ data class VoiceSettings(
     val speechRate: Float = 1.0f,
     val speechPitch: Float = 1.0f
 )
+
+/**
+ * Real-time karaoke speech progress emitted by TTS engine.
+ */
+data class TtsSpokenProgress(
+    val utteranceId: String,
+    val start: Int,
+    val end: Int,
+    val word: String
+)
