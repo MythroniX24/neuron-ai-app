@@ -102,7 +102,7 @@ class SpeechToTextManager(
                                 SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "No speech heard"
                                 else -> "Speech recognition error ($error)"
                             }
-                            logger?.warn("SpeechToTextManager", "Speech recognition error: $message")
+                            logger?.w("SpeechToTextManager", "Speech recognition error: $message")
                             onError(message)
                         }
 
@@ -138,7 +138,7 @@ class SpeechToTextManager(
                 _isListening.value = true
             } catch (e: Exception) {
                 _isListening.value = false
-                logger?.warn("SpeechToTextManager", "Failed to start listening: ${e.message}")
+                logger?.w("SpeechToTextManager", "Failed to start listening: ${e.message}", e)
                 onError("Failed to start voice input: ${e.message}")
             }
         }
@@ -151,7 +151,7 @@ class SpeechToTextManager(
                 recognizer?.cancel()
                 recognizer?.destroy()
             } catch (e: Exception) {
-                logger?.warn("SpeechToTextManager", "Error stopping recognizer: ${e.message}")
+                logger?.w("SpeechToTextManager", "Error stopping recognizer: ${e.message}", e)
             } finally {
                 recognizer = null
                 _isListening.value = false

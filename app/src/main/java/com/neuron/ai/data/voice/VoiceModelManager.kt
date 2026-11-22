@@ -109,7 +109,7 @@ class VoiceModelManager(
 
                     if (tempFile.renameTo(targetFile)) {
                         _statusMap.update { it + (definition.id to VoiceModelStatus.Downloaded) }
-                        logger?.info("VoiceModelManager", "Downloaded voice model: ${definition.name}")
+                        logger?.d("VoiceModelManager", "Downloaded voice model: ${definition.name}")
                     } else {
                         throw IOException("Failed to finalize downloaded file")
                     }
@@ -118,7 +118,7 @@ class VoiceModelManager(
                 tempFile.delete()
                 _statusMap.update { it + (definition.id to VoiceModelStatus.NotDownloaded) }
             } catch (e: Exception) {
-                logger?.warn("VoiceModelManager", "Download failed for ${definition.name}: ${e.message}")
+                logger?.w("VoiceModelManager", "Download failed for ${definition.name}: ${e.message}", e)
                 tempFile.delete()
                 _statusMap.update { it + (definition.id to VoiceModelStatus.Error(e.message ?: "Download failed")) }
             } finally {

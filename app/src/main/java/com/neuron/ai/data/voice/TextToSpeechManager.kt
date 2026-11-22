@@ -66,12 +66,12 @@ class TextToSpeechManager(
                     override fun onError(utteranceId: String?, errorCode: Int) {
                         _isSpeaking.value = false
                         _currentUtteranceId.value = null
-                        logger?.warn("TextToSpeechManager", "TTS error code $errorCode for utterance $utteranceId")
+                        logger?.w("TextToSpeechManager", "TTS error code $errorCode for utterance $utteranceId")
                     }
                 })
                 isInitialized = true
             } else {
-                logger?.warn("TextToSpeechManager", "Failed to initialize Android TextToSpeech, status=$status")
+                logger?.w("TextToSpeechManager", "Failed to initialize Android TextToSpeech, status=$status")
             }
         }
     }

@@ -234,6 +234,7 @@ fun ChatScreen(
     }
 
     val isStreaming = generation is GenerationState.Streaming
+    val context = androidx.compose.ui.platform.LocalContext.current
 
     // ---- Voice & Speech (STT & TTS) -----------------------------------------------
     val sttManager = container.speechToTextManager
@@ -312,7 +313,6 @@ fun ChatScreen(
     val screenScope = rememberCoroutineScope()
 
     // ---- Attachment entry points (sheet: Camera / Photos / Files) ----------------
-    val context = androidx.compose.ui.platform.LocalContext.current
     var showAttachmentSheet by remember { mutableStateOf(false) }
     var pendingCaptureFile by remember { mutableStateOf<java.io.File?>(null) }
 
@@ -1576,7 +1576,7 @@ private fun ComposerBar(
                     imageVector = if (isVoiceListening) Icons.Outlined.MicOff else Icons.Outlined.Mic,
                     contentDescription = if (isVoiceListening) "Stop voice input" else "Voice input",
                     tint = if (isVoiceListening) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = if (isVoiceListening) Modifier.neuronPulse() else Modifier
+                    modifier = if (isVoiceListening) Modifier.neuronPulse(enabled = true) else Modifier
                 )
             }
 
