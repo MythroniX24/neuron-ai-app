@@ -193,7 +193,8 @@ fun NeuronApp(
                         onOpenLocalAi = { navController.navigate(Routes.LOCAL_AI) },
                         onOpenDebugConsole = { navController.navigate(Routes.DEBUG_CONSOLE) },
                         onOpenConnectedApps = { navController.navigate(Routes.CONNECTED_APPS) },
-                        onOpenAppUpdate = { navController.navigate(Routes.APP_UPDATE) }
+                        onOpenAppUpdate = { navController.navigate(Routes.APP_UPDATE) },
+                        onOpenVoiceSettings = { navController.navigate(Routes.VOICE_SETTINGS) }
                     )
                 }
 
@@ -293,6 +294,13 @@ fun NeuronApp(
 
                 composable(Routes.APP_UPDATE) {
                     com.neuron.ai.ui.update.AppUpdateScreen(
+                        container = container,
+                        onBack = { navController.popBackStack() }
+                    )
+                }
+
+                composable(Routes.VOICE_SETTINGS) {
+                    com.neuron.ai.ui.settings.VoiceSettingsScreen(
                         container = container,
                         onBack = { navController.popBackStack() }
                     )

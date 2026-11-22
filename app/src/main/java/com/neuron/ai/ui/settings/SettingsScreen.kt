@@ -33,6 +33,7 @@ import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.Hub
 import androidx.compose.material.icons.outlined.LightMode
 import androidx.compose.material.icons.outlined.Memory
+import androidx.compose.material.icons.outlined.Mic
 import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material.icons.outlined.SystemUpdate
@@ -84,7 +85,8 @@ fun SettingsScreen(
     onOpenLocalAi: () -> Unit = {},
     onOpenDebugConsole: () -> Unit = {},
     onOpenConnectedApps: () -> Unit = {},
-    onOpenAppUpdate: () -> Unit = {}
+    onOpenAppUpdate: () -> Unit = {},
+    onOpenVoiceSettings: () -> Unit = {}
 ) {
     val viewModel: SettingsViewModel =
         viewModel(factory = SettingsViewModelFactory(container))
@@ -264,7 +266,25 @@ fun SettingsScreen(
 
                 RowDivider(borderColor = cardBorderColor)
 
-                // 2. Storage Access
+                // 2. Voice & Speech
+                SettingsItemRow(
+                    icon = Icons.Outlined.Mic,
+                    iconTint = Color(0xFF06B6D4),
+                    title = "Voice & Speech",
+                    trailing = {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Outlined.KeyboardArrowRight,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                            modifier = Modifier.size(20.dp)
+                        )
+                    },
+                    onClick = onOpenVoiceSettings
+                )
+
+                RowDivider(borderColor = cardBorderColor)
+
+                // 3. Storage Access
                 val hasStorageAccess = remember(themeMode) { DeviceStorage.hasAccess(context) }
                 SettingsItemRow(
                     icon = Icons.Outlined.Folder,

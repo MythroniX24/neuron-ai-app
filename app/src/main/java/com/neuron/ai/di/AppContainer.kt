@@ -205,6 +205,35 @@ class AppContainer(context: Context) {
         )
     }
 
+    // ---- Voice & Speech (TTS and STT) --------------------------------------
+    val voiceSettingsRepository: com.neuron.ai.core.voice.VoiceSettingsRepository by lazy {
+        com.neuron.ai.core.voice.VoiceSettingsRepositoryImpl(context, dispatchers)
+    }
+
+    val voiceModelManager: com.neuron.ai.data.voice.VoiceModelManager by lazy {
+        com.neuron.ai.data.voice.VoiceModelManager(context, dispatchers, logger)
+    }
+
+    val textToSpeechManager: com.neuron.ai.data.voice.TextToSpeechManager by lazy {
+        com.neuron.ai.data.voice.TextToSpeechManager(
+            context = context,
+            settingsRepository = voiceSettingsRepository,
+            modelManager = voiceModelManager,
+            dispatchers = dispatchers,
+            logger = logger
+        )
+    }
+
+    val speechToTextManager: com.neuron.ai.data.voice.SpeechToTextManager by lazy {
+        com.neuron.ai.data.voice.SpeechToTextManager(
+            context = context,
+            settingsRepository = voiceSettingsRepository,
+            modelManager = voiceModelManager,
+            dispatchers = dispatchers,
+            logger = logger
+        )
+    }
+
     val permissionManager: PermissionManager = SessionPermissionManager()
 
     val toolRegistry: ToolRegistry = InMemoryToolRegistry()

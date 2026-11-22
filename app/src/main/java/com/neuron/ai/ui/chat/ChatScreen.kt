@@ -54,6 +54,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
@@ -65,8 +66,12 @@ import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.KeyboardArrowDown
 import androidx.compose.material.icons.outlined.Menu
+import androidx.compose.material.icons.outlined.Mic
+import androidx.compose.material.icons.outlined.MicOff
 import androidx.compose.material.icons.outlined.Terminal
 import androidx.compose.material.icons.outlined.Refresh
+import androidx.compose.material.icons.outlined.Stop
+import androidx.compose.material.icons.outlined.VolumeUp
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -192,28 +197,112 @@ fun ChatScreen(
     // old effect animated on every token, which launched a new scroll
     // animation dozens of times per second and fought the user's finger.
     val streamingText = (generation as? GenerationState.Streaming)?.buffer.orEmpty()
+    var userScrolledUp by remember { mutableStateOf(false) }
+
+    // When the user drags or scrolls up away from the bottom, cancel auto-scroll immediately
+    // so the auto-scroll never fights the user's finger.
+    LaunchedEffect(listState.isScrollInProgress) {
+        if (listState.isScrollInProgress) {
+            if (listState.canScrollForward) {
+                userScrolledUp = true
+            }
+        } else {
+            // Once user scrolls all the way back to the bottom, re-enable auto-scroll
+            if (!listState.canScrollForward) {
+                userScrolledUp = false
+            }
+        }
+    }
+
     LaunchedEffect(visibleMessages.size, liveRun?.steps?.size) {
         val target = visibleMessages.size + if (generation is GenerationState.Streaming) 1 else 0
-        if (target > 0) {
+        if (target > 0 && !userScrolledUp && !listState.isScrollInProgress) {
             val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
             if (lastVisible >= target - 3) {
-                listState.animateScrollToItem(target - 1)
+                listState.animateScrollToItem(target - 1, 100000)
             }
         }
     }
     LaunchedEffect(streamingText.length) {
-        if (streamingText.isNotEmpty()) {
+        if (streamingText.isNotEmpty() && !userScrolledUp && !listState.isScrollInProgress) {
             val target = visibleMessages.size + 1
             val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
             if (lastVisible >= target - 3) {
-                // No animation here: a token stream can update many times per
-                // second, and an animated scroll per token IS the jank.
-                listState.scrollToItem(target - 1)
+                listState.scrollToItem(target - 1, 100000)
             }
         }
     }
 
     val isStreaming = generation is GenerationState.Streaming
+
+    // ---- Voice & Speech (STT & TTS) -----------------------------------------------
+    val sttManager = container.speechToTextManager
+    val isVoiceListening by sttManager.isListening.collectAsStateWithLifecycle()
+    val ttsManager = container.textToSpeechManager
+    val isTtsSpeaking by ttsManager.isSpeaking.collectAsStateWithLifecycle()
+    val ttsUtteranceId by ttsManager.currentUtteranceId.collectAsStateWithLifecycle()
+
+    val recordAudioPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        if (isGranted) {
+            sttManager.startListening(
+                onPartial = { partial ->
+                    if (draft.isBlank()) {
+                        draft = partial
+                    } else {
+                        val base = draft.substringBeforeLast(" ").trim()
+                        draft = if (base.isEmpty()) partial else "$base $partial"
+                    }
+                },
+                onFinal = { finalResult ->
+                    draft = if (draft.isBlank()) finalResult else "${draft.trim()} $finalResult"
+                },
+                onError = { error ->
+                    android.widget.Toast.makeText(context, error, android.widget.Toast.LENGTH_SHORT).show()
+                }
+            )
+        } else {
+            android.widget.Toast.makeText(context, "Microphone permission required for voice input", android.widget.Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    val keyboardController = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
+    val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
+
+    fun toggleVoiceInput() {
+        if (isVoiceListening) {
+            sttManager.stopListening()
+        } else {
+            val hasPermission = androidx.core.content.ContextCompat.checkSelfPermission(
+                context,
+                android.Manifest.permission.RECORD_AUDIO
+            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+
+            if (hasPermission) {
+                keyboardController?.hide()
+                focusManager.clearFocus()
+                sttManager.startListening(
+                    onPartial = { partial ->
+                        if (draft.isBlank()) {
+                            draft = partial
+                        } else {
+                            val base = draft.substringBeforeLast(" ").trim()
+                            draft = if (base.isEmpty()) partial else "$base $partial"
+                        }
+                    },
+                    onFinal = { finalResult ->
+                        draft = if (draft.isBlank()) finalResult else "${draft.trim()} $finalResult"
+                    },
+                    onError = { error ->
+                        android.widget.Toast.makeText(context, error, android.widget.Toast.LENGTH_SHORT).show()
+                    }
+                )
+            } else {
+                recordAudioPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
+            }
+        }
+    }
 
     // ---- Terminal + Browser panel state -------------------------------------------
     val terminalEnabled by viewModel.terminalEnabled.collectAsStateWithLifecycle()
@@ -372,8 +461,17 @@ fun ChatScreen(
                         enabled = animateIn
                     )
                 ) {
+                    val isSpeakingThis = isTtsSpeaking && ttsUtteranceId == message.id
                     MessageRow(
                         message = message,
+                        isSpeakingThisMessage = isSpeakingThis,
+                        onReadAloud = {
+                            if (isSpeakingThis) {
+                                ttsManager.stop()
+                            } else {
+                                ttsManager.speak(message.content, message.id)
+                            }
+                        },
                         onRetryFromHere = { viewModel.retryFrom(message.id) },
                         onEditAndResend = { viewModel.editAndResend(message.id, message.content) },
                         fullResultResolver = { callId ->
@@ -527,11 +625,14 @@ fun ChatScreen(
             onDraftChange = { draft = it },
             onAttach = { showAttachmentSheet = true },
             onSend = {
+                userScrolledUp = false
                 viewModel.send(draft)
                 draft = ""
             },
             onStop = viewModel::stop,
             onRegenerate = viewModel::regenerate,
+            onToggleVoiceInput = ::toggleVoiceInput,
+            isVoiceListening = isVoiceListening,
             // The composer stays USABLE while streaming: the user can keep
             // typing and attaching; sending queues the next turn instead of
             // dropping it. Only the send action swaps to Stop.
@@ -554,9 +655,10 @@ fun ChatScreen(
     ) {
         Surface(
             onClick = {
+                userScrolledUp = false
                 screenScope.launch {
                     val last = (listState.layoutInfo.totalItemsCount - 1).coerceAtLeast(0)
-                    listState.animateScrollToItem(last)
+                    listState.animateScrollToItem(last, 100000)
                 }
             },
             shape = RoundedCornerShape(50),
@@ -1005,6 +1107,8 @@ private fun MessageAttachmentTile(attachment: Attachment) {
 @Composable
 private fun MessageRow(
     message: Message,
+    isSpeakingThisMessage: Boolean = false,
+    onReadAloud: (() -> Unit)? = null,
     onRetryFromHere: (() -> Unit)? = null,
     onEditAndResend: (() -> Unit)? = null,
     fullResultResolver: (String) -> String? = { null },
@@ -1142,12 +1246,7 @@ private fun MessageRow(
                 legacy = message.metadata?.replySpacing,
                 gap = message.metadata?.blockGapSpacing
             )
-            Box(
-                Modifier.combinedClickable(
-                    onClick = {},
-                    onLongClick = { showMenu = true }
-                )
-            ) {
+            SelectionContainer {
                 // One answer, read in order: prose, native comparison card,
                 // more prose, next card. Rich recommendation sets still render
                 // as their own section below.
@@ -1190,6 +1289,16 @@ private fun MessageRow(
                     )
                 }
             }
+
+            // Bottom action row: Copy whole message, Read Aloud (TTS), and Retry
+            AssistantMessageBottomBar(
+                isSpeakingThisMessage = isSpeakingThisMessage,
+                onCopy = {
+                    clipboard.setText(androidx.compose.ui.text.AnnotatedString(message.content))
+                },
+                onReadAloud = { onReadAloud?.invoke() },
+                onRetry = { onRetryFromHere?.invoke() }
+            )
         }
 
         Message.Role.SYSTEM -> Unit
@@ -1333,6 +1442,71 @@ private fun BlinkingCaret() {
  * regenerate after a failure).
  */
 @Composable
+private fun AssistantMessageBottomBar(
+    isSpeakingThisMessage: Boolean,
+    onCopy: () -> Unit,
+    onReadAloud: () -> Unit,
+    onRetry: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var copied by remember { mutableStateOf(false) }
+
+    LaunchedEffect(copied) {
+        if (copied) {
+            kotlinx.coroutines.delay(2000)
+            copied = false
+        }
+    }
+
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(top = Spacing.xs, start = Spacing.xs),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        IconButton(
+            onClick = {
+                onCopy()
+                copied = true
+            },
+            modifier = Modifier.size(32.dp)
+        ) {
+            Icon(
+                imageVector = if (copied) Icons.Outlined.Check else Icons.Outlined.ContentCopy,
+                contentDescription = if (copied) "Copied" else "Copy message",
+                tint = if (copied) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f),
+                modifier = Modifier.size(16.dp)
+            )
+        }
+
+        IconButton(
+            onClick = onReadAloud,
+            modifier = Modifier.size(32.dp)
+        ) {
+            Icon(
+                imageVector = if (isSpeakingThisMessage) Icons.Outlined.Stop else Icons.Outlined.VolumeUp,
+                contentDescription = if (isSpeakingThisMessage) "Stop speaking" else "Read aloud",
+                tint = if (isSpeakingThisMessage) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f),
+                modifier = Modifier.size(17.dp)
+            )
+        }
+
+        IconButton(
+            onClick = onRetry,
+            modifier = Modifier.size(32.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Outlined.Refresh,
+                contentDescription = "Retry from here",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f),
+                modifier = Modifier.size(17.dp)
+            )
+        }
+    }
+}
+
+@Composable
 private fun ComposerBar(
     draft: String,
     onDraftChange: (String) -> Unit,
@@ -1340,9 +1514,14 @@ private fun ComposerBar(
     onSend: () -> Unit,
     onStop: () -> Unit,
     onRegenerate: () -> Unit,
+    onToggleVoiceInput: () -> Unit = {},
+    isVoiceListening: Boolean = false,
     isStreaming: Boolean,
     modifier: Modifier = Modifier
 ) {
+    val keyboardController = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
+    val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
+
     Surface(
         modifier = modifier,
         shape = MaterialTheme.shapes.extraLarge,
@@ -1358,7 +1537,14 @@ private fun ComposerBar(
             // The + control is a PERMANENT part of the composer: attach, work-
             // space, terminal toggles live here on every screen state — new chat
             // included. Streaming only disables it, it never hides it.
-            IconButton(onClick = onAttach) {
+            // Automatically closes soft keyboard when clicked.
+            IconButton(
+                onClick = {
+                    keyboardController?.hide()
+                    focusManager.clearFocus()
+                    onAttach()
+                }
+            ) {
                 Icon(
                     imageVector = Icons.Outlined.Add,
                     contentDescription = "Attach and capabilities",
@@ -1381,6 +1567,19 @@ private fun ComposerBar(
                 ),
                 textStyle = MaterialTheme.typography.bodyLarge
             )
+
+            // Voice input (Microphone) button
+            IconButton(
+                onClick = onToggleVoiceInput
+            ) {
+                Icon(
+                    imageVector = if (isVoiceListening) Icons.Outlined.MicOff else Icons.Outlined.Mic,
+                    contentDescription = if (isVoiceListening) "Stop voice input" else "Voice input",
+                    tint = if (isVoiceListening) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = if (isVoiceListening) Modifier.neuronPulse() else Modifier
+                )
+            }
+
             // Streaming: STOP first (prominent), send second — send queues the
             // next turn. Idle: send only. Same slot, animated morph.
             AnimatedContent(

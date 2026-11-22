@@ -32,6 +32,8 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- Required on Android 8.0+ to prompt package installer for in-app updates. -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- Required for speech-to-text / voice input. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
     <application
         android:name=".NeuronApplication"
