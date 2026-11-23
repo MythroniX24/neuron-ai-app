@@ -97,6 +97,11 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
@@ -693,7 +698,7 @@ fun ChatScreen(
             isStreaming = isStreaming,
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(Spacing.lg)
+                .padding(horizontal = Spacing.md, vertical = Spacing.sm)
         )
     }
 
@@ -831,40 +836,58 @@ private fun ChatTopBar(
 
     TopAppBar(
         title = {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                // Signature: the brand mark breathes while the agent works.
-                BrandMark(
-                    Modifier
-                        .padding(end = Spacing.sm)
-                        .neuronPulse(enabled = isThinking)
-                )
-                Column(
-                    modifier = Modifier
-                        .onGloballyPositioned { titleBounds = it.boundsInWindow() }
-                        .clickable(enabled = modelOptions.isNotEmpty()) {
-                            menuExpanded = true
-                        }
+            Surface(
+                shape = RoundedCornerShape(20.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                border = BorderStroke(
+                    1.dp,
+                    if (isThinking) MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
+                    else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+                ),
+                modifier = Modifier
+                    .onGloballyPositioned { titleBounds = it.boundsInWindow() }
+                    .clip(RoundedCornerShape(20.dp))
+                    .clickable(enabled = modelOptions.isNotEmpty()) {
+                        menuExpanded = true
+                    }
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
                 ) {
-                Text(
-                    text = shortModelName(modelName),
-                    style = MaterialTheme.typography.titleMedium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.widthIn(max = 220.dp)
-                )
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (isThinking) {
+                        BrandMark(
+                            Modifier
+                                .size(18.dp)
+                                .padding(end = 6.dp)
+                                .neuronPulse(enabled = true)
+                        )
+                    } else {
+                        Text(
+                            text = "✦",
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                color = MaterialTheme.colorScheme.primary,
+                                fontWeight = FontWeight.Bold
+                            ),
+                            modifier = Modifier.padding(end = 6.dp)
+                        )
+                    }
                     Text(
-                        text = "Tap to switch",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        text = shortModelName(modelName),
+                        style = MaterialTheme.typography.titleSmall.copy(
+                            fontWeight = FontWeight.SemiBold
+                        ),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.widthIn(max = 160.dp)
                     )
+                    Spacer(Modifier.width(4.dp))
                     Icon(
                         imageVector = Icons.Outlined.KeyboardArrowDown,
                         contentDescription = "Switch model",
                         modifier = Modifier.size(16.dp),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                }
                 }
             }
         },
@@ -1590,35 +1613,55 @@ private fun ComposerBar(
     val keyboardController = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
     val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
 
+    val isDraftActive = draft.isNotBlank() || isVoiceListening
+    val borderBrush = if (isDraftActive) {
+        Brush.linearGradient(
+            listOf(
+                Color(0xFF8B5CF6).copy(alpha = 0.65f),
+                Color(0xFF06B6D4).copy(alpha = 0.55f)
+            )
+        )
+    } else {
+        SolidColor(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
+    }
+
     Surface(
         modifier = modifier,
-        shape = MaterialTheme.shapes.extraLarge,
+        shape = RoundedCornerShape(28.dp),
         color = MaterialTheme.colorScheme.surface,
-        border = androidx.compose.foundation.BorderStroke(
-            1.dp, MaterialTheme.colorScheme.outline
-        )
+        tonalElevation = 3.dp,
+        shadowElevation = 8.dp,
+        border = BorderStroke(1.2.dp, borderBrush)
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = Spacing.md, vertical = Spacing.xs),
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // The + control is a PERMANENT part of the composer: attach, work-
-            // space, terminal toggles live here on every screen state — new chat
-            // included. Streaming only disables it, it never hides it.
-            // Automatically closes soft keyboard when clicked.
-            IconButton(
-                onClick = {
-                    keyboardController?.hide()
-                    focusManager.clearFocus()
-                    onAttach()
-                }
+            // The + control is a permanent part of the composer: attach, workspace, terminal toggles
+            Surface(
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                modifier = Modifier
+                    .size(38.dp)
+                    .clip(CircleShape)
+                    .clickable {
+                        keyboardController?.hide()
+                        focusManager.clearFocus()
+                        onAttach()
+                    }
             ) {
-                Icon(
-                    imageVector = Icons.Outlined.Add,
-                    contentDescription = "Attach and capabilities",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        imageVector = Icons.Outlined.Add,
+                        contentDescription = "Attach and capabilities",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
             }
+
+            Spacer(Modifier.width(4.dp))
+
             androidx.compose.material3.OutlinedTextField(
                 value = draft,
                 onValueChange = onDraftChange,
@@ -1632,24 +1675,27 @@ private fun ComposerBar(
                             Text(
                                 "Listening…",
                                 color = MaterialTheme.colorScheme.primary,
-                                style = MaterialTheme.typography.bodyLarge
+                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium)
                             )
                             AudioWaveformVisualizer(audioLevel = audioLevel)
                         }
                     } else {
-                        Text("Ask Neuron…")
+                        Text(
+                            "Ask Neuron anything…",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                        )
                     }
                 },
-                // Typing stays available during streaming — the send queues.
                 enabled = true,
                 minLines = 1,
                 maxLines = 5,
                 colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = androidx.compose.ui.graphics.Color.Transparent,
-                    unfocusedBorderColor = androidx.compose.ui.graphics.Color.Transparent,
-                    disabledBorderColor = androidx.compose.ui.graphics.Color.Transparent
+                    focusedBorderColor = Color.Transparent,
+                    unfocusedBorderColor = Color.Transparent,
+                    disabledBorderColor = Color.Transparent
                 ),
-                textStyle = MaterialTheme.typography.bodyLarge
+                textStyle = MaterialTheme.typography.bodyMedium
             )
 
             // Voice input (Microphone) waveform animation and button
@@ -1659,19 +1705,29 @@ private fun ComposerBar(
                     modifier = Modifier.padding(end = 4.dp)
                 )
             }
-            IconButton(
-                onClick = onToggleVoiceInput
+
+            Surface(
+                shape = CircleShape,
+                color = if (isVoiceListening) MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.35f)
+                        else Color.Transparent,
+                modifier = Modifier
+                    .size(38.dp)
+                    .clip(CircleShape)
+                    .clickable(onClick = onToggleVoiceInput)
             ) {
-                Icon(
-                    imageVector = if (isVoiceListening) Icons.Outlined.MicOff else Icons.Outlined.Mic,
-                    contentDescription = if (isVoiceListening) "Stop voice input" else "Voice input",
-                    tint = if (isVoiceListening) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = if (isVoiceListening) Modifier.neuronPulse(enabled = true) else Modifier
-                )
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        imageVector = if (isVoiceListening) Icons.Outlined.MicOff else Icons.Outlined.Mic,
+                        contentDescription = if (isVoiceListening) "Stop voice input" else "Voice input",
+                        tint = if (isVoiceListening) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = if (isVoiceListening) Modifier.size(20.dp).neuronPulse(enabled = true) else Modifier.size(20.dp)
+                    )
+                }
             }
 
-            // Streaming: STOP first (prominent), send second — send queues the
-            // next turn. Idle: send only. Same slot, animated morph.
+            Spacer(Modifier.width(2.dp))
+
+            // Streaming: STOP first (prominent), send second — send queues the next turn. Idle: send only.
             AnimatedContent(
                 targetState = isStreaming,
                 transitionSpec = {
@@ -1682,24 +1738,69 @@ private fun ComposerBar(
             ) { streaming ->
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     if (streaming) {
-                        IconButton(onClick = onStop) {
-                            Icon(
-                                imageVector = Icons.Outlined.Close,
-                                contentDescription = "Stop generating",
-                                tint = MaterialTheme.colorScheme.error
-                            )
+                        Surface(
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.errorContainer,
+                            modifier = Modifier
+                                .size(38.dp)
+                                .clip(CircleShape)
+                                .clickable(onClick = onStop)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Outlined.Close,
+                                    contentDescription = "Stop generating",
+                                    tint = MaterialTheme.colorScheme.error,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
                         }
                     }
-                    IconButton(
-                        onClick = onSend,
-                        enabled = draft.isNotBlank()
-                    ) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.Send,
-                            contentDescription = if (streaming) "Queue message" else "Send",
-                            tint = if (draft.isNotBlank()) MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.outline
-                        )
+                    if (!streaming) {
+                        Surface(
+                            shape = CircleShape,
+                            color = if (draft.isNotBlank()) MaterialTheme.colorScheme.primary
+                                    else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                            shadowElevation = if (draft.isNotBlank()) 4.dp else 0.dp,
+                            modifier = Modifier
+                                .size(38.dp)
+                                .clip(CircleShape)
+                                .clickable(
+                                    enabled = draft.isNotBlank(),
+                                    onClick = onSend
+                                )
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.Send,
+                                    contentDescription = "Send",
+                                    tint = if (draft.isNotBlank()) MaterialTheme.colorScheme.onPrimary
+                                           else MaterialTheme.colorScheme.outline.copy(alpha = 0.6f),
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+                    } else if (draft.isNotBlank()) {
+                        // While streaming, allow queueing if draft has text
+                        Spacer(Modifier.width(4.dp))
+                        Surface(
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.primary,
+                            shadowElevation = 3.dp,
+                            modifier = Modifier
+                                .size(38.dp)
+                                .clip(CircleShape)
+                                .clickable(onClick = onSend)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.Send,
+                                    contentDescription = "Queue message",
+                                    tint = MaterialTheme.colorScheme.onPrimary,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
                     }
                 }
             }

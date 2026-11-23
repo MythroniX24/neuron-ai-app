@@ -26,6 +26,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
@@ -169,4 +171,89 @@ fun SkeletonBar(modifier: Modifier = Modifier) {
             .background(MaterialTheme.colorScheme.surfaceVariant)
             .shimmer()
     )
+}
+
+/**
+ * Dynamic, smoothly animated linear gradient brush.
+ * Sweeps colors continuously to produce a shimmering, breathing iridescent look.
+ */
+@Composable
+fun rememberAnimatedGradientBrush(
+    colors: List<Color> = listOf(
+        Color(0xFF8B5CF6), // Purple
+        Color(0xFF06B6D4), // Cyan
+        Color(0xFF3B82F6), // Blue
+        Color(0xFFEC4899), // Pink
+        Color(0xFF8B5CF6)  // Loop
+    ),
+    durationMs: Int = 4500
+): Brush {
+    val transition = rememberInfiniteTransition(label = "animatedGradientBrush")
+    val progress by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = durationMs, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "gradientOffset"
+    )
+    val width = 1200f
+    val xOffset = width * progress
+    return Brush.linearGradient(
+        colors = colors,
+        start = Offset(xOffset, 0f),
+        end = Offset(xOffset + width, width * 0.7f)
+    )
+}
+
+/**
+ * Multi-layer ambient neural glow with dual-frequency breathing and rotation.
+ * Gives the brand mark an organic, alive, breathing aesthetic.
+ */
+fun Modifier.ambientNeuralGlow(enabled: Boolean = true): Modifier = composed {
+    if (!enabled) return@composed Modifier
+    val transition = rememberInfiniteTransition(label = "ambientNeuralGlow")
+    val pulse by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 2400, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "pulse"
+    )
+    val rotation by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 9000, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "rotation"
+    )
+
+    val primary = Color(0xFF8B5CF6)
+    val secondary = Color(0xFF06B6D4)
+    val tertiary = Color(0xFF3B82F6)
+
+    drawWithCache {
+        val radius = size.minDimension * (0.6f + 0.22f * pulse)
+        val sweepBrush = Brush.sweepGradient(
+            colors = listOf(
+                primary.copy(alpha = 0.28f + 0.14f * pulse),
+                secondary.copy(alpha = 0.22f + 0.12f * pulse),
+                tertiary.copy(alpha = 0.26f + 0.14f * pulse),
+                primary.copy(alpha = 0.28f + 0.14f * pulse)
+            ),
+            center = Offset(size.width / 2f, size.height / 2f)
+        )
+
+        onDrawWithContent {
+            rotate(rotation, Offset(size.width / 2f, size.height / 2f)) {
+                drawCircle(sweepBrush, radius)
+            }
+            drawContent()
+        }
+    }
 }
