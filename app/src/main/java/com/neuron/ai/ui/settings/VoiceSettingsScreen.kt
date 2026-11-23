@@ -87,7 +87,7 @@ fun VoiceSettingsScreen(
     val modelStatuses by viewModel.modelStatuses.collectAsStateWithLifecycle()
     val isSpeaking by viewModel.isSpeaking.collectAsStateWithLifecycle()
 
-    val themeMode by container.settingsDataStore.themeMode.collectAsStateWithLifecycle(
+    val themeMode by container.settingsRepository.themeMode.collectAsStateWithLifecycle(
         initialValue = com.neuron.ai.core.settings.ThemeMode.SYSTEM
     )
     val isDark = when (themeMode) {
