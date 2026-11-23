@@ -208,6 +208,9 @@ private fun BlockView(
                 com.neuron.ai.ui.chat.RichRecommendationSection(
                     recommendations = listOf(set),
                     responseSpacing = spacing.paragraph,
+                    imageUrls = com.neuron.ai.ui.components.LocalComparisonImages.current,
+                    missingQueries = com.neuron.ai.ui.components.LocalMissingImages.current,
+                    onImagesNeeded = com.neuron.ai.ui.components.LocalOnImagesNeeded.current,
                     modifier = Modifier.padding(vertical = Spacing.xs)
                 )
             }

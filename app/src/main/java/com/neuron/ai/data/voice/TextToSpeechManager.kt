@@ -140,21 +140,17 @@ class TextToSpeechManager(
                 when (settings.activeTtsModelId) {
                     "kokoro-tts-82m" -> {
                         // Studio-quality warm neural female voice
-                        val candidate = engine.voices?.firstOrNull { v ->
-                            !v.isNetworkConnectionRequired && v.features?.contains("female") == true
-                        } ?: engine.voices?.firstOrNull { v -> v.name.contains("female", ignoreCase = true) }
+                        val candidate = selectBestVoiceForPersona(engine.voices, isFemale = true)
                         if (candidate != null) runCatching { engine.voice = candidate }
                         engine.setSpeechRate((0.96f * settings.speechRate).coerceIn(0.5f, 2.0f))
-                        engine.setPitch((1.08f * settings.speechPitch).coerceIn(0.5f, 2.0f))
+                        engine.setPitch((1.20f * settings.speechPitch).coerceIn(0.5f, 2.0f))
                     }
                     "piper-voice-en" -> {
                         // Crisp, authoritative, natural neural male voice
-                        val candidate = engine.voices?.firstOrNull { v ->
-                            !v.isNetworkConnectionRequired && v.features?.contains("male") == true
-                        } ?: engine.voices?.firstOrNull { v -> v.name.contains("male", ignoreCase = true) }
+                        val candidate = selectBestVoiceForPersona(engine.voices, isFemale = false)
                         if (candidate != null) runCatching { engine.voice = candidate }
-                        engine.setSpeechRate((1.04f * settings.speechRate).coerceIn(0.5f, 2.0f))
-                        engine.setPitch((0.92f * settings.speechPitch).coerceIn(0.5f, 2.0f))
+                        engine.setSpeechRate((1.06f * settings.speechRate).coerceIn(0.5f, 2.0f))
+                        engine.setPitch((0.80f * settings.speechPitch).coerceIn(0.5f, 2.0f))
                     }
                     else -> {
                         engine.setSpeechRate(settings.speechRate.coerceIn(0.5f, 2.0f))
@@ -208,6 +204,45 @@ class TextToSpeechManager(
     }
 
     companion object {
+        fun selectBestVoiceForPersona(
+            allVoices: Set<android.speech.tts.Voice>?,
+            isFemale: Boolean,
+            preferredLocale: Locale = Locale.getDefault()
+        ): android.speech.tts.Voice? {
+            if (allVoices.isNullOrEmpty()) return null
+
+            val matchingLang = allVoices.filter {
+                it.locale.language.equals(preferredLocale.language, ignoreCase = true)
+            }.ifEmpty {
+                allVoices.filter { it.locale.language.equals("en", ignoreCase = true) }
+            }.ifEmpty {
+                allVoices.toList()
+            }
+
+            val femaleKeywords = listOf(
+                "female", "woman", "-sfg", "-iol", "-cfl", "-end", "-hia", "-hic", "-efa",
+                "f0", "f1", "voice_2", "voice_4", "eva", "jenny", "samantha"
+            )
+            val maleKeywords = listOf(
+                "male", "man", "-tpd", "-iob", "-iom", "-enc", "-hid", "-hie", "-emc",
+                "m0", "m1", "voice_1", "voice_3", "guy", "alex", "daniel"
+            )
+
+            val targetKeywords = if (isFemale) femaleKeywords else maleKeywords
+            val oppositeKeywords = if (isFemale) maleKeywords else femaleKeywords
+
+            return matchingLang.maxByOrNull { v ->
+                var score = 0
+                val nameLower = v.name.lowercase()
+                if (targetKeywords.any { nameLower.contains(it) }) score += 100
+                if (oppositeKeywords.any { nameLower.contains(it) }) score -= 50
+                if (v.quality == android.speech.tts.Voice.QUALITY_VERY_HIGH) score += 30
+                if (v.quality == android.speech.tts.Voice.QUALITY_HIGH) score += 20
+                if (!v.isNetworkConnectionRequired) score += 10
+                score
+            } ?: matchingLang.firstOrNull()
+        }
+
         fun cleanMarkdownForSpeech(raw: String): String {
             var text = raw
             // Remove code blocks (```...```)

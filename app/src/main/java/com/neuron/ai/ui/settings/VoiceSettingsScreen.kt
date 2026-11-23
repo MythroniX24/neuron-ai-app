@@ -248,6 +248,69 @@ fun VoiceSettingsScreen(
                         onSelect = { viewModel.setTtsEngine(TtsEngineType.AI_MODEL) }
                     )
 
+                    if (settings.ttsEngine == TtsEngineType.AI_MODEL) {
+                        Spacer(Modifier.height(8.dp))
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.Check,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    text = if (settings.activeTtsModelId == "kokoro-tts-82m")
+                                        "Kokoro Studio Neural Female Persona Active"
+                                    else
+                                        "Piper Natural Crisp Male Persona Active",
+                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                        }
+                    } else {
+                        val availableVoices = remember { viewModel.getAvailableVoices() }
+                        if (availableVoices.isNotEmpty()) {
+                            Spacer(Modifier.height(10.dp))
+                            Text(
+                                text = "Installed Device Voice",
+                                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Spacer(Modifier.height(4.dp))
+                            androidx.compose.foundation.lazy.LazyRow(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                item {
+                                    androidx.compose.material3.FilterChip(
+                                        selected = settings.activeVoiceName == null,
+                                        onClick = { viewModel.setActiveVoiceName(null) },
+                                        label = { Text("Default") }
+                                    )
+                                }
+                                items(availableVoices.take(8).size) { idx ->
+                                    val v = availableVoices[idx]
+                                    val isSelected = settings.activeVoiceName == v.name
+                                    val displayLabel = v.name.substringAfterLast("-").ifBlank { v.name.takeLast(8) }
+                                    androidx.compose.material3.FilterChip(
+                                        selected = isSelected,
+                                        onClick = { viewModel.setActiveVoiceName(v.name) },
+                                        label = { Text(displayLabel) }
+                                    )
+                                }
+                            }
+                        }
+                    }
+
                     Spacer(Modifier.height(16.dp))
                     HorizontalDivider(color = cardBorderColor.copy(alpha = 0.5f), thickness = 0.8.dp)
                     Spacer(Modifier.height(16.dp))
@@ -575,7 +638,7 @@ private fun VoiceModelDownloadCard(
                                     )
                                     Spacer(Modifier.width(6.dp))
                                     Text(
-                                        text = "In Use",
+                                        text = "In Use (Active Profile)",
                                         style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
                                         color = MaterialTheme.colorScheme.primary
                                     )

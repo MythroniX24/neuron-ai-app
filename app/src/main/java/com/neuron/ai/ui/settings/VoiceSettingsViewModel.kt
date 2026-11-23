@@ -93,16 +93,18 @@ class VoiceSettingsViewModel(
             val settings = voiceSettings.value
             val sampleText = if (settings.ttsEngine == TtsEngineType.AI_MODEL) {
                 when (settings.activeTtsModelId) {
-                    "kokoro-tts-82m" -> "Hello! Kokoro Studio Neural Voice is active. How can I help you today?"
-                    "piper-voice-en" -> "Hello! Piper Natural Voice Pack is active. Ready to assist you."
-                    else -> "Hello! On-device AI voice synthesis is active."
+                    "kokoro-tts-82m" -> "Hello! I am your Kokoro Studio neural voice. My tone is warm, natural, and expressive. How can I assist you today?"
+                    "piper-voice-en" -> "Greetings! Piper neural voice engine is online and active. Ready to assist with your questions and tasks."
+                    else -> "Hello! On-device neural AI voice synthesis is active and ready."
                 }
             } else {
-                "Hello! System Text-to-Speech is active. How can I help you today?"
+                "This is a test of the Android system text-to-speech voice."
             }
             ttsManager.speak(sampleText)
         }
     }
+
+    fun getAvailableVoices(): List<android.speech.tts.Voice> = ttsManager.getAvailableVoices()
 
     fun stopVoice() {
         ttsManager.stop()

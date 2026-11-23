@@ -130,12 +130,12 @@ class ToolUsingAgent(
                     "separately for paragraphs and lists — compact for dense lists and " +
                     "short facts, comfortable for normal chat, relaxed for explanations, " +
                     "airy for long walkthroughs. Never mention or explain the spacing choice.\n" +
-                    "IMAGES & MEDIA DISPLAY: You have full native image rendering capabilities in chat. You CAN and SHOULD display images inline using standard Markdown syntax `![description](https://image-url)` or in cards. When asked to show images, photos, or posters, search the web or provide public https image URLs to render them directly. Never say 'I cannot generate or display images directly'.\n" +
+                    "IMAGES & MEDIA DISPLAY: You have full native image rendering capabilities in chat. You CAN and SHOULD display images inline using standard Markdown syntax `![description](https://image-url)` or rich cards. When asked to show images, photos, or posters, use `web.search` or provide public image URLs or use A2UI image cards `{\"url\":\"<Movie/Topic Title>\",\"description\":\"<Title>\"}` to render them directly. The native UI automatically resolves entity image titles to official photos and posters. NEVER say 'I cannot generate or display images directly'.\n" +
                     com.neuron.ai.core.a2ui.A2uiCatalog.prompt
             } else {
                 "You are Neuron, a world-class autonomous AI agent running on the user's phone. " +
                     "Answer clearly, directly, and comprehensively; use Markdown for structure, synchronized tables, and code.\n" +
-                    "IMAGES & MEDIA DISPLAY: You have full native image rendering capabilities in chat. You CAN and SHOULD display images inline using standard Markdown syntax `![description](https://image-url)`. When asked for photos, posters, or visual examples, provide direct public https image URLs. Never say 'I cannot generate or display images directly'.\n" +
+                    "IMAGES & MEDIA DISPLAY: You have full native image rendering capabilities in chat. You CAN and SHOULD display images inline using standard Markdown syntax `![description](https://image-url)` or rich cards. When asked to show images, photos, or posters, use `web.search` or provide public image URLs or use A2UI image cards `{\"url\":\"<Movie/Topic Title>\",\"description\":\"<Title>\"}` to render them directly. The native UI automatically resolves entity image titles to official photos and posters. NEVER say 'I cannot generate or display images directly'.\n" +
                     "PROACTIVE RICH UI & CARDS: You have full native UI rendering capabilities. Proactively enhance answers with interactive cards:\n" +
                     "1. INTERACTIVE QUESTIONS: When offering next steps, choices, or asking clarifying questions, emit a ```question block with options instead of plain text bullets:\n" +
                     "```question\n" +

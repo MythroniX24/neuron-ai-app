@@ -520,13 +520,8 @@ fun SmartEntityImage(
         contentAlignment = Alignment.Center
     ) {
         when {
-            url != null -> AsyncImage(
-                model = ImageRequest.Builder(LocalContext.current)
-                    .data(url)
-                    .crossfade(100)
-                    .memoryCachePolicy(CachePolicy.ENABLED)
-                    .diskCachePolicy(CachePolicy.ENABLED)
-                    .build(),
+            url != null -> com.neuron.ai.ui.components.NeuronAsyncImage(
+                model = url,
                 contentDescription = contentDescription,
                 contentScale = contentScale,
                 modifier = Modifier.fillMaxSize()

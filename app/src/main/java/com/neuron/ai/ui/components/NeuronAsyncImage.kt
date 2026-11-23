@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.BrokenImage
 import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -22,7 +21,12 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -38,14 +42,21 @@ import coil.compose.SubcomposeAsyncImage
 import coil.compose.SubcomposeAsyncImageContent
 import coil.request.CachePolicy
 import coil.request.ImageRequest
+import com.neuron.ai.core.web.EntityImageResolver
 import com.neuron.ai.ui.theme.Radius
 import com.neuron.ai.ui.theme.Spacing
+
+val LocalEntityImageResolver = staticCompositionLocalOf<EntityImageResolver?> { null }
+val LocalComparisonImages = staticCompositionLocalOf<Map<String, String>> { emptyMap() }
+val LocalMissingImages = staticCompositionLocalOf<Set<String>> { emptySet() }
+val LocalOnImagesNeeded = staticCompositionLocalOf<(List<String>) -> Unit> { {} }
 
 /**
  * High-performance, low-latency image composable for chat and UI cards.
  *
  * Configured with standard browser headers to prevent CDN 403 Forbidden drops
- * (e.g. Unsplash, Wikimedia), with smooth loading placeholders and graceful error fallbacks.
+ * (e.g. Unsplash, Wikimedia), with automatic entity query resolution, smooth
+ * loading placeholders and graceful error fallbacks.
  */
 @Composable
 fun NeuronAsyncImage(
@@ -59,17 +70,56 @@ fun NeuronAsyncImage(
     error: @Composable (BoxScope.() -> Unit)? = null
 ) {
     val context = LocalContext.current
+    val imageResolver = LocalEntityImageResolver.current
+    val comparisonImages = LocalComparisonImages.current
+    val onImagesNeeded = LocalOnImagesNeeded.current
 
-    val sanitizedModel = remember(model) {
-        if (model is String) {
-            val trimmed = model.trim().trim('`', '"', '\'')
+    var resolvedUrl by remember(model) { mutableStateOf<String?>(null) }
+    var resolutionAttempted by remember(model) { mutableStateOf(false) }
+
+    val sanitizedModel = remember(model, resolvedUrl) {
+        val target = resolvedUrl ?: model
+        if (target is String) {
+            val trimmed = target.trim().trim('`', '"', '\'')
             if (trimmed.startsWith("http://")) {
                 "https://${trimmed.removePrefix("http://")}"
             } else {
                 trimmed
             }
         } else {
-            model
+            target
+        }
+    }
+
+    // Auto-resolve non-URL entity queries (e.g. "Talk to Me (2022) Movie Poster")
+    LaunchedEffect(model, comparisonImages) {
+        if (model is String && resolvedUrl == null) {
+            val trimmed = model.trim().trim('`', '"', '\'')
+            val isDirectUrl = trimmed.startsWith("http://", ignoreCase = true) ||
+                trimmed.startsWith("https://", ignoreCase = true) ||
+                trimmed.startsWith("content://", ignoreCase = true) ||
+                trimmed.startsWith("file://", ignoreCase = true)
+
+            if (!isDirectUrl && trimmed.isNotBlank()) {
+                val cached = comparisonImages[trimmed]
+                if (!cached.isNullOrBlank()) {
+                    resolvedUrl = cached
+                } else if (imageResolver != null && !resolutionAttempted) {
+                    resolutionAttempted = true
+                    onImagesNeeded(listOf(trimmed))
+                    runCatching {
+                        val cleanQuery = trimmed.removeSuffix(" Movie Poster")
+                            .removeSuffix(" Poster")
+                            .removeSuffix(" Image")
+                            .removeSuffix(" Picture")
+                            .trim()
+                        val fetched = imageResolver.resolve(cleanQuery)
+                        if (!fetched.isNullOrBlank()) {
+                            resolvedUrl = fetched
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -115,6 +165,19 @@ fun NeuronAsyncImage(
             }
         },
         error = {
+            // When an image fails to load, attempt fallback resolution using contentDescription
+            LaunchedEffect(contentDescription) {
+                if (!resolutionAttempted && resolvedUrl == null && !contentDescription.isNullOrBlank() && imageResolver != null) {
+                    resolutionAttempted = true
+                    runCatching {
+                        val fetched = imageResolver.resolve(contentDescription.trim())
+                        if (!fetched.isNullOrBlank()) {
+                            resolvedUrl = fetched
+                        }
+                    }
+                }
+            }
+
             if (error != null) {
                 error()
             } else {

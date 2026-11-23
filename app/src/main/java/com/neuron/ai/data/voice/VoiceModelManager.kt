@@ -8,6 +8,7 @@ import com.neuron.ai.core.voice.VoiceModelStatus
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
+import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -17,7 +18,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 
@@ -25,8 +25,15 @@ class VoiceModelManager(
     private val context: Context,
     private val dispatchers: DispatcherProvider,
     private val logger: Logger? = null,
-    private val client: OkHttpClient = OkHttpClient.Builder().build()
+    httpClient: OkHttpClient? = null
 ) {
+    private val client: OkHttpClient = (httpClient ?: OkHttpClient()).newBuilder()
+        .connectTimeout(30, TimeUnit.SECONDS)
+        .readTimeout(90, TimeUnit.SECONDS)
+        .followRedirects(true)
+        .followSslRedirects(true)
+        .build()
+
     private val scope = CoroutineScope(SupervisorJob() + dispatchers.io)
     val modelsDir = File(context.filesDir, "voice_models").also { it.mkdirs() }
 
@@ -52,7 +59,7 @@ class VoiceModelManager(
         val current = mutableMapOf<String, VoiceModelStatus>()
         VoiceModelDefinition.PRESET_MODELS.forEach { def ->
             val file = getModelFile(def)
-            if (file.exists() && file.length() >= (def.sizeBytes * 0.95)) {
+            if (file.exists() && file.length() >= (def.sizeBytes * 0.90)) {
                 current[def.id] = VoiceModelStatus.Downloaded
             } else if (downloadJobs.containsKey(def.id)) {
                 // Keep active downloading state
@@ -73,46 +80,70 @@ class VoiceModelManager(
         val job = scope.launch {
             _statusMap.update { it + (definition.id to VoiceModelStatus.Downloading(0, 0, definition.sizeBytes)) }
             try {
-                val request = Request.Builder()
-                    .url(definition.downloadUrl)
-                    .build()
+                val urlsToTry = listOfNotNull(definition.downloadUrl, definition.fallbackUrl).distinct()
+                var downloadedSuccessfully = false
+                var lastException: Exception? = null
 
-                client.newCall(request).execute().use { response ->
-                    if (!response.isSuccessful) {
-                        throw IOException("HTTP ${response.code} downloading ${definition.name}")
-                    }
-                    val body = response.body ?: throw IOException("Empty response body")
-                    val totalBytes = if (body.contentLength() > 0) body.contentLength() else definition.sizeBytes
+                for (url in urlsToTry) {
+                    try {
+                        val request = Request.Builder()
+                            .url(url)
+                            .header("User-Agent", "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36")
+                            .header("Accept", "*/*")
+                            .build()
 
-                    tempFile.parentFile?.mkdirs()
-                    body.byteStream().use { input ->
-                        FileOutputStream(tempFile).use { output ->
-                            val buffer = ByteArray(32 * 1024)
-                            var bytesRead: Int
-                            var downloaded = 0L
-                            var lastPercent = 0
+                        client.newCall(request).execute().use { response ->
+                            if (!response.isSuccessful) {
+                                throw IOException("HTTP ${response.code} downloading ${definition.name} from $url")
+                            }
+                            val body = response.body ?: throw IOException("Empty response body from $url")
+                            val totalBytes = if (body.contentLength() > 0) body.contentLength() else definition.sizeBytes
 
-                            while (input.read(buffer).also { bytesRead = it } != -1) {
-                                output.write(buffer, 0, bytesRead)
-                                downloaded += bytesRead
-                                val percent = ((downloaded.toDouble() / totalBytes) * 100).toInt().coerceIn(0, 100)
-                                if (percent != lastPercent) {
-                                    lastPercent = percent
-                                    _statusMap.update {
-                                        it + (definition.id to VoiceModelStatus.Downloading(percent, downloaded, totalBytes))
+                            tempFile.parentFile?.mkdirs()
+                            body.byteStream().use { input ->
+                                FileOutputStream(tempFile).use { output ->
+                                    val buffer = ByteArray(64 * 1024)
+                                    var bytesRead: Int
+                                    var downloaded = 0L
+                                    var lastPercent = 0
+
+                                    while (input.read(buffer).also { bytesRead = it } != -1) {
+                                        output.write(buffer, 0, bytesRead)
+                                        downloaded += bytesRead
+                                        val percent = ((downloaded.toDouble() / totalBytes) * 100).toInt().coerceIn(0, 100)
+                                        if (percent != lastPercent) {
+                                            lastPercent = percent
+                                            _statusMap.update {
+                                                it + (definition.id to VoiceModelStatus.Downloading(percent, downloaded, totalBytes))
+                                            }
+                                        }
                                     }
+                                    output.flush()
                                 }
                             }
-                            output.flush()
-                        }
-                    }
 
-                    if (tempFile.renameTo(targetFile)) {
-                        _statusMap.update { it + (definition.id to VoiceModelStatus.Downloaded) }
-                        logger?.d("VoiceModelManager", "Downloaded voice model: ${definition.name}")
-                    } else {
-                        throw IOException("Failed to finalize downloaded file")
+                            if (tempFile.exists() && tempFile.length() > 0) {
+                                if (targetFile.exists()) targetFile.delete()
+                                if (tempFile.renameTo(targetFile)) {
+                                    downloadedSuccessfully = true
+                                    _statusMap.update { it + (definition.id to VoiceModelStatus.Downloaded) }
+                                    logger?.d("VoiceModelManager", "Downloaded voice model: ${definition.name}")
+                                    return@launch
+                                } else {
+                                    throw IOException("Failed to rename temporary download file to target")
+                                }
+                            }
+                        }
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        lastException = e
+                        logger?.w("VoiceModelManager", "Failed mirror $url for ${definition.name}: ${e.message}")
                     }
+                }
+
+                if (!downloadedSuccessfully) {
+                    throw lastException ?: IOException("Failed to download ${definition.name} from any available source")
                 }
             } catch (e: CancellationException) {
                 tempFile.delete()

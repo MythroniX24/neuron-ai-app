@@ -595,6 +595,7 @@ private fun A2uiImage(
         ?: resolver.string(component, "uri", scope)
         ?: resolver.string(component, "imageUrl", scope)
         ?: resolver.string(component, "image_url", scope)
+        ?: resolver.string(component, "description", scope)
         ?: ""
     if (raw.isBlank()) return
     val model = remember(raw) {

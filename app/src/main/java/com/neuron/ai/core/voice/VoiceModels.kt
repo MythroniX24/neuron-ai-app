@@ -57,7 +57,8 @@ data class VoiceModelDefinition(
     val description: String,
     val sizeBytes: Long,
     val downloadUrl: String,
-    val fileName: String
+    val fileName: String,
+    val fallbackUrl: String? = null
 ) {
     val formattedSize: String
         get() {
@@ -74,7 +75,8 @@ data class VoiceModelDefinition(
                 description = "Ultra-fast neural speech recognition. Low RAM (~75 MB), supports 99+ languages.",
                 sizeBytes = 77_700_000L,
                 downloadUrl = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin",
-                fileName = "ggml-whisper-tiny.bin"
+                fileName = "ggml-whisper-tiny.bin",
+                fallbackUrl = "https://hf-mirror.com/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin"
             ),
             VoiceModelDefinition(
                 id = "whisper-base-gguf",
@@ -83,7 +85,8 @@ data class VoiceModelDefinition(
                 description = "Higher accuracy on technical terms and accented speech (~145 MB).",
                 sizeBytes = 148_000_000L,
                 downloadUrl = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin",
-                fileName = "ggml-whisper-base.bin"
+                fileName = "ggml-whisper-base.bin",
+                fallbackUrl = "https://hf-mirror.com/ggerganov/whisper.cpp/resolve/main/ggml-base.bin"
             ),
             VoiceModelDefinition(
                 id = "kokoro-tts-82m",
@@ -92,7 +95,8 @@ data class VoiceModelDefinition(
                 description = "Studio-quality neural text-to-speech. Natural prosody and warm expression (~88 MB).",
                 sizeBytes = 92_360_543L,
                 downloadUrl = "https://huggingface.co/onnx-community/Kokoro-82M-ONNX/resolve/main/onnx/model_quantized.onnx",
-                fileName = "kokoro-v0_19-quantized.onnx"
+                fileName = "kokoro-v0_19-quantized.onnx",
+                fallbackUrl = "https://hf-mirror.com/onnx-community/Kokoro-82M-ONNX/resolve/main/onnx/model_quantized.onnx"
             ),
             VoiceModelDefinition(
                 id = "piper-voice-en",
@@ -101,7 +105,8 @@ data class VoiceModelDefinition(
                 description = "Crisp, low-latency neural speech synthesis (~63 MB).",
                 sizeBytes = 63_000_000L,
                 downloadUrl = "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/lessac/medium/en_US-lessac-medium.onnx",
-                fileName = "piper-lessac-medium.onnx"
+                fileName = "piper-lessac-medium.onnx",
+                fallbackUrl = "https://hf-mirror.com/rhasspy/piper-voices/resolve/main/en/en_US/lessac/medium/en_US-lessac-medium.onnx"
             )
         )
     }

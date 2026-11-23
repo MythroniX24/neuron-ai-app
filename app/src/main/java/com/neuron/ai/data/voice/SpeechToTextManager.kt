@@ -71,7 +71,17 @@ class SpeechToTextManager(
             }
 
             try {
-                recognizer = SpeechRecognizer.createSpeechRecognizer(context).apply {
+                val useOnDevice = engineType == SttEngineType.AI_MODEL &&
+                    android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S &&
+                    SpeechRecognizer.isOnDeviceRecognitionAvailable(context)
+
+                val newRecognizer = if (useOnDevice) {
+                    SpeechRecognizer.createOnDeviceSpeechRecognizer(context)
+                } else {
+                    SpeechRecognizer.createSpeechRecognizer(context)
+                }
+
+                recognizer = newRecognizer.apply {
                     setRecognitionListener(object : RecognitionListener {
                         override fun onReadyForSpeech(params: Bundle?) {
                             _isListening.value = true
@@ -143,6 +153,7 @@ class SpeechToTextManager(
                     putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault())
                     if (engineType == SttEngineType.AI_MODEL) {
                         putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
+                        putExtra("android.speech.extra.DICTATION_MODE", true)
                     }
                 }
 

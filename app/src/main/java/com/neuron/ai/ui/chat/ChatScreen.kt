@@ -254,22 +254,25 @@ fun ChatScreen(
     val isTtsSpeaking by ttsManager.isSpeaking.collectAsStateWithLifecycle()
     val ttsUtteranceId by ttsManager.currentUtteranceId.collectAsStateWithLifecycle()
     val activeSpeechProgress by ttsManager.activeSpeechProgress.collectAsStateWithLifecycle()
+    var voiceBaseDraft by remember { mutableStateOf("") }
 
     val recordAudioPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { isGranted ->
         if (isGranted) {
+            voiceBaseDraft = draft.trim()
             sttManager.startListening(
                 onPartial = { partial ->
-                    if (draft.isBlank()) {
-                        draft = partial
-                    } else {
-                        val base = draft.substringBeforeLast(" ").trim()
-                        draft = if (base.isEmpty()) partial else "$base $partial"
+                    val clean = partial.trim()
+                    if (clean.isNotBlank()) {
+                        draft = if (voiceBaseDraft.isEmpty()) clean else "$voiceBaseDraft $clean"
                     }
                 },
                 onFinal = { finalResult ->
-                    draft = if (draft.isBlank()) finalResult else "${draft.trim()} $finalResult"
+                    val clean = finalResult.trim()
+                    if (clean.isNotBlank()) {
+                        draft = if (voiceBaseDraft.isEmpty()) clean else "$voiceBaseDraft $clean"
+                    }
                 },
                 onError = { error ->
                     android.widget.Toast.makeText(context, error, android.widget.Toast.LENGTH_SHORT).show()
@@ -286,7 +289,7 @@ fun ChatScreen(
         if (result.resultCode == android.app.Activity.RESULT_OK) {
             val spoken = result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()?.trim()
             if (!spoken.isNullOrBlank()) {
-                draft = if (draft.isBlank()) spoken else "${draft.trim()} $spoken"
+                draft = if (voiceBaseDraft.isEmpty()) spoken else "$voiceBaseDraft $spoken"
             }
         }
     }
@@ -295,6 +298,7 @@ fun ChatScreen(
     val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
 
     fun launchSpeechIntentFallback() {
+        voiceBaseDraft = draft.trim()
         runCatching {
             val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
@@ -319,20 +323,22 @@ fun ChatScreen(
             if (hasPermission) {
                 keyboardController?.hide()
                 focusManager.clearFocus()
+                voiceBaseDraft = draft.trim()
                 if (!sttManager.isRecognitionAvailable()) {
                     launchSpeechIntentFallback()
                 } else {
                     sttManager.startListening(
                         onPartial = { partial ->
-                            if (draft.isBlank()) {
-                                draft = partial
-                            } else {
-                                val base = draft.substringBeforeLast(" ").trim()
-                                draft = if (base.isEmpty()) partial else "$base $partial"
+                            val clean = partial.trim()
+                            if (clean.isNotBlank()) {
+                                draft = if (voiceBaseDraft.isEmpty()) clean else "$voiceBaseDraft $clean"
                             }
                         },
                         onFinal = { finalResult ->
-                            draft = if (draft.isBlank()) finalResult else "${draft.trim()} $finalResult"
+                            val clean = finalResult.trim()
+                            if (clean.isNotBlank()) {
+                                draft = if (voiceBaseDraft.isEmpty()) clean else "$voiceBaseDraft $clean"
+                            }
                         },
                         onError = { error ->
                             if (error.contains("not available", ignoreCase = true) || error.contains("Client error", ignoreCase = true)) {
@@ -440,7 +446,11 @@ fun ChatScreen(
             { answer: String ->
                 viewModel.submitQuestionAnswer(answer)
             }
-        }
+        },
+        com.neuron.ai.ui.components.LocalComparisonImages provides comparisonImages,
+        com.neuron.ai.ui.components.LocalMissingImages provides missingImages,
+        com.neuron.ai.ui.components.LocalOnImagesNeeded provides viewModel::requestComparisonImages,
+        com.neuron.ai.ui.components.LocalEntityImageResolver provides container.comparisonImageResolver
     ) {
     Box(Modifier.fillMaxSize()) {
     Column(

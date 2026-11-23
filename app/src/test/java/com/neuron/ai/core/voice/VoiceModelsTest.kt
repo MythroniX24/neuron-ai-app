@@ -42,6 +42,7 @@ class VoiceModelsTest {
             assertTrue("Model name must not be blank", model.name.isNotBlank())
             assertTrue("Model file name must not be blank", model.fileName.isNotBlank())
             assertTrue("Model downloadUrl must be valid https URL", model.downloadUrl.startsWith("https://"))
+            assertTrue("Model fallbackUrl must be valid https URL if present", model.fallbackUrl == null || model.fallbackUrl!!.startsWith("https://"))
             assertTrue("Model size must be positive", model.sizeBytes > 0)
             assertNotNull("Formatted size must not be null", model.formattedSize)
         }
@@ -146,5 +147,32 @@ class VoiceModelsTest {
         val thirdPrior = text.substring(0, thirdStart)
         val thirdOcc = pattern.findAll(thirdPrior).count()
         assertEquals(2, thirdOcc)
+    }
+
+    @Test
+    fun testVoiceInputDraftNoDuplicateLogic() {
+        fun computeDraft(base: String, speech: String): String {
+            val clean = speech.trim()
+            if (clean.isBlank()) return base
+            return if (base.isEmpty()) clean else "$base $clean"
+        }
+
+        // Case 1: user starts speaking from empty draft
+        var voiceBase = ""
+        var currentDraft = computeDraft(voiceBase, "Hello")
+        assertEquals("Hello", currentDraft)
+        currentDraft = computeDraft(voiceBase, "Hello world")
+        assertEquals("Hello world", currentDraft)
+        currentDraft = computeDraft(voiceBase, "Hello world") // final
+        assertEquals("Hello world", currentDraft)
+
+        // Case 2: user had prior text "Explain"
+        voiceBase = "Explain"
+        currentDraft = computeDraft(voiceBase, "quantum")
+        assertEquals("Explain quantum", currentDraft)
+        currentDraft = computeDraft(voiceBase, "quantum computing")
+        assertEquals("Explain quantum computing", currentDraft)
+        currentDraft = computeDraft(voiceBase, "quantum computing") // final
+        assertEquals("Explain quantum computing", currentDraft)
     }
 }
