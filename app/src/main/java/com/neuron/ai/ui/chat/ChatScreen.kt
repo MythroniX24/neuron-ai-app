@@ -926,17 +926,28 @@ private fun ChatTopBar(
                 onDismissRequest = { menuExpanded = false },
                 properties = androidx.compose.ui.window.PopupProperties(focusable = true)
             ) {
-            Surface(
-                shape = RoundedCornerShape(16.dp),
-                color = MaterialTheme.colorScheme.surface,
-                tonalElevation = 3.dp,
-                shadowElevation = 12.dp,
-                border = androidx.compose.foundation.BorderStroke(
-                    1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.4f)
-                ),
-                modifier = Modifier
-                    .widthIn(min = 240.dp, max = 320.dp)
-            ) {
+                var popupVisible by remember { mutableStateOf(false) }
+                LaunchedEffect(Unit) {
+                    popupVisible = true
+                }
+                AnimatedVisibility(
+                    visible = popupVisible,
+                    enter = fadeIn(tween(180)) +
+                        scaleIn(tween(220, easing = FastOutSlowInEasing), initialScale = 0.86f, transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0.5f, 0f)) +
+                        slideInVertically(tween(220, easing = FastOutSlowInEasing)) { -it / 6 },
+                    exit = fadeOut(tween(120)) + scaleOut(tween(120), targetScale = 0.9f)
+                ) {
+                    Surface(
+                        shape = RoundedCornerShape(16.dp),
+                        color = MaterialTheme.colorScheme.surface,
+                        tonalElevation = 4.dp,
+                        shadowElevation = 14.dp,
+                        border = androidx.compose.foundation.BorderStroke(
+                            1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)
+                        ),
+                        modifier = Modifier
+                            .widthIn(min = 250.dp, max = 320.dp)
+                    ) {
                 Column(Modifier.padding(vertical = Spacing.sm)) {
                     Text(
                         text = "Select model",
@@ -1085,6 +1096,7 @@ private fun ChatTopBar(
                     }
                 }
             }
+            } // AnimatedVisibility
             } // Popup content
         } // if (bounds != null)
     } // if (menuExpanded)

@@ -94,6 +94,15 @@ class WikipediaImageResolver(
             }
         }
 
+        // Secondary fallback: DuckDuckGo Instant Answer API for movies, games, brands
+        if (found.isNullOrBlank()) {
+            val ddgResult = runCatching { lookupDuckDuckGo(query) }.getOrNull()
+            if (!ddgResult.isNullOrBlank()) {
+                found = ddgResult
+                diagnostics?.log("IMAGE", "resolved \"$query\"", "via DuckDuckGo")
+            }
+        }
+
         synchronized(cache) {
             cache[key] = CacheEntry(found, System.currentTimeMillis())
         }
@@ -164,6 +173,37 @@ class WikipediaImageResolver(
         val lower = url.lowercase()
         if (!lower.startsWith("https://")) return false
         return !lower.contains(" ") && !lower.contains("javascript:")
+    }
+
+    /** Fallback search via DuckDuckGo Instant Answer API */
+    private fun lookupDuckDuckGo(query: String): String? {
+        val httpUrl = runCatching {
+            "https://api.duckduckgo.com/".toHttpUrl().newBuilder()
+                .addQueryParameter("q", query)
+                .addQueryParameter("format", "json")
+                .addQueryParameter("no_redirect", "1")
+                .addQueryParameter("no_html", "1")
+                .build()
+        }.getOrNull() ?: return null
+
+        val request = Request.Builder()
+            .url(httpUrl)
+            .header("User-Agent", "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36")
+            .header("Accept", "application/json")
+            .get()
+            .build()
+
+        client.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) return null
+            val body = response.body?.string() ?: return null
+            val root = runCatching { json.parseToJsonElement(body) as? JsonObject }.getOrNull() ?: return null
+            val img = (root["Image"] as? JsonPrimitive)?.contentOrNull?.trim()
+            if (!img.isNullOrBlank()) {
+                val fullUrl = if (img.startsWith("http")) img else "https://duckduckgo.com$img"
+                if (isSafeImageUrl(fullUrl)) return fullUrl
+            }
+        }
+        return null
     }
 
     companion object {

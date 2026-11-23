@@ -222,16 +222,6 @@ fun SettingsScreen(
                     },
                     onClick = onOpenConnectedApps
                 )
-
-                RowDivider(borderColor = cardBorderColor)
-
-                // 4. Tasks
-                SettingsItemRow(
-                    icon = Icons.Outlined.Schedule,
-                    iconTint = Color(0xFFE11D48),
-                    title = "Tasks",
-                    onClick = onOpenTasks
-                )
             }
 
             Spacer(Modifier.height(12.dp))

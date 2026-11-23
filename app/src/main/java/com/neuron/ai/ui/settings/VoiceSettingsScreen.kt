@@ -87,7 +87,14 @@ fun VoiceSettingsScreen(
     val modelStatuses by viewModel.modelStatuses.collectAsStateWithLifecycle()
     val isSpeaking by viewModel.isSpeaking.collectAsStateWithLifecycle()
 
-    val isDark = isSystemInDarkTheme()
+    val themeMode by container.settingsDataStore.themeMode.collectAsStateWithLifecycle(
+        initialValue = com.neuron.ai.core.settings.ThemeMode.SYSTEM
+    )
+    val isDark = when (themeMode) {
+        com.neuron.ai.core.settings.ThemeMode.LIGHT -> false
+        com.neuron.ai.core.settings.ThemeMode.DARK -> true
+        com.neuron.ai.core.settings.ThemeMode.SYSTEM -> isSystemInDarkTheme()
+    }
     val screenBg = if (isDark) MaterialTheme.colorScheme.background else Color(0xFFF6F7F9)
     val cardBg = if (isDark) MaterialTheme.colorScheme.surface else Color(0xFFFFFFFF)
     val cardBorderColor = if (isDark) Color(0xFF2A2F37) else Color(0xFFE5E7EB)

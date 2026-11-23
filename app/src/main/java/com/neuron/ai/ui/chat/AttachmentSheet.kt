@@ -20,13 +20,13 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.Photo
 import androidx.compose.material.icons.outlined.PhotoCamera
 import androidx.compose.material.icons.outlined.Public
 import androidx.compose.material.icons.outlined.Terminal
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -37,17 +37,20 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.neuron.ai.ui.components.entrancePop
 import com.neuron.ai.ui.components.pressScale
 import com.neuron.ai.ui.theme.Spacing
 
 /**
- * Clean, professional, modern composer "+" panel:
- * A single, cohesive bottom sheet for attachments and agent capabilities.
- * Built with subtle neutral surfaces, crisp borders, and calm monochrome iconography.
+ * Ultra-clean, modern, professional Composer Actions & Capabilities sheet.
+ * Fast, tactile action cards for attachments and streamlined agent tool toggles.
  */
 @Composable
 fun AttachmentSheet(
@@ -60,11 +63,14 @@ fun AttachmentSheet(
     browserEnabled: Boolean,
     onToggleBrowser: (Boolean) -> Unit
 ) {
+    val haptic = LocalHapticFeedback.current
+
     Surface(
-        shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp),
+        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
         color = MaterialTheme.colorScheme.surface,
-        tonalElevation = 4.dp,
-        shadowElevation = 12.dp,
+        tonalElevation = 6.dp,
+        shadowElevation = 16.dp,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
         modifier = Modifier.fillMaxWidth()
     ) {
         Column(
@@ -72,51 +78,56 @@ fun AttachmentSheet(
                 .fillMaxWidth()
                 .navigationBarsPadding()
                 .verticalScroll(rememberScrollState())
-                .padding(bottom = Spacing.md)
+                .padding(bottom = Spacing.lg)
         ) {
             // Sleek centered drag handle
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(top = 10.dp, bottom = 4.dp),
+                    .padding(top = 10.dp, bottom = 6.dp),
                 contentAlignment = Alignment.Center
             ) {
                 Box(
                     modifier = Modifier
-                        .width(36.dp)
+                        .width(40.dp)
                         .height(4.dp)
                         .clip(RoundedCornerShape(2.dp))
-                        .background(MaterialTheme.colorScheme.outlineVariant)
+                        .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.8f))
                 )
             }
 
-            // Header: Minimal, crisp, professional
+            // Header: Clean, minimal & branded
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = Spacing.lg, vertical = Spacing.sm)
+                    .padding(horizontal = Spacing.lg, vertical = Spacing.xs)
             ) {
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        text = "Chat controls",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                    Text(
-                        text = "Attach media and configure agent tools",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
+                Text(
+                    text = "✦",
+                    color = MaterialTheme.colorScheme.primary,
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                    modifier = Modifier.padding(end = 8.dp)
+                )
+                Text(
+                    text = "Attach & Capabilities",
+                    style = MaterialTheme.typography.titleMedium.copy(
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = (-0.2).sp
+                    ),
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.weight(1f)
+                )
                 Box(
                     contentAlignment = Alignment.Center,
                     modifier = Modifier
                         .size(32.dp)
                         .clip(CircleShape)
-                        .background(MaterialTheme.colorScheme.surfaceVariant)
-                        .clickable { onDismiss() }
+                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f))
+                        .clickable {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            onDismiss()
+                        }
                 ) {
                     Icon(
                         Icons.Outlined.Close,
@@ -127,41 +138,47 @@ fun AttachmentSheet(
                 }
             }
 
-            Spacer(Modifier.height(Spacing.sm))
+            Spacer(Modifier.height(Spacing.md))
 
-            // Action tiles: Clean, neutral, high-contrast monochrome
+            // Action cards: Camera, Photos, Files (tactile, modern colored capsules)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = Spacing.lg),
-                horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                ActionTile(
+                QuickActionCard(
                     icon = Icons.Outlined.PhotoCamera,
                     title = "Camera",
-                    hint = "Take photo",
+                    accentColor = Color(0xFF8B5CF6),
+                    delayMs = 40,
                     modifier = Modifier.weight(1f),
                     onClick = {
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                         onDismiss()
                         onCamera()
                     }
                 )
-                ActionTile(
+                QuickActionCard(
                     icon = Icons.Outlined.Photo,
-                    title = "Photos",
-                    hint = "From gallery",
+                    title = "Gallery",
+                    accentColor = Color(0xFF06B6D4),
+                    delayMs = 80,
                     modifier = Modifier.weight(1f),
                     onClick = {
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                         onDismiss()
                         onPhotos()
                     }
                 )
-                ActionTile(
+                QuickActionCard(
                     icon = Icons.Outlined.Description,
                     title = "Files",
-                    hint = "Any document",
+                    accentColor = Color(0xFFF59E0B),
+                    delayMs = 120,
                     modifier = Modifier.weight(1f),
                     onClick = {
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                         onDismiss()
                         onFiles()
                     }
@@ -170,186 +187,163 @@ fun AttachmentSheet(
 
             Spacer(Modifier.height(Spacing.lg))
 
-            SectionHeader("Tools & access")
-
-            ToolRow(
-                icon = Icons.Outlined.Public,
-                title = "Browser",
-                subtitle = if (browserEnabled) {
-                    "On — AI can open and read web pages in this chat"
-                } else {
-                    "Off — browsing tools are unavailable"
-                },
-                enabled = browserEnabled,
-                onToggle = { onToggleBrowser(!browserEnabled) },
-                modifier = Modifier.padding(horizontal = Spacing.lg, vertical = Spacing.xs)
+            // Agent Capabilities Group
+            Text(
+                text = "CAPABILITIES",
+                style = MaterialTheme.typography.labelSmall.copy(
+                    letterSpacing = 1.5.sp,
+                    fontWeight = FontWeight.Bold
+                ),
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(horizontal = Spacing.lg, vertical = 4.dp)
             )
 
-            ToolRow(
-                icon = Icons.Outlined.Terminal,
-                title = "Terminal",
-                subtitle = if (terminalEnabled) {
-                    "On — AI can run shell commands on this phone"
-                } else {
-                    "Off — command tools are unavailable"
-                },
-                enabled = terminalEnabled,
-                onToggle = { onToggleTerminal(!terminalEnabled) },
-                modifier = Modifier.padding(horizontal = Spacing.lg, vertical = Spacing.xs)
-            )
+            Spacer(Modifier.height(Spacing.xs))
 
-            // Confirmation note
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.padding(
-                    start = Spacing.lg,
-                    end = Spacing.lg,
-                    top = Spacing.md,
-                    bottom = Spacing.sm
-                )
+            Surface(
+                shape = RoundedCornerShape(16.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = Spacing.lg)
             ) {
-                Icon(
-                    Icons.Outlined.Check,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(13.dp)
-                )
-                Spacer(Modifier.width(Spacing.xs))
-                Text(
-                    text = "Changes are saved automatically",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                Column {
+                    CapabilitySwitchRow(
+                        icon = Icons.Outlined.Public,
+                        title = "Web Search & Browsing",
+                        enabled = browserEnabled,
+                        iconTint = Color(0xFF06B6D4),
+                        onToggle = {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            onToggleBrowser(!browserEnabled)
+                        }
+                    )
+                    HorizontalDivider(
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
+                        thickness = 0.8.dp,
+                        modifier = Modifier.padding(horizontal = Spacing.md)
+                    )
+                    CapabilitySwitchRow(
+                        icon = Icons.Outlined.Terminal,
+                        title = "Terminal & Shell Tools",
+                        enabled = terminalEnabled,
+                        iconTint = Color(0xFF10B981),
+                        onToggle = {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            onToggleTerminal(!terminalEnabled)
+                        }
+                    )
+                }
             }
         }
     }
 }
 
 @Composable
-private fun ActionTile(
+private fun QuickActionCard(
     icon: ImageVector,
     title: String,
-    hint: String,
+    accentColor: Color,
+    delayMs: Int,
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val interaction = remember { MutableInteractionSource() }
+
     Surface(
         onClick = onClick,
         interactionSource = interaction,
-        shape = RoundedCornerShape(14.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+        border = BorderStroke(1.dp, accentColor.copy(alpha = 0.25f)),
+        tonalElevation = 2.dp,
         modifier = modifier
-            .height(78.dp)
-            .pressScale(interaction, pressedScale = 0.96f)
+            .height(88.dp)
+            .entrancePop(delayMs)
+            .pressScale(interaction, pressedScale = 0.93f)
     ) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,
-            modifier = Modifier.padding(horizontal = 4.dp, vertical = 6.dp)
+            modifier = Modifier.padding(Spacing.xs)
         ) {
-            Icon(
-                icon,
-                contentDescription = title,
-                tint = MaterialTheme.colorScheme.onSurface,
-                modifier = Modifier.size(22.dp)
-            )
-            Spacer(Modifier.height(5.dp))
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier
+                    .size(42.dp)
+                    .clip(CircleShape)
+                    .background(accentColor.copy(alpha = 0.14f))
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = title,
+                    tint = accentColor,
+                    modifier = Modifier.size(22.dp)
+                )
+            }
+            Spacer(Modifier.height(6.dp))
             Text(
-                title,
-                style = MaterialTheme.typography.labelMedium,
-                fontWeight = FontWeight.Medium,
+                text = title,
+                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
                 color = MaterialTheme.colorScheme.onSurface
-            )
-            Text(
-                hint,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1
             )
         }
     }
 }
 
 @Composable
-private fun SectionHeader(text: String) {
-    Text(
-        text = text.uppercase(),
-        style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 0.6.sp),
-        fontWeight = FontWeight.SemiBold,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier.padding(horizontal = Spacing.lg, vertical = Spacing.xs)
-    )
-}
-
-@Composable
-private fun ToolRow(
+private fun CapabilitySwitchRow(
     icon: ImageVector,
     title: String,
-    subtitle: String,
     enabled: Boolean,
+    iconTint: Color,
     onToggle: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val interaction = remember { MutableInteractionSource() }
-    Surface(
-        onClick = onToggle,
-        interactionSource = interaction,
-        shape = RoundedCornerShape(14.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
-        border = BorderStroke(
-            1.dp,
-            if (enabled) MaterialTheme.colorScheme.primary.copy(alpha = 0.35f)
-            else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
-        ),
+
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
         modifier = modifier
             .fillMaxWidth()
-            .pressScale(interaction, pressedScale = 0.985f)
+            .clickable(
+                interactionSource = interaction,
+                indication = null,
+                onClick = onToggle
+            )
+            .padding(horizontal = Spacing.md, vertical = 10.dp)
     ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.padding(horizontal = Spacing.md, vertical = Spacing.sm)
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier
+                .size(36.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(if (enabled) iconTint.copy(alpha = 0.15f) else MaterialTheme.colorScheme.surfaceVariant)
         ) {
-            Box(
-                contentAlignment = Alignment.Center,
-                modifier = Modifier
-                    .size(36.dp)
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(
-                        if (enabled) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
-                        else MaterialTheme.colorScheme.surfaceVariant
-                    )
-            ) {
-                Icon(
-                    icon,
-                    contentDescription = null,
-                    tint = if (enabled) MaterialTheme.colorScheme.primary
-                    else MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(20.dp)
-                )
-            }
-            Column(
-                Modifier
-                    .weight(1f)
-                    .padding(horizontal = Spacing.md)
-            ) {
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.Medium,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-                Text(
-                    text = subtitle,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-            Switch(
-                checked = enabled,
-                onCheckedChange = null
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = if (enabled) iconTint else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                modifier = Modifier.size(20.dp)
             )
         }
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Text(
+                text = if (enabled) "Active • Agent can use this" else "Disabled",
+                style = MaterialTheme.typography.labelSmall,
+                color = if (enabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+            )
+        }
+        Switch(
+            checked = enabled,
+            onCheckedChange = { onToggle() }
+        )
     }
 }

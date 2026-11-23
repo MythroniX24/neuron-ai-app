@@ -21,6 +21,7 @@ object Radius {
     val sm: Dp = 8.dp
     val md: Dp = 12.dp
     val lg: Dp = 16.dp
+    val xl: Dp = 22.dp
     val pill: Dp = 100.dp
 }
 
@@ -32,5 +33,5 @@ val NeuronShapes = Shapes(
     small = RoundedCornerShape(Radius.sm),
     medium = RoundedCornerShape(Radius.md),
     large = RoundedCornerShape(Radius.lg),
-    extraLarge = RoundedCornerShape(Radius.pill)
+    extraLarge = RoundedCornerShape(Radius.xl)
 )

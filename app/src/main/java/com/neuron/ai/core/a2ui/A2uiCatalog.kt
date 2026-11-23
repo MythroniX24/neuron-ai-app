@@ -73,7 +73,7 @@ RULES
 COMPONENTS (props)
 - Text: text, variant "body"|"caption"|"title"|"headline"|"highlight", highlight true|false
 - Badge: text, variant "default"|"primary"|"success"|"warning"|"error"|"info", icon (shows an eye-catching pill badge)
-- Image: url (real image URL; can be {"@path":…}), description, variant "icon"|"avatar"|"smallFeature"|"mediumFeature"|"largeFeature"|"header", fit "cover"|"contain"
+- Image: url (must be a valid direct public https:// image URL or {"@path":…}; NEVER put placeholder text or fake filenames in url; if no real image URL exists, omit the Image component), description, variant "icon"|"avatar"|"smallFeature"|"mediumFeature"|"largeFeature"|"header", fit "cover"|"contain"
 - Icon: name (add, arrowBack, arrowForward, attachFile, calendarToday, check, close, delete, download, edit, folder, info, lock, mail, menu, moreVert, person, play, refresh, search, send, settings, share, star, upload, warning…)
 - Row / Column: children, justify "start"|"center"|"end"|"spaceBetween"|"spaceAround"|"spaceEvenly", align "start"|"center"|"end"|"stretch"
 - List: children, direction "vertical"|"horizontal", align

@@ -57,6 +57,20 @@ object NeuronImageLoader {
                     .followRedirects(true)
                     .followSslRedirects(true)
                     .retryOnConnectionFailure(true)
+                    .addNetworkInterceptor { chain ->
+                        val original = chain.request()
+                        val reqBuilder = original.newBuilder()
+                        if (original.header("User-Agent") == null) {
+                            reqBuilder.header(
+                                "User-Agent",
+                                "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
+                            )
+                        }
+                        if (original.header("Accept") == null) {
+                            reqBuilder.header("Accept", "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8")
+                        }
+                        chain.proceed(reqBuilder.build())
+                    }
                     .build()
             }
             .allowHardware(true)
