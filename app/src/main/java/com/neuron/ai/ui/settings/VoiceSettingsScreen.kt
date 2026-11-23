@@ -23,6 +23,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.runtime.remember
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Check
@@ -277,7 +278,7 @@ fun VoiceSettingsScreen(
                             }
                         }
                     } else {
-                        val availableVoices = remember { viewModel.getAvailableVoices() }
+                        val availableVoices = remember { viewModel.getAvailableVoices().take(8) }
                         if (availableVoices.isNotEmpty()) {
                             Spacer(Modifier.height(10.dp))
                             Text(
@@ -297,15 +298,16 @@ fun VoiceSettingsScreen(
                                         label = { Text("Default") }
                                     )
                                 }
-                                items(availableVoices.take(8).size) { idx ->
-                                    val v = availableVoices[idx]
-                                    val isSelected = settings.activeVoiceName == v.name
-                                    val displayLabel = v.name.substringAfterLast("-").ifBlank { v.name.takeLast(8) }
-                                    androidx.compose.material3.FilterChip(
-                                        selected = isSelected,
-                                        onClick = { viewModel.setActiveVoiceName(v.name) },
-                                        label = { Text(displayLabel) }
-                                    )
+                                for (v in availableVoices) {
+                                    item {
+                                        val isSelected = settings.activeVoiceName == v.name
+                                        val displayLabel = v.name.substringAfterLast("-").ifBlank { v.name.takeLast(8) }
+                                        androidx.compose.material3.FilterChip(
+                                            selected = isSelected,
+                                            onClick = { viewModel.setActiveVoiceName(v.name) },
+                                            label = { Text(displayLabel) }
+                                        )
+                                    }
                                 }
                             }
                         }
