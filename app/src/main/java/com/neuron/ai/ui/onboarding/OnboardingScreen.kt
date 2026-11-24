@@ -382,12 +382,11 @@ fun OnboardingScreen(
             shadowElevation = 8.dp,
             border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
         ) {
-            Row(
+            Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = Spacing.xl, vertical = Spacing.md),
-                horizontalAlignment = Alignment.CenterVertically,
-                verticalArrangement = Arrangement.Center
+                contentAlignment = Alignment.Center
             ) {
                 Button(
                     onClick = { finishSetup() },

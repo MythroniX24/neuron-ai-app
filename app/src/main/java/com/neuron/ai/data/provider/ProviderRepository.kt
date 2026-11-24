@@ -160,21 +160,23 @@ class ProviderRepository(
                 val defaultFree = listOf(
                     ProviderConfig(
                         id = "prov-kilo-free",
+                        kind = ProviderConfig.Kind.OPENAI_COMPATIBLE,
                         displayName = "Kilo AI (Zero-Key)",
                         baseUrl = "https://ai-gateway.kilo.ai/api/v1",
                         credentialKey = "credential-kilo-free",
+                        defaultModelId = "kilo-auto/free",
                         modelIds = listOf("kilo-auto/free"),
-                        enabled = true,
-                        updatedAtEpochMs = clock()
+                        enabled = true
                     ),
                     ProviderConfig(
                         id = "prov-pollinations-free",
+                        kind = ProviderConfig.Kind.OPENAI_COMPATIBLE,
                         displayName = "Pollinations AI (Free)",
                         baseUrl = "https://text.pollinations.ai/openai",
                         credentialKey = "credential-pollinations-free",
+                        defaultModelId = "openai",
                         modelIds = listOf("openai", "mistral", "qwen-coder", "deepseek-r1"),
-                        enabled = true,
-                        updatedAtEpochMs = clock()
+                        enabled = true
                     )
                 )
                 _configs.value = defaultFree
