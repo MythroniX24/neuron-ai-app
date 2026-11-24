@@ -372,7 +372,7 @@ fun TerminalScreen(
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(
                             imeAction = ImeAction.Send,
-                            autoCorrect = false
+                            autoCorrectEnabled = false
                         ),
                         keyboardActions = KeyboardActions(
                             onSend = { submitCommand() }

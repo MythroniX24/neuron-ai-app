@@ -9,17 +9,17 @@ class ProviderPresetsTest {
 
     @Test
     fun testFreeZeroKeyProviders() {
-        val kilo = ProviderPresets.all.firstOrNull { it.id == "kilo" }
+        val kilo = ProviderPresets.ALL.firstOrNull { it.id == "kilo" }
         assertNotNull(kilo)
         assertFalse(kilo!!.requiresApiKey)
         assertTrue(kilo.defaultModels.contains("kilo-auto/free"))
 
-        val pollinations = ProviderPresets.all.firstOrNull { it.id == "pollinations" }
+        val pollinations = ProviderPresets.ALL.firstOrNull { it.id == "pollinations" }
         assertNotNull(pollinations)
         assertFalse(pollinations!!.requiresApiKey)
         assertTrue(pollinations.defaultModels.contains("openai"))
 
-        val openCode = ProviderPresets.all.firstOrNull { it.id == "opencode" }
+        val openCode = ProviderPresets.ALL.firstOrNull { it.id == "opencode" }
         assertNotNull(openCode)
         assertFalse(openCode!!.requiresApiKey)
     }
