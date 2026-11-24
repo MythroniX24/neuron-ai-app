@@ -154,6 +154,7 @@ fun ChatScreen(
     onOpenMenu: () -> Unit = {},
     onOpenSettings: () -> Unit = {},
     onOpenConversations: () -> Unit = {},
+    onOpenTerminalScreen: () -> Unit = {},
     /** When a local-model load/runtime failure happens AFTER backends are ready,
      *  the error banner offers a one-tap jump here — the caller routes to
      *  Settings → Debug console (Routes.debugConsole(...)) so the llama.cpp log
@@ -806,7 +807,11 @@ fun ChatScreen(
             Box(Modifier.systemBarsPadding()) {
                 TerminalPanel(
                     session = session,
-                    onDismiss = { showTerminal = false }
+                    onDismiss = { showTerminal = false },
+                    onOpenFullScreen = {
+                        showTerminal = false
+                        onOpenTerminalScreen()
+                    }
                 )
             }
         }

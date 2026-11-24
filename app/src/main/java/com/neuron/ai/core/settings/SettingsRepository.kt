@@ -108,6 +108,10 @@ interface SettingsRepository {
     /** User's custom system instructions / persona applied to every conversation. */
     val customInstructions: Flow<String>
     suspend fun setCustomInstructions(instructions: String)
+
+    /** Whether the first-time setup / onboarding wizard was completed or skipped. */
+    val hasCompletedInitialSetup: Flow<Boolean>
+    suspend fun setCompletedInitialSetup(completed: Boolean)
 }
 
 private val Context.neuronDataStore by preferencesDataStore(name = "neuron_settings")
@@ -150,10 +154,20 @@ class SettingsRepositoryImpl(
         }
     }
 
+    override val hasCompletedInitialSetup: Flow<Boolean> = dataStore.data
+        .map { prefs -> prefs[KEY_COMPLETED_INITIAL_SETUP] ?: false }
+
+    override suspend fun setCompletedInitialSetup(completed: Boolean) {
+        dataStore.edit { prefs ->
+            prefs[KEY_COMPLETED_INITIAL_SETUP] = completed
+        }
+    }
+
     private companion object {
         val KEY_THEME_MODE = stringPreferencesKey("theme_mode")
         val KEY_LAST_PROVIDER = stringPreferencesKey("last_provider_id")
         val KEY_LAST_MODEL = stringPreferencesKey("last_model_id")
         val KEY_CUSTOM_INSTRUCTIONS = stringPreferencesKey("custom_instructions")
+        val KEY_COMPLETED_INITIAL_SETUP = androidx.datastore.preferences.core.booleanPreferencesKey("completed_initial_setup")
     }
 }

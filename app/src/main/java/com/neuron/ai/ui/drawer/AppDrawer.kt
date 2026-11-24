@@ -26,6 +26,7 @@ import androidx.compose.material.icons.outlined.DriveFileRenameOutline
 import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.Terminal
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import com.neuron.ai.ui.components.entrancePop
@@ -69,7 +70,8 @@ fun AppDrawer(
     container: AppContainer,
     onOpenChat: (String) -> Unit,
     onNewChat: () -> Unit,
-    onOpenSettings: () -> Unit
+    onOpenSettings: () -> Unit,
+    onOpenTerminal: () -> Unit = {}
 ) {
     val conversations by container.conversationRepository.conversations
         .collectAsStateWithLifecycle(initialValue = emptyList())
@@ -175,11 +177,19 @@ fun AppDrawer(
             HorizontalDivider(modifier = Modifier.padding(vertical = Spacing.sm))
 
             NavigationDrawerItem(
+                icon = { Icon(Icons.Outlined.Terminal, contentDescription = null) },
+                label = { Text("Termux Shell") },
+                selected = false,
+                onClick = onOpenTerminal,
+                modifier = Modifier.padding(horizontal = Spacing.md, vertical = Spacing.xs)
+            )
+
+            NavigationDrawerItem(
                 icon = { Icon(Icons.Outlined.Settings, contentDescription = null) },
                 label = { Text("Settings") },
                 selected = false,
                 onClick = onOpenSettings,
-                modifier = Modifier.padding(horizontal = Spacing.md, vertical = Spacing.sm)
+                modifier = Modifier.padding(horizontal = Spacing.md, vertical = Spacing.xs)
             )
         }
     }

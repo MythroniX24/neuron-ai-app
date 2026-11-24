@@ -136,8 +136,28 @@ fun ProviderEditScreen(
             // ---- Preset picker (new providers only) ------------------------------
             if (providerId == null) {
                 Text(
-                    text = "Choose a provider",
-                    style = MaterialTheme.typography.titleSmall
+                    text = "Free & Zero-Key Providers",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(Spacing.xs)
+                ) {
+                    listOf("kilo", "pollinations", "opencode").forEach { id ->
+                        PresetChip(
+                            label = ProviderPresets.byId(id)!!.displayName.substringBefore(" ("),
+                            selected = form.presetId == id,
+                            onClick = { viewModel.applyPreset(id) },
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                }
+                Spacer(Modifier.height(Spacing.xs))
+                Text(
+                    text = "API Key Required",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -186,11 +206,19 @@ fun ProviderEditScreen(
                 modifier = Modifier.fillMaxWidth()
             )
 
+            val currentPreset = ProviderPresets.byId(form.presetId)
+            val isKeyOptional = currentPreset?.requiresApiKey == false
             OutlinedTextField(
                 value = form.apiKey,
                 onValueChange = { value -> viewModel.updateForm { it.copy(apiKey = value) } },
                 label = {
-                    Text(if (providerId == null) "API key" else "API key (unchanged if blank)")
+                    Text(
+                        when {
+                            isKeyOptional -> "API key (Optional for this free provider)"
+                            providerId == null -> "API key"
+                            else -> "API key (unchanged if blank)"
+                        }
+                    )
                 },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth()

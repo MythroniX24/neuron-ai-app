@@ -96,4 +96,29 @@ class MarkdownParserTest {
         val code = blocks.first() as MdBlock.CodeBlock
         assertEquals("kotlin", code.language)
     }
+
+    @Test
+    fun `parses geometry and tree fences as DiagramBlock`() {
+        val geoMd = """
+            ```geometry
+            {"type":"triangle","title":"Right Triangle","points":[{"id":"A","label":"A","x":100,"y":50}]}
+            ```
+        """.trimIndent()
+        val geoBlocks = MarkdownParser.parse(geoMd)
+        assertEquals(1, geoBlocks.size)
+        assertTrue(geoBlocks.first() is MdBlock.DiagramBlock)
+        val geo = geoBlocks.first() as MdBlock.DiagramBlock
+        assertEquals("geometry", geo.type)
+
+        val treeMd = """
+            ```tree
+            {"type":"tree","title":"Family Tree","treeRoot":{"label":"Root"}}
+            ```
+        """.trimIndent()
+        val treeBlocks = MarkdownParser.parse(treeMd)
+        assertEquals(1, treeBlocks.size)
+        assertTrue(treeBlocks.first() is MdBlock.DiagramBlock)
+        val tree = treeBlocks.first() as MdBlock.DiagramBlock
+        assertEquals("tree", tree.type)
+    }
 }

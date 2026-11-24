@@ -18,6 +18,8 @@ object Routes {
     const val CONNECTED_APPS = "connected-apps"
     const val APP_UPDATE = "app-update"
     const val VOICE_SETTINGS = "voice-settings"
+    const val ONBOARDING = "onboarding"
+    const val TERMINAL = "terminal"
 
     /** When the user arrives here right after a local-model load/runtime failure,
      *  the failed model id and a short human reason can be passed so the screen

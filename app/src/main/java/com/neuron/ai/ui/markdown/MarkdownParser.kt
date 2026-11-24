@@ -39,6 +39,11 @@ sealed class MdBlock {
     data class QuestionBlock(val json: String) : MdBlock()
 
     /**
+     * A fenced `geometry`, `diagram`, or `tree` interactive math canvas block.
+     */
+    data class DiagramBlock(val type: String, val content: String) : MdBlock()
+
+    /**
      * One list row. [number] carries the number the model actually wrote
      * (`3.` → 3) so a list that the parser splits into several blocks — nested
      * bullets in between do that — keeps counting 1, 2, 3 instead of
@@ -127,10 +132,19 @@ object MarkdownParser {
                     (content.contains(""""questions"""") || (content.contains(""""question"""") && content.contains(""""options"""")))
                 )
 
+                val isDiagramFence = langLower in setOf("geometry", "diagram", "tree", "shapes", "shape")
+                val looksLikeDiagram = isDiagramFence || (
+                    (langLower == "json" || langLower == null) &&
+                    (content.contains(""""shapeType"""") ||
+                     content.contains(""""treeRoot"""") ||
+                     (content.contains(""""points"""") && content.contains(""""angles"""")))
+                )
+
                 when {
                     looksLikeA2ui -> blocks += MdBlock.A2ui(content)
                     looksLikeRichItems -> blocks += MdBlock.RichItemsBlock(content)
                     looksLikeQuestion -> blocks += MdBlock.QuestionBlock(content)
+                    looksLikeDiagram -> blocks += MdBlock.DiagramBlock(langLower ?: "geometry", content)
                     else -> blocks += MdBlock.CodeBlock(language, content)
                 }
                 continue

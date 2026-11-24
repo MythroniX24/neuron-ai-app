@@ -89,9 +89,15 @@ fun NeuronApp(
             },
             onOpenSettings = {
                 closeDrawerAnd(Runnable { navController.navigate(Routes.SETTINGS) })
+            },
+            onOpenTerminal = {
+                closeDrawerAnd(Runnable { navController.navigate(Routes.TERMINAL) })
             }
         )
     }
+
+    val initialSetupCompleted by container.settingsRepository.hasCompletedInitialSetup
+        .collectAsState(initial = null)
 
     val backStackEntry by navController.currentBackStackEntryAsState()
 
@@ -120,9 +126,10 @@ fun NeuronApp(
                 container = container,
                 onOpenUpdate = { navController.navigate(Routes.APP_UPDATE) }
             )
+            val startDest = if (initialSetupCompleted == false) Routes.ONBOARDING else Routes.HOME
             NavHost(
                 navController = navController,
-                startDestination = Routes.HOME,
+                startDestination = startDest,
                 // Short slide + fade only. Full-screen scale animations
                 // forced every destination to re-rasterise during the
                 // transition, which is exactly what read as "laggy" on a
@@ -159,7 +166,8 @@ fun NeuronApp(
                         conversationId = newChatId,
                         onOpenMenu = openDrawer,
                         onOpenSettings = { navController.navigate(Routes.SETTINGS) },
-                        onOpenConversations = { navController.navigate(Routes.CONVERSATIONS) }
+                        onOpenConversations = { navController.navigate(Routes.CONVERSATIONS) },
+                        onOpenTerminalScreen = { navController.navigate(Routes.TERMINAL) }
                     )
                 }
 
@@ -172,6 +180,7 @@ fun NeuronApp(
                         onOpenMenu = openDrawer,
                         onOpenSettings = { navController.navigate(Routes.SETTINGS) },
                         onOpenConversations = { navController.navigate(Routes.CONVERSATIONS) },
+                        onOpenTerminalScreen = { navController.navigate(Routes.TERMINAL) },
                         onOpenDebugConsole = { failedModelId, reason ->
                             navController.navigate(
                                 Routes.debugConsole(
@@ -194,7 +203,9 @@ fun NeuronApp(
                         onOpenDebugConsole = { navController.navigate(Routes.DEBUG_CONSOLE) },
                         onOpenConnectedApps = { navController.navigate(Routes.CONNECTED_APPS) },
                         onOpenAppUpdate = { navController.navigate(Routes.APP_UPDATE) },
-                        onOpenVoiceSettings = { navController.navigate(Routes.VOICE_SETTINGS) }
+                        onOpenVoiceSettings = { navController.navigate(Routes.VOICE_SETTINGS) },
+                        onOpenOnboarding = { navController.navigate(Routes.ONBOARDING) },
+                        onOpenTerminal = { navController.navigate(Routes.TERMINAL) }
                     )
                 }
 
@@ -301,6 +312,27 @@ fun NeuronApp(
 
                 composable(Routes.VOICE_SETTINGS) {
                     com.neuron.ai.ui.settings.VoiceSettingsScreen(
+                        container = container,
+                        onBack = { navController.popBackStack() }
+                    )
+                }
+
+                composable(Routes.ONBOARDING) {
+                    com.neuron.ai.ui.onboarding.OnboardingScreen(
+                        container = container,
+                        onFinished = {
+                            navController.navigate(Routes.HOME) {
+                                popUpTo(Routes.ONBOARDING) { inclusive = true }
+                            }
+                        },
+                        onBack = if (navController.previousBackStackEntry != null) {
+                            { navController.popBackStack() }
+                        } else null
+                    )
+                }
+
+                composable(Routes.TERMINAL) {
+                    com.neuron.ai.ui.terminal.TerminalScreen(
                         container = container,
                         onBack = { navController.popBackStack() }
                     )

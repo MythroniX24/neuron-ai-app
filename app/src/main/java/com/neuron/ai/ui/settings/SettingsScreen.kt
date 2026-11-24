@@ -93,7 +93,9 @@ fun SettingsScreen(
     onOpenDebugConsole: () -> Unit = {},
     onOpenConnectedApps: () -> Unit = {},
     onOpenAppUpdate: () -> Unit = {},
-    onOpenVoiceSettings: () -> Unit = {}
+    onOpenVoiceSettings: () -> Unit = {},
+    onOpenOnboarding: () -> Unit = {},
+    onOpenTerminal: () -> Unit = {}
 ) {
     val viewModel: SettingsViewModel =
         viewModel(factory = SettingsViewModelFactory(container))
@@ -352,7 +354,27 @@ fun SettingsScreen(
 
                 RowDivider(borderColor = cardBorderColor)
 
-                // 3. Debug Console
+                // 3. Termux Terminal Shell
+                SettingsItemRow(
+                    icon = Icons.Outlined.Terminal,
+                    iconTint = Color(0xFF10B981),
+                    title = "Termux Terminal Shell",
+                    onClick = onOpenTerminal
+                )
+
+                RowDivider(borderColor = cardBorderColor)
+
+                // 4. Linux & Setup Hub
+                SettingsItemRow(
+                    icon = Icons.Outlined.Tune,
+                    iconTint = Color(0xFF06B6D4),
+                    title = "Linux & Setup Hub",
+                    onClick = onOpenOnboarding
+                )
+
+                RowDivider(borderColor = cardBorderColor)
+
+                // 5. Debug Console
                 SettingsItemRow(
                     icon = Icons.Outlined.Terminal,
                     iconTint = Color(0xFFF59E0B),

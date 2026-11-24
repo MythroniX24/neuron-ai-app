@@ -156,6 +156,32 @@ class ProviderRepository(
                     _configs.value = json.decodeFromString<List<ProviderConfig>>(raw)
                 }
             }
+            if (_configs.value.isEmpty()) {
+                val defaultFree = listOf(
+                    ProviderConfig(
+                        id = "prov-kilo-free",
+                        displayName = "Kilo AI (Zero-Key)",
+                        baseUrl = "https://ai-gateway.kilo.ai/api/v1",
+                        credentialKey = "credential-kilo-free",
+                        modelIds = listOf("kilo-auto/free"),
+                        enabled = true,
+                        updatedAtEpochMs = clock()
+                    ),
+                    ProviderConfig(
+                        id = "prov-pollinations-free",
+                        displayName = "Pollinations AI (Free)",
+                        baseUrl = "https://text.pollinations.ai/openai",
+                        credentialKey = "credential-pollinations-free",
+                        modelIds = listOf("openai", "mistral", "qwen-coder", "deepseek-r1"),
+                        enabled = true,
+                        updatedAtEpochMs = clock()
+                    )
+                )
+                _configs.value = defaultFree
+                defaultProviderId.value = "prov-kilo-free"
+                defaultModelId.value = "kilo-auto/free"
+                persist()
+            }
         }.onFailure { logger.w("Provider", "Could not load provider configs", it) }
     }
 

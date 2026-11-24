@@ -74,7 +74,8 @@ class ProvidersViewModel(
         _form.value = ProviderFormState(
             presetId = presetId,
             name = if (presetId == "custom") "" else preset.displayName,
-            baseUrl = preset.baseUrl
+            baseUrl = preset.baseUrl,
+            modelIdsText = preset.defaultModels.joinToString(", ")
         )
     }
 

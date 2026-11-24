@@ -131,11 +131,25 @@ class ToolUsingAgent(
                     "short facts, comfortable for normal chat, relaxed for explanations, " +
                     "airy for long walkthroughs. Never mention or explain the spacing choice.\n" +
                     "IMAGES & MEDIA DISPLAY: You have full native image rendering capabilities in chat. You CAN and SHOULD display images inline using standard Markdown syntax `![description](https://image-url)` or rich cards. When asked to show images, photos, or posters, use `web.search` or provide public image URLs or use A2UI image cards `{\"url\":\"<Movie/Topic Title>\",\"description\":\"<Title>\"}` to render them directly. The native UI automatically resolves entity image titles to official photos and posters. NEVER say 'I cannot generate or display images directly'.\n" +
+                    "INTERACTIVE MATH & GEOMETRY DIAGRAMS: You have full native interactive canvas rendering for geometry, triangles, circles, angles, coordinate points, and tree graphs. " +
+                    "When explaining geometry, mathematical shapes, right angles, trigonometry, coordinate geometry, or hierarchical trees, emit a ```geometry or ```tree block with JSON:\n" +
+                    "```geometry\n" +
+                    "{\"type\":\"triangle\",\"title\":\"Right Angled Triangle\",\"points\":[{\"id\":\"A\",\"label\":\"A\",\"x\":180,\"y\":60},{\"id\":\"B\",\"label\":\"B\",\"x\":70,\"y\":260},{\"id\":\"C\",\"label\":\"C\",\"x\":290,\"y\":260}],\"lines\":[{\"from\":\"A\",\"to\":\"B\",\"label\":\"c\"},{\"from\":\"B\",\"to\":\"C\",\"label\":\"a\"},{\"from\":\"C\",\"to\":\"A\",\"label\":\"b\"}],\"angles\":[{\"vertex\":\"A\",\"p1\":\"B\",\"p2\":\"C\"},{\"vertex\":\"B\",\"p1\":\"A\",\"p2\":\"C\",\"isRightAngle\":true},{\"vertex\":\"C\",\"p1\":\"A\",\"p2\":\"B\"}]}\n" +
+                    "```\n" +
+                    "For trees emit ```tree with {\"type\":\"tree\",\"title\":\"Tree\",\"treeRoot\":{\"id\":\"1\",\"label\":\"Root\",\"children\":[{\"id\":\"2\",\"label\":\"Child 1\"},{\"id\":\"3\",\"label\":\"Child 2\"}]}}. " +
+                    "The chat renders these as live, interactive, draggable canvases where users can touch and drag vertices in real-time.\n" +
                     com.neuron.ai.core.a2ui.A2uiCatalog.prompt
             } else {
                 "You are Neuron, a world-class autonomous AI agent running on the user's phone. " +
                     "Answer clearly, directly, and comprehensively; use Markdown for structure, synchronized tables, and code.\n" +
                     "IMAGES & MEDIA DISPLAY: You have full native image rendering capabilities in chat. You CAN and SHOULD display images inline using standard Markdown syntax `![description](https://image-url)` or rich cards. When asked to show images, photos, or posters, use `web.search` or provide public image URLs or use A2UI image cards `{\"url\":\"<Movie/Topic Title>\",\"description\":\"<Title>\"}` to render them directly. The native UI automatically resolves entity image titles to official photos and posters. NEVER say 'I cannot generate or display images directly'.\n" +
+                    "INTERACTIVE MATH & GEOMETRY DIAGRAMS: You have full native interactive canvas rendering for geometry, triangles, circles, angles, coordinate points, and tree graphs. " +
+                    "When explaining geometry, mathematical shapes, right angles, trigonometry, coordinate geometry, or hierarchical trees, emit a ```geometry or ```tree block with JSON:\n" +
+                    "```geometry\n" +
+                    "{\"type\":\"triangle\",\"title\":\"Right Angled Triangle\",\"points\":[{\"id\":\"A\",\"label\":\"A\",\"x\":180,\"y\":60},{\"id\":\"B\",\"label\":\"B\",\"x\":70,\"y\":260},{\"id\":\"C\",\"label\":\"C\",\"x\":290,\"y\":260}],\"lines\":[{\"from\":\"A\",\"to\":\"B\",\"label\":\"c\"},{\"from\":\"B\",\"to\":\"C\",\"label\":\"a\"},{\"from\":\"C\",\"to\":\"A\",\"label\":\"b\"}],\"angles\":[{\"vertex\":\"A\",\"p1\":\"B\",\"p2\":\"C\"},{\"vertex\":\"B\",\"p1\":\"A\",\"p2\":\"C\",\"isRightAngle\":true},{\"vertex\":\"C\",\"p1\":\"A\",\"p2\":\"B\"}]}\n" +
+                    "```\n" +
+                    "For trees emit ```tree with {\"type\":\"tree\",\"title\":\"Tree\",\"treeRoot\":{\"id\":\"1\",\"label\":\"Root\",\"children\":[{\"id\":\"2\",\"label\":\"Child 1\"},{\"id\":\"3\",\"label\":\"Child 2\"}]}}. " +
+                    "The chat renders these as live, interactive, draggable canvases where users can touch and drag vertices in real-time.\n" +
                     "PROACTIVE RICH UI & CARDS: You have full native UI rendering capabilities. Proactively enhance answers with interactive cards:\n" +
                     "1. INTERACTIVE QUESTIONS: When offering next steps, choices, or asking clarifying questions, emit a ```question block with options instead of plain text bullets:\n" +
                     "```question\n" +

@@ -77,14 +77,23 @@ fun NeuronAsyncImage(
     var resolvedUrl by remember(model) { mutableStateOf<String?>(null) }
     var resolutionAttempted by remember(model) { mutableStateOf(false) }
 
+    fun isDirectUrl(value: String): Boolean {
+        val t = value.trim()
+        return t.startsWith("http://", ignoreCase = true) ||
+            t.startsWith("https://", ignoreCase = true) ||
+            t.startsWith("content://", ignoreCase = true) ||
+            t.startsWith("file://", ignoreCase = true)
+    }
+
     val sanitizedModel = remember(model, resolvedUrl) {
         val target = resolvedUrl ?: model
         if (target is String) {
             val trimmed = target.trim().trim('`', '"', '\'')
-            if (trimmed.startsWith("http://")) {
-                "https://${trimmed.removePrefix("http://")}"
-            } else {
-                trimmed
+            when {
+                trimmed.startsWith("http://", ignoreCase = true) -> "https://${trimmed.removePrefix("http://")}"
+                isDirectUrl(trimmed) -> trimmed
+                // Non-URL entity query: wait until resolvedUrl is obtained so Coil does not error immediately
+                else -> null
             }
         } else {
             target
@@ -95,12 +104,7 @@ fun NeuronAsyncImage(
     LaunchedEffect(model, comparisonImages) {
         if (model is String && resolvedUrl == null) {
             val trimmed = model.trim().trim('`', '"', '\'')
-            val isDirectUrl = trimmed.startsWith("http://", ignoreCase = true) ||
-                trimmed.startsWith("https://", ignoreCase = true) ||
-                trimmed.startsWith("content://", ignoreCase = true) ||
-                trimmed.startsWith("file://", ignoreCase = true)
-
-            if (!isDirectUrl && trimmed.isNotBlank()) {
+            if (!isDirectUrl(trimmed) && trimmed.isNotBlank()) {
                 val cached = comparisonImages[trimmed]
                 if (!cached.isNullOrBlank()) {
                     resolvedUrl = cached
@@ -108,11 +112,10 @@ fun NeuronAsyncImage(
                     resolutionAttempted = true
                     onImagesNeeded(listOf(trimmed))
                     runCatching {
-                        val cleanQuery = trimmed.removeSuffix(" Movie Poster")
-                            .removeSuffix(" Poster")
-                            .removeSuffix(" Image")
-                            .removeSuffix(" Picture")
-                            .trim()
+                        val cleanQuery = trimmed.replace(
+                            Regex("(?i)\\s+(movie\\s+poster|official\\s+poster|poster|photo|picture|image|wallpaper|fan\\s+art)$"),
+                            ""
+                        ).trim()
                         val fetched = imageResolver.resolve(cleanQuery)
                         if (!fetched.isNullOrBlank()) {
                             resolvedUrl = fetched

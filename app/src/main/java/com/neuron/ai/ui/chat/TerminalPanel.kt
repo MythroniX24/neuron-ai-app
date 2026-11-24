@@ -23,6 +23,7 @@ import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.DeleteOutline
+import androidx.compose.material.icons.outlined.OpenInNew
 import androidx.compose.material.icons.outlined.Stop
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -63,7 +64,8 @@ import kotlinx.coroutines.launch
 @Composable
 fun TerminalPanel(
     session: TerminalSession,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    onOpenFullScreen: (() -> Unit)? = null
 ) {
     var command by remember { mutableStateOf("") }
     val output by session.output.collectAsStateWithLifecycle()
@@ -138,6 +140,16 @@ fun TerminalPanel(
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.size(20.dp)
                         )
+                    }
+                    if (onOpenFullScreen != null) {
+                        IconButton(onClick = onOpenFullScreen) {
+                            Icon(
+                                Icons.Outlined.OpenInNew,
+                                contentDescription = "Full screen Termux",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
                     }
                     IconButton(onClick = onDismiss) {
                         Icon(

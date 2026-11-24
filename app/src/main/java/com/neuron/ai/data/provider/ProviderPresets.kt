@@ -2,7 +2,7 @@ package com.neuron.ai.data.provider
 
 /**
  * Prebuilt provider presets. Picking one fills the add-provider form so the
- * user only pastes an API key (and can optionally load models from /models).
+ * user only pastes an API key (or uses zero-key free providers).
  * All endpoints are OpenAI-compatible chat-completions APIs.
  */
 data class ProviderPreset(
@@ -10,12 +10,41 @@ data class ProviderPreset(
     val displayName: String,
     val baseUrl: String,
     val apiKeyUrl: String,
-    val notes: String
+    val notes: String,
+    val defaultModels: List<String> = emptyList(),
+    val requiresApiKey: Boolean = true
 )
 
 object ProviderPresets {
 
     val ALL = listOf(
+        ProviderPreset(
+            id = "kilo",
+            displayName = "Kilo AI (Zero-Key Free)",
+            baseUrl = "https://ai-gateway.kilo.ai/api/v1",
+            apiKeyUrl = "kilo.ai",
+            notes = "Built-in free models (kilo-auto/free) with no API key required.",
+            defaultModels = listOf("kilo-auto/free"),
+            requiresApiKey = false
+        ),
+        ProviderPreset(
+            id = "pollinations",
+            displayName = "Pollinations AI (100% Free)",
+            baseUrl = "https://text.pollinations.ai/openai",
+            apiKeyUrl = "pollinations.ai",
+            notes = "Free streaming models (OpenAI, Mistral, Qwen, DeepSeek) with zero keys or signups.",
+            defaultModels = listOf("openai", "mistral", "qwen-coder", "deepseek-r1"),
+            requiresApiKey = false
+        ),
+        ProviderPreset(
+            id = "opencode",
+            displayName = "OpenCode Free AI",
+            baseUrl = "https://opencode.ai/inference/v1",
+            apiKeyUrl = "opencode.ai",
+            notes = "OpenCode inference gateway for coding and assistant models.",
+            defaultModels = listOf("deepseek-chat", "qwen-2.5-coder"),
+            requiresApiKey = false
+        ),
         ProviderPreset(
             id = "openai",
             displayName = "OpenAI",
@@ -49,14 +78,15 @@ object ProviderPresets {
             displayName = "OpenRouter",
             baseUrl = "https://openrouter.ai/api/v1",
             apiKeyUrl = "openrouter.ai/keys",
-            notes = "One key, hundreds of models from every major lab."
+            notes = "One key, hundreds of models from every major lab (including free-tier models)."
         ),
         ProviderPreset(
             id = "ollama",
             displayName = "Ollama (local)",
             baseUrl = "http://localhost:11434/v1",
             apiKeyUrl = "ollama.com",
-            notes = "Run models on your own machine. No API key needed."
+            notes = "Run models on your own machine. No API key needed.",
+            requiresApiKey = false
         ),
         ProviderPreset(
             id = "custom",

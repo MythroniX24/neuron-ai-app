@@ -136,6 +136,7 @@ class WikipediaImageResolver(
                 .addQueryParameter("prop", "pageimages")
                 .addQueryParameter("piprop", "thumbnail")
                 .addQueryParameter("pithumbsize", "640")
+                .addQueryParameter("pilicense", "any")
                 .build()
         }.getOrNull() ?: return null
 

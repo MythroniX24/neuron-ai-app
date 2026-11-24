@@ -232,6 +232,15 @@ private fun BlockView(
             }
         }
 
+        // Native interactive math & geometry / tree diagram canvas
+        is MdBlock.DiagramBlock -> {
+            com.neuron.ai.ui.chat.diagram.InteractiveDiagramCard(
+                typeHint = block.type,
+                rawContent = block.content,
+                modifier = Modifier.padding(vertical = Spacing.xs)
+            )
+        }
+
         is MdBlock.CodeBlock -> CodeBlockView(block)
 
         is MdBlock.LatexBlock -> LatexBlockView(block.latex)

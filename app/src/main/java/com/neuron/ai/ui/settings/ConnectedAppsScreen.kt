@@ -316,6 +316,7 @@ fun ConnectedAppsScreen(
 
     confirmDisconnect?.let { account ->
         AlertDialog(
+            shape = RoundedCornerShape(18.dp),
             onDismissRequest = { confirmDisconnect = null },
             title = { Text("Disconnect ${account.label}?") },
             text = {
@@ -339,6 +340,7 @@ fun ConnectedAppsScreen(
     if (showGitHubDialog) {
         val context = LocalContext.current
         AlertDialog(
+            shape = RoundedCornerShape(18.dp),
             onDismissRequest = { showGitHubDialog = false },
             title = {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -403,6 +405,7 @@ fun ConnectedAppsScreen(
     when (val state = gitHubAuthState) {
         is ConnectedAppsViewModel.GitHubAuthState.RequestingCode -> {
             AlertDialog(
+                shape = RoundedCornerShape(18.dp),
                 onDismissRequest = { viewModel.dismissGitHubAuthDialog() },
                 title = { Text("Connecting to GitHub...") },
                 text = {
@@ -424,6 +427,7 @@ fun ConnectedAppsScreen(
         is ConnectedAppsViewModel.GitHubAuthState.AwaitingUser -> {
             val context = LocalContext.current
             AlertDialog(
+                shape = RoundedCornerShape(18.dp),
                 onDismissRequest = { viewModel.dismissGitHubAuthDialog() },
                 title = {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -510,6 +514,7 @@ fun ConnectedAppsScreen(
         }
         is ConnectedAppsViewModel.GitHubAuthState.Error -> {
             AlertDialog(
+                shape = RoundedCornerShape(18.dp),
                 onDismissRequest = { viewModel.dismissGitHubAuthDialog() },
                 title = { Text("GitHub Sign In Failed") },
                 text = { Text(state.message) },
