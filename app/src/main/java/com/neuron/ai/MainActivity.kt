@@ -12,11 +12,14 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.getValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.lifecycleScope
 import com.neuron.ai.core.settings.ThemeMode
 import com.neuron.ai.data.storage.DeviceStorage
 import com.neuron.ai.di.AppContainer
 import com.neuron.ai.ui.NeuronApp
 import com.neuron.ai.ui.theme.NeuronTheme
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
 
@@ -104,11 +107,16 @@ class MainActivity : ComponentActivity() {
     private fun checkStoragePermissionOnLaunch() {
         if (!hasPromptedStorageOnLaunch) {
             hasPromptedStorageOnLaunch = true
-            val prefs = getSharedPreferences("neuron_launch_prefs", Context.MODE_PRIVATE)
-            val alreadyPrompted = prefs.getBoolean("has_prompted_storage_launch", false)
-            if (!alreadyPrompted && !DeviceStorage.hasAccess(this)) {
-                prefs.edit().putBoolean("has_prompted_storage_launch", true).apply()
-                promptStorageAccess()
+            lifecycleScope.launch {
+                val setupDone = container.settingsRepository.hasCompletedInitialSetup.first()
+                if (setupDone) {
+                    val prefs = getSharedPreferences("neuron_launch_prefs", Context.MODE_PRIVATE)
+                    val alreadyPrompted = prefs.getBoolean("has_prompted_storage_launch", false)
+                    if (!alreadyPrompted && !DeviceStorage.hasAccess(this@MainActivity)) {
+                        prefs.edit().putBoolean("has_prompted_storage_launch", true).apply()
+                        promptStorageAccess()
+                    }
+                }
             }
         }
     }

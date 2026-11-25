@@ -183,6 +183,12 @@ class ProviderRepository(
                 defaultProviderId.value = "prov-kilo-free"
                 defaultModelId.value = "kilo-auto/free"
                 persist()
+            } else {
+                val firstEnabled = _configs.value.firstOrNull { it.enabled }
+                if (firstEnabled != null) {
+                    defaultProviderId.value = firstEnabled.id
+                    defaultModelId.value = firstEnabled.defaultModelId ?: firstEnabled.modelIds.firstOrNull()
+                }
             }
         }.onFailure { logger.w("Provider", "Could not load provider configs", it) }
     }

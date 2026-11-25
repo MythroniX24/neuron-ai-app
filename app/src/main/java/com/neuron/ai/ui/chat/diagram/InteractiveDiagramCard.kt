@@ -290,13 +290,37 @@ fun InteractiveDiagramCard(
 @Composable
 private fun GeometryCanvas(
     spec: DiagramSpec,
-    points: List<DiagramPoint>,
+    points: androidx.compose.runtime.snapshots.SnapshotStateList<DiagramPoint>,
     primaryColor: Color,
     secondaryColor: Color,
     outlineColor: Color,
     onSurface: Color
 ) {
     var draggedPointIndex by remember { mutableStateOf<Int?>(null) }
+
+    val onSurfaceArgb = onSurface.toArgb()
+    val secondaryArgb = secondaryColor.toArgb()
+    val labelPaint = remember(onSurfaceArgb) {
+        Paint().apply {
+            color = onSurfaceArgb
+            textSize = 26f
+            isFakeBoldText = true
+        }
+    }
+    val anglePaint = remember(secondaryArgb) {
+        Paint().apply {
+            color = secondaryArgb
+            textSize = 24f
+            isFakeBoldText = true
+        }
+    }
+    val pointPaint = remember(onSurfaceArgb) {
+        Paint().apply {
+            color = onSurfaceArgb
+            textSize = 30f
+            isFakeBoldText = true
+        }
+    }
 
     // Live calculated stats
     val pointMap = remember(points.map { "${it.id}_${it.x}_${it.y}" }) {
@@ -326,8 +350,7 @@ private fun GeometryCanvas(
                                 val pt = points[index]
                                 val newX = (pt.x + dragAmount.x).coerceIn(30f, size.width.toFloat() - 30f)
                                 val newY = (pt.y + dragAmount.y).coerceIn(30f, size.height.toFloat() - 30f)
-                                pt.x = newX
-                                pt.y = newY
+                                points[index] = pt.copy(x = newX, y = newY)
                             }
                         },
                         onDragEnd = { draggedPointIndex = null },
@@ -401,11 +424,7 @@ private fun GeometryCanvas(
                             labelText,
                             midX + 8f,
                             midY - 8f,
-                            Paint().apply {
-                                color = onSurface.toArgb()
-                                textSize = 26f
-                                isFakeBoldText = true
-                            }
+                            labelPaint
                         )
                     }
                 }
@@ -444,11 +463,7 @@ private fun GeometryCanvas(
                             "$angleLabel${deg.toInt()}°",
                             textX,
                             textY,
-                            Paint().apply {
-                                color = secondaryColor.toArgb()
-                                textSize = 24f
-                                isFakeBoldText = true
-                            }
+                            anglePaint
                         )
                     }
                 }
@@ -484,11 +499,7 @@ private fun GeometryCanvas(
                         pt.label,
                         pt.x + 12f,
                         pt.y - 12f,
-                        Paint().apply {
-                            color = onSurface.toArgb()
-                            textSize = 30f
-                            isFakeBoldText = true
-                        }
+                        pointPaint
                     )
                 }
             }
@@ -545,6 +556,12 @@ private fun GeometryCanvas(
     }
 }
 
+private fun treeDepth(node: DiagramTreeNode): Int =
+    if (node.children.isEmpty()) 1 else 1 + (node.children.maxOfOrNull { treeDepth(it) } ?: 0)
+
+private fun treeLeafCount(node: DiagramTreeNode): Int =
+    if (node.children.isEmpty()) 1 else node.children.sumOf { treeLeafCount(it) }
+
 @Composable
 private fun TreeCanvas(
     root: DiagramTreeNode,
@@ -552,15 +569,29 @@ private fun TreeCanvas(
     textColor: Color,
     surfaceColor: Color
 ) {
+    val depth = remember(root) { treeDepth(root) }
+    val leaves = remember(root) { treeLeafCount(root) }
+    val minCanvasWidthDp = maxOf(340f, leaves * 85f).dp
+    val canvasHeightDp = (depth * 75 + 50).coerceIn(240, 500).dp
+    val textArgb = textColor.toArgb()
+    val textPaint = remember(textArgb) {
+        Paint().apply {
+            color = textArgb
+            textSize = 22f
+            isFakeBoldText = true
+            textAlign = Paint.Align.CENTER
+        }
+    }
+
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .height(260.dp)
+            .horizontalScroll(rememberScrollState())
+            .height(canvasHeightDp)
             .background(Color.Black.copy(alpha = 0.05f))
     ) {
-        Canvas(modifier = Modifier.fillMaxSize()) {
+        Canvas(modifier = Modifier.size(width = minCanvasWidthDp, height = canvasHeightDp)) {
             val canvasWidth = size.width
-            val canvasHeight = size.height
 
             // Render root at top center, children spaced horizontally
             val rootPos = Offset(canvasWidth / 2, 45f)
@@ -571,7 +602,8 @@ private fun TreeCanvas(
                 level = 0,
                 primaryColor = primaryColor,
                 textColor = textColor,
-                surfaceColor = surfaceColor
+                surfaceColor = surfaceColor,
+                textPaint = textPaint
             )
         }
     }
@@ -584,9 +616,10 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawTreeNode(
     level: Int,
     primaryColor: Color,
     textColor: Color,
-    surfaceColor: Color
+    surfaceColor: Color,
+    textPaint: Paint
 ) {
-    val nodeWidth = 72f
+    val nodeWidth = maxOf(76f, node.label.length * 13f + 18f)
     val nodeHeight = 36f
 
     // Draw node card
@@ -608,13 +641,9 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawTreeNode(
     // Node text
     drawContext.canvas.nativeCanvas.drawText(
         node.label,
-        center.x - (node.label.length * 6f),
-        center.y + 6f,
-        Paint().apply {
-            color = textColor.toArgb()
-            textSize = 22f
-            isFakeBoldText = true
-        }
+        center.x,
+        center.y + 7f,
+        textPaint
     )
 
     val childrenCount = node.children.size
@@ -642,7 +671,8 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawTreeNode(
                 level = level + 1,
                 primaryColor = primaryColor,
                 textColor = textColor,
-                surfaceColor = surfaceColor
+                surfaceColor = surfaceColor,
+                textPaint = textPaint
             )
         }
     }

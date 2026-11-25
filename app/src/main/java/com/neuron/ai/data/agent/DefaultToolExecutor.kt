@@ -85,7 +85,7 @@ class DefaultToolExecutor(
                 is ToolResult.Success -> false
                 is ToolResult.TimedOut -> false // timeouts are a budget signal, not transient
                 is ToolResult.Denied -> false   // a refusal is never retried
-                is ToolResult.Failure -> attempt <= maxRetries
+                is ToolResult.Failure -> attempt <= maxRetries && tool.riskLevel == RiskLevel.SAFE
             }
             if (!retryable) return result
 

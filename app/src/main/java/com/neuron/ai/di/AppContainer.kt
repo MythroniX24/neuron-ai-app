@@ -342,35 +342,37 @@ class AppContainer(context: Context) {
     private val initScope = CoroutineScope(SupervisorJob() + dispatchers.io)
 
     init {
+        // Register core tools synchronously so early agent turns always have tools available
+        toolRegistry.register(SafeTools.CurrentTime())
+        toolRegistry.register(SafeTools.Calculator())
+        toolRegistry.register(SafeTools.TextStats())
+        val workspace = java.io.File(context.filesDir, "workspace")
+        toolRegistry.register(SafeTools.FileRead(workspace))
+        toolRegistry.register(SafeTools.FileSearch(workspace))
+        // Milestone 3: web search + reading + memory are global tools.
+        toolRegistry.register(
+            com.neuron.ai.data.tool.WebTools.WebSearch(searchOrchestrator, pageFetcher)
+        )
+        toolRegistry.register(com.neuron.ai.data.tool.WebTools.WebRead(pageFetcher))
+        // Universal rich recommendation cards: available in every chat,
+        // independent of terminal/browser/workspace capabilities.
+        toolRegistry.register(com.neuron.ai.data.tool.RichItemsTool())
+        // Native comparison surfaces (side-by-side, table, score, pros/cons,
+        // interactive priorities) — universal, no capability required.
+        toolRegistry.register(com.neuron.ai.data.tool.ComparisonTool())
+        // The model owns reply readability separately for prose and lists.
+        toolRegistry.register(com.neuron.ai.data.tool.ReplySpacingTool())
+        // Interactive question cards: tappable options + custom input (Claude style).
+        toolRegistry.register(com.neuron.ai.data.tool.QuestionTool())
+        memoryTools.forEach { toolRegistry.register(it) }
+        // Google connectors. ELEVATED: Capability.GOOGLE is granted on
+        // demand, and the two destructive actions re-prompt every time.
+        googleTools.forEach { toolRegistry.register(it) }
+        // GitHub connectors. Capability.GITHUB is granted on demand.
+        gitHubTools.forEach { toolRegistry.register(it) }
+
         initScope.launch {
             taskManager.restore()
-            toolRegistry.register(SafeTools.CurrentTime())
-            toolRegistry.register(SafeTools.Calculator())
-            toolRegistry.register(SafeTools.TextStats())
-            val workspace = java.io.File(context.filesDir, "workspace")
-            toolRegistry.register(SafeTools.FileRead(workspace))
-            toolRegistry.register(SafeTools.FileSearch(workspace))
-            // Milestone 3: web search + reading + memory are global tools.
-            toolRegistry.register(
-                com.neuron.ai.data.tool.WebTools.WebSearch(searchOrchestrator, pageFetcher)
-            )
-            toolRegistry.register(com.neuron.ai.data.tool.WebTools.WebRead(pageFetcher))
-            // Universal rich recommendation cards: available in every chat,
-            // independent of terminal/browser/workspace capabilities.
-            toolRegistry.register(com.neuron.ai.data.tool.RichItemsTool())
-            // Native comparison surfaces (side-by-side, table, score, pros/cons,
-            // interactive priorities) — universal, no capability required.
-            toolRegistry.register(com.neuron.ai.data.tool.ComparisonTool())
-            // The model owns reply readability separately for prose and lists.
-            toolRegistry.register(com.neuron.ai.data.tool.ReplySpacingTool())
-            // Interactive question cards: tappable options + custom input (Claude style).
-            toolRegistry.register(com.neuron.ai.data.tool.QuestionTool())
-            memoryTools.forEach { toolRegistry.register(it) }
-            // Google connectors. ELEVATED: Capability.GOOGLE is granted on
-            // demand, and the two destructive actions re-prompt every time.
-            googleTools.forEach { toolRegistry.register(it) }
-            // GitHub connectors. Capability.GITHUB is granted on demand.
-            gitHubTools.forEach { toolRegistry.register(it) }
             // Refresh the linked-account list from the backend, if any.
             if (googleConnectorRepository.configured) googleConnectorRepository.syncAccounts()
         }

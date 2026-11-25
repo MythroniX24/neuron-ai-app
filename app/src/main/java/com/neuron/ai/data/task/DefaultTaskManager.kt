@@ -112,6 +112,14 @@ class DefaultTaskManager(
         jobs.remove(taskId)?.cancel()
     }
 
+    /** Asynchronously marks a task CANCELLED using task manager's process scope. */
+    fun cancelTaskAsync(taskId: String) {
+        scope.launch {
+            jobs.remove(taskId)?.cancel()
+            updateStatus(taskId, Task.Status.CANCELLED)
+        }
+    }
+
     /** Re-queues a FAILED task and re-runs it with [block]. */
     suspend fun retry(taskId: String, block: suspend () -> Unit) {
         mutate(taskId) { it.copy(error = null, activity = null) }

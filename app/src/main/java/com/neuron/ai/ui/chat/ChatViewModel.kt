@@ -1491,12 +1491,7 @@ class ChatViewModel(
         // No WebView leaks: the chat's browser session dies with its ViewModel.
         runCatching { browserManager.closeSession(conversationId) }
         currentTaskId?.let { id ->
-            viewModelScope.launch(dispatchers.io) {
-                val task = tasks.tasks.first().find { it.id == id }
-                if (task != null && !task.isFinished) {
-                    tasks.updateStatus(id, com.neuron.ai.core.task.Task.Status.CANCELLED)
-                }
-            }
+            tasks.cancelTaskAsync(id)
         }
         super.onCleared()
     }

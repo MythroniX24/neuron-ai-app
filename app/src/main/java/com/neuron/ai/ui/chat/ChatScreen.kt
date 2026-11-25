@@ -224,8 +224,9 @@ fun ChatScreen(
         }
     }
 
-    LaunchedEffect(visibleMessages.size, liveRun?.steps?.size) {
-        val target = visibleMessages.size + if (generation is GenerationState.Streaming) 1 else 0
+    LaunchedEffect(visibleMessages.size, liveRun?.steps?.size, generation) {
+        val extra = if (generation is GenerationState.Streaming || generation is GenerationState.Failed) 1 else 0
+        val target = visibleMessages.size + extra
         if (target > 0 && !userScrolledUp && !listState.isScrollInProgress) {
             val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
             if (lastVisible >= target - 3) {
@@ -233,12 +234,17 @@ fun ChatScreen(
             }
         }
     }
-    LaunchedEffect(streamingText.length) {
-        if (streamingText.isNotEmpty() && !userScrolledUp && !listState.isScrollInProgress) {
-            val target = visibleMessages.size + 1
-            val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
-            if (lastVisible >= target - 3) {
-                listState.scrollToItem(target - 1)
+    LaunchedEffect(streamingText.isNotEmpty()) {
+        if (streamingText.isNotEmpty()) {
+            while (generation is GenerationState.Streaming) {
+                if (!userScrolledUp && !listState.isScrollInProgress) {
+                    val target = visibleMessages.size + 1
+                    val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
+                    if (lastVisible >= target - 3) {
+                        listState.scrollToItem(target - 1)
+                    }
+                }
+                kotlinx.coroutines.delay(100)
             }
         }
     }
@@ -509,7 +515,9 @@ fun ChatScreen(
                 val animateIn = remember(message.id) {
                     message.id !in entranceSeen && (message.id == visibleMessages.lastOrNull()?.id)
                 }
-                remember(message.id) { entranceSeen.add(message.id) }
+                androidx.compose.runtime.LaunchedEffect(message.id) {
+                    if (message.id !in entranceSeen) entranceSeen.add(message.id)
+                }
                 Box(
                     Modifier.messageEntrance(
                         fromEnd = message.role == Message.Role.USER,

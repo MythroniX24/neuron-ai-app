@@ -44,6 +44,10 @@ class TextToSpeechManager(
 
     @Volatile
     private var lastSpokenCleanText: String = ""
+    @Volatile
+    private var expectedFinalUtteranceId: String? = null
+    @Volatile
+    private var currentChunkOffsets: List<Int> = emptyList()
 
     init {
         initTts()
@@ -60,9 +64,11 @@ class TextToSpeechManager(
                     }
 
                     override fun onDone(utteranceId: String?) {
-                        _isSpeaking.value = false
-                        _currentUtteranceId.value = null
-                        _activeSpeechProgress.value = null
+                        if (utteranceId == null || utteranceId == expectedFinalUtteranceId) {
+                            _isSpeaking.value = false
+                            _currentUtteranceId.value = null
+                            _activeSpeechProgress.value = null
+                        }
                     }
 
                     @Deprecated("Deprecated in Java")
@@ -82,19 +88,23 @@ class TextToSpeechManager(
                     override fun onRangeStart(utteranceId: String?, start: Int, end: Int, frame: Int) {
                         if (utteranceId != null && start >= 0) {
                             val text = lastSpokenCleanText
-                            val word = if (end <= text.length && start < end) {
-                                text.substring(start, end).trim()
+                            val chunkIndex = utteranceId.substringAfter("-", "0").toIntOrNull() ?: 0
+                            val chunkBase = currentChunkOffsets.getOrElse(chunkIndex) { 0 }
+                            val absStart = chunkBase + start
+                            val absEnd = chunkBase + end
+                            val word = if (absEnd <= text.length && absStart < absEnd) {
+                                text.substring(absStart, absEnd).trim()
                             } else {
                                 ""
                             }
                             if (word.isNotBlank()) {
                                 val cleanId = utteranceId.substringBefore("-")
-                                val priorText = if (start <= text.length) text.substring(0, start) else ""
+                                val priorText = if (absStart <= text.length) text.substring(0, absStart) else ""
                                 val wordOccurrence = Regex("""(?i)\b${Regex.escape(word)}\b""").findAll(priorText).count()
                                 _activeSpeechProgress.value = TtsSpokenProgress(
                                     utteranceId = cleanId,
-                                    start = start,
-                                    end = end,
+                                    start = absStart,
+                                    end = absEnd,
                                     word = word,
                                     wordOccurrence = wordOccurrence
                                 )
@@ -176,6 +186,16 @@ class TextToSpeechManager(
             // For very long texts, TextToSpeech has max input length per chunk. Split into sentences.
             val chunks = splitTextIntoChunks(text, 3500)
             if (chunks.isEmpty()) return
+
+            val offsets = mutableListOf<Int>()
+            var cur = 0
+            for (ch in chunks) {
+                val idx = text.indexOf(ch, cur).takeIf { it >= 0 } ?: cur
+                offsets.add(idx)
+                cur = idx + ch.length
+            }
+            currentChunkOffsets = offsets
+            expectedFinalUtteranceId = if (chunks.size > 1) "$utteranceId-${chunks.size - 1}" else utteranceId
 
             engine.speak(chunks[0], TextToSpeech.QUEUE_FLUSH, params, utteranceId)
             for (i in 1 until chunks.size) {

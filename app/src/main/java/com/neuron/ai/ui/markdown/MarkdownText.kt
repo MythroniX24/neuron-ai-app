@@ -213,6 +213,8 @@ private fun BlockView(
                     onImagesNeeded = com.neuron.ai.ui.components.LocalOnImagesNeeded.current,
                     modifier = Modifier.padding(vertical = Spacing.xs)
                 )
+            } else {
+                CodeBlockView(MdBlock.CodeBlock("json", block.json))
             }
         }
 
@@ -229,6 +231,8 @@ private fun BlockView(
                     onDismiss = {},
                     modifier = Modifier.padding(vertical = Spacing.xs)
                 )
+            } else {
+                CodeBlockView(MdBlock.CodeBlock("json", block.json))
             }
         }
 

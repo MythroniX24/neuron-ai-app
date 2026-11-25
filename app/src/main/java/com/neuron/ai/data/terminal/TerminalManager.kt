@@ -66,7 +66,7 @@ class TerminalSession internal constructor(
     val lastExitCode: kotlinx.coroutines.flow.StateFlow<Int?> = _lastExitCode.asStateFlow()
 
     private var outputLimit = outputBufferLimit
-    private val history = mutableListOf<String>()
+    private val history = java.util.concurrent.CopyOnWriteArrayList<String>()
     private var activeProcess: Process? = null
     private var activeJob: Job? = null
 

@@ -90,7 +90,11 @@ fun NeuronAsyncImage(
         if (target is String) {
             val trimmed = target.trim().trim('`', '"', '\'')
             when {
-                trimmed.startsWith("http://", ignoreCase = true) -> "https://${trimmed.removePrefix("http://")}"
+                trimmed.startsWith("http://localhost", ignoreCase = true) ||
+                    trimmed.startsWith("http://127.0.0.1", ignoreCase = true) ||
+                    trimmed.startsWith("http://10.", ignoreCase = true) ||
+                    trimmed.startsWith("http://192.168.", ignoreCase = true) -> trimmed
+                trimmed.startsWith("http://", ignoreCase = true) -> "https://${trimmed.substring(7)}"
                 isDirectUrl(trimmed) -> trimmed
                 // Non-URL entity query: wait until resolvedUrl is obtained so Coil does not error immediately
                 else -> null

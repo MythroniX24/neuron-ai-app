@@ -15,6 +15,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -50,9 +51,9 @@ class DefaultAgentRuntime(
             state = AgentRun.State.RUNNING,
             startedAtEpochMs = System.currentTimeMillis()
         )
-        scope.launch { mutex.withLock { _runs.value = _runs.value + (runId to run) } }
+        _runs.update { it + (runId to run) }
 
-        val job = scope.launch {
+        val job = scope.launch(start = kotlinx.coroutines.CoroutineStart.LAZY) {
             try {
                 agent.run(goal).collect { event ->
                     when (event) {
@@ -95,9 +96,12 @@ class DefaultAgentRuntime(
                         finishedAtEpochMs = System.currentTimeMillis()
                     )
                 }
+            } finally {
+                jobs.remove(runId)
             }
         }
         jobs[runId] = job
+        job.start()
         return object : AgentSession {
             override val runId: String = runId
             override val run: Flow<AgentRun> = runOf(runId)

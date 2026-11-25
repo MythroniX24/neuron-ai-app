@@ -127,34 +127,42 @@ fun NeuronApp(
                 container = container,
                 onOpenUpdate = { navController.navigate(Routes.APP_UPDATE) }
             )
-            val startDest = if (initialSetupCompleted == false) Routes.ONBOARDING else Routes.HOME
-            NavHost(
-                navController = navController,
-                startDestination = startDest,
-                // Short slide + fade only. Full-screen scale animations
-                // forced every destination to re-rasterise during the
-                // transition, which is exactly what read as "laggy" on a
-                // phone — especially right after a heavy local-model turn.
-                enterTransition = {
-                    fadeIn(tween(180)) +
-                        slideInHorizontally(
-                            tween(220, easing = FastOutSlowInEasing)
-                        ) { it / 12 }
-                },
-                exitTransition = { fadeOut(tween(140)) },
-                popEnterTransition = {
-                    fadeIn(tween(180)) +
-                        slideInHorizontally(
-                            tween(220, easing = FastOutSlowInEasing)
-                        ) { -it / 12 }
-                },
-                popExitTransition = {
-                    fadeOut(tween(140)) +
-                        slideOutHorizontally(
-                            tween(220, easing = FastOutSlowInEasing)
-                        ) { it / 12 }
-                }
-            ) {
+            val isSetupDone = initialSetupCompleted
+            if (isSetupDone == null) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(MaterialTheme.colorScheme.background)
+                )
+            } else {
+                val startDest = if (!isSetupDone) Routes.ONBOARDING else Routes.HOME
+                NavHost(
+                    navController = navController,
+                    startDestination = startDest,
+                    // Short slide + fade only. Full-screen scale animations
+                    // forced every destination to re-rasterise during the
+                    // transition, which is exactly what read as "laggy" on a
+                    // phone — especially right after a heavy local-model turn.
+                    enterTransition = {
+                        fadeIn(tween(180)) +
+                            slideInHorizontally(
+                                tween(220, easing = FastOutSlowInEasing)
+                            ) { it / 12 }
+                    },
+                    exitTransition = { fadeOut(tween(140)) },
+                    popEnterTransition = {
+                        fadeIn(tween(180)) +
+                            slideInHorizontally(
+                                tween(220, easing = FastOutSlowInEasing)
+                            ) { -it / 12 }
+                    },
+                    popExitTransition = {
+                        fadeOut(tween(140)) +
+                            slideOutHorizontally(
+                                tween(220, easing = FastOutSlowInEasing)
+                            ) { it / 12 }
+                    }
+                ) {
                 composable(Routes.HOME) {
                     // Unified chat surface: "Home" IS the chat screen. A fresh
                     // conversation id is minted per visit; the ViewModel lazily
@@ -338,6 +346,7 @@ fun NeuronApp(
                         onBack = { navController.popBackStack() }
                     )
                 }
+            }
             }
         }
         }

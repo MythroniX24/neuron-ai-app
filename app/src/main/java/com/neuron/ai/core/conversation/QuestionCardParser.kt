@@ -194,12 +194,13 @@ object QuestionCardParser {
                 }
             }
 
-            val looksLikeQuestion = leadInLine.endsWith("?") ||
-                leadInLine.endsWith(":") ||
-                listOf("choose", "select", "which", "option", "prefer", "next step", "would you like",
-                       "बताएं", "चुनें", "विकल्प", "कदम", "क्या आप", "पसंद").any {
-                    leadInLine.contains(it, ignoreCase = true)
-                }
+            val questionIndicators = listOf(
+                "choose", "select", "which", "option", "prefer", "next step", "what would you like",
+                "would you like", "should we", "how would you like", "pick",
+                "बताएं", "चुनें", "विकल्प", "क्या आप", "पसंद", "क्या करना चाहेंगे"
+            )
+            val hasIndicator = questionIndicators.any { leadInLine.contains(it, ignoreCase = true) }
+            val looksLikeQuestion = leadInLine.endsWith("?") || (leadInLine.endsWith(":") && hasIndicator) || hasIndicator
 
             if (looksLikeQuestion && leadInLine.isNotBlank() && leadInIndex >= 0) {
                 val cleanQuestion = leadInLine.trimEnd(':').trim()
