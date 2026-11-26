@@ -138,7 +138,7 @@ object AgentStepMapper {
             "google.gmail.draft" -> "Save draft"
             "google.gmail.read", "google.gmail.thread" -> "Read email"
             "google.gmail.search" -> "Search Gmail"
-            "google.drive.list", "google.drive.search" -> "Drive search"
+            "google.drive.list", "google.drive.search" -> "Google Drive"
             "google.drive.read" -> "Read Drive file"
             "google.drive.move" -> "Move Drive file"
             "google.drive.delete" -> "Delete Drive file"

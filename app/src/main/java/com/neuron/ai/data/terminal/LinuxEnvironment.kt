@@ -204,32 +204,40 @@ object LinuxEnvironment {
         val inbuiltLib = linuxDir?.let { File(it, "lib").absolutePath }.orEmpty()
         val nativeLibDir = context?.applicationInfo?.nativeLibraryDir.orEmpty()
 
-        val pathElements = listOf(
-            inbuiltBin,
-            inbuiltUsrBin,
-            "/data/data/com.termux/files/usr/bin",
-            "/data/data/com.termux/files/usr/bin/applets",
-            "/data/user/0/com.androidharness.app/files/linux/bin",
-            "/data/local/tmp/androidharness/com.androidharness.app/linux/bin",
-            "/data/local/tmp/bin",
-            "/system/bin",
-            "/system/xbin"
-        ).filter { it.isNotBlank() }.distinct()
+        val hostPath = System.getenv("PATH").orEmpty()
+        val pathElements = mutableListOf<String>()
+        if (inbuiltBin.isNotBlank()) pathElements.add(inbuiltBin)
+        if (inbuiltUsrBin.isNotBlank()) pathElements.add(inbuiltUsrBin)
+        pathElements.add("/data/data/com.termux/files/usr/bin")
+        pathElements.add("/data/data/com.termux/files/usr/bin/applets")
+        pathElements.add("/data/user/0/com.androidharness.app/files/linux/bin")
+        pathElements.add("/data/local/tmp/androidharness/com.androidharness.app/linux/bin")
+        pathElements.add("/data/local/tmp/bin")
+        if (hostPath.isNotBlank()) {
+            pathElements.addAll(hostPath.split(":"))
+        }
+        pathElements.add("/system/bin")
+        pathElements.add("/system/xbin")
+        pathElements.add("/usr/bin")
+        pathElements.add("/bin")
+        val cleanPaths = pathElements.filter { it.isNotBlank() }.distinct()
 
-        val ldElements = listOf(
-            inbuiltLib,
-            "/data/data/com.termux/files/usr/lib",
-            "/data/user/0/com.androidharness.app/files/linux/lib",
-            nativeLibDir,
-            "/system/lib64",
-            "/system/lib"
-        ).filter { it.isNotBlank() }.distinct()
+        val hostLd = System.getenv("LD_LIBRARY_PATH").orEmpty()
+        val ldElements = mutableListOf<String>()
+        if (inbuiltLib.isNotBlank()) ldElements.add(inbuiltLib)
+        ldElements.add("/data/data/com.termux/files/usr/lib")
+        ldElements.add("/data/user/0/com.androidharness.app/files/linux/lib")
+        if (nativeLibDir.isNotBlank()) ldElements.add(nativeLibDir)
+        if (hostLd.isNotBlank()) ldElements.addAll(hostLd.split(":"))
+        ldElements.add("/system/lib64")
+        ldElements.add("/system/lib")
+        val cleanLd = ldElements.filter { it.isNotBlank() }.distinct()
 
         return mapOf(
             "PREFIX" to (linuxDir?.absolutePath ?: "/data/data/com.termux/files/usr"),
             "HOME" to homeDir.absolutePath,
-            "PATH" to pathElements.joinToString(":"),
-            "LD_LIBRARY_PATH" to ldElements.joinToString(":"),
+            "PATH" to cleanPaths.joinToString(":"),
+            "LD_LIBRARY_PATH" to cleanLd.joinToString(":"),
             "SHELL" to shellInfo.path,
             "TERM" to "xterm-256color",
             "COLORTERM" to "truecolor",
