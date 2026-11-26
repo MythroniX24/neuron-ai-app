@@ -166,19 +166,23 @@ fun OnboardingScreen(
             linuxStatus = "Configuring workspace & verifying shell..."
             withContext(Dispatchers.IO) {
                 try {
-                    val workspaceDir = File(context.filesDir, "workspace")
-                    if (!workspaceDir.exists()) workspaceDir.mkdirs()
+                    val shellInfo = com.neuron.ai.data.terminal.LinuxEnvironment.initialize(context)
+                    val workspaceDir = com.neuron.ai.data.terminal.LinuxEnvironment.getWorkspaceDir(context)
+                    val fullEnv = com.neuron.ai.data.terminal.LinuxEnvironment.buildEnvironment(context, workspaceDir)
 
-                    val termuxBash = File("/data/data/com.termux/files/usr/bin/bash")
-                    val hasTermux = termuxBash.canExecute()
-                    val shell = if (hasTermux) termuxBash.absolutePath else "/system/bin/sh"
-
-                    val p = ProcessBuilder(shell, "-c", "echo 'Neuron Shell Ready'")
+                    val p = ProcessBuilder(shellInfo.path, "-c", "echo 'Neuron Shell Ready'")
                         .directory(workspaceDir)
+                        .apply {
+                            environment().putAll(fullEnv)
+                        }
                         .start()
                     val exit = p.waitFor()
                     if (exit == 0) {
-                        linuxStatus = if (hasTermux) "Termux bash detected & linked" else "Linux shell ready ($workspaceDir)"
+                        linuxStatus = if (shellInfo.isTermuxOrLinux) {
+                            "Termux Linux environment ready (${shellInfo.name})"
+                        } else {
+                            "Linux shell ready (Android fallback)"
+                        }
                         linuxConfigured = true
                     } else {
                         linuxStatus = "Basic shell active (exit $exit)"

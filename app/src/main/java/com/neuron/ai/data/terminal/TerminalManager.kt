@@ -50,8 +50,14 @@ class TerminalSession internal constructor(
     workingDir: File?,
     private val scope: CoroutineScope,
     private val io: kotlinx.coroutines.CoroutineDispatcher,
-    outputBufferLimit: Int = 2_000
+    outputBufferLimit: Int = 2_000,
+    private val context: android.content.Context? = null
 ) {
+    val shellInfo: LinuxEnvironment.ShellInfo
+        get() = LinuxEnvironment.resolveShell(context)
+
+    val isRealTermux: Boolean
+        get() = shellInfo.isTermuxOrLinux
     private val _workingDir = MutableStateFlow(workingDir ?: File("/"))
     val workingDirFlow: kotlinx.coroutines.flow.StateFlow<File> = _workingDir.asStateFlow()
 
@@ -112,10 +118,12 @@ class TerminalSession internal constructor(
                 val dir = workingDir?.takeIf { it.isDirectory }
                     ?: _workingDir.value.takeIf { it.isDirectory }
                     ?: File("/").takeIf { it.canRead() }
-                val process = ProcessBuilder(shellPath(), "-c", command)
+                val shell = LinuxEnvironment.resolveShell(context)
+                val fullEnv = LinuxEnvironment.buildEnvironment(context, dir) + env
+                val process = ProcessBuilder(shell.path, "-c", command)
                     .apply {
                         directory(dir)
-                        environment().putAll(env)
+                        environment().putAll(fullEnv)
                         redirectErrorStream(false)
                     }
                     .start()
@@ -195,9 +203,9 @@ class TerminalSession internal constructor(
     }
 
     companion object {
-        /** Android ships /system/bin/sh; JVM/desktop environments use /bin/sh. */
-        internal fun shellPath(): String =
-            if (File("/system/bin/sh").exists()) "/system/bin/sh" else "/bin/sh"
+        /** Resolves best shell (in-built Termux/Linux bash first, fallback to /system/bin/sh). */
+        internal fun shellPath(context: android.content.Context? = null): String =
+            LinuxEnvironment.resolveShell(context).path
     }
 
     private fun drainThread(stream: java.io.InputStream, streamKind: TerminalLine.Stream): Thread =
@@ -231,7 +239,10 @@ class TerminalSession internal constructor(
  * panel and AI tools resolve the SAME session per conversation — one shared
  * process infrastructure, no duplicate stacks.
  */
-class TerminalManager(private val dispatchers: DispatcherProvider) {
+class TerminalManager(
+    private val dispatchers: DispatcherProvider,
+    private val context: android.content.Context? = null
+) {
 
     private val scope = CoroutineScope(SupervisorJob() + dispatchers.default)
     private val io = dispatchers.io
@@ -245,7 +256,8 @@ class TerminalManager(private val dispatchers: DispatcherProvider) {
                 workspaceId = workspaceId,
                 workingDir = workingDir,
                 scope = scope,
-                io = io
+                io = io,
+                context = context
             )
         }
 

@@ -606,13 +606,16 @@ class ToolUsingAgent(
             for (call in toolCalls) {
                 val tool = toolRegistry.find(call.toolId)
                 val now = System.currentTimeMillis()
+                val baseTitle = when (tool?.riskLevel) {
+                    RiskLevel.DESTRUCTIVE -> "Confirming ${tool.title.lowercase()}"
+                    RiskLevel.ELEVATED -> "Running ${tool.title.lowercase()}"
+                    else -> tool?.title ?: call.toolId
+                }
+                val resolvedTitle = com.neuron.ai.core.agent.AgentStepMapper
+                    .resolveActivityTitle(call.toolId, call.argumentsJson, baseTitle)
                 val activity = AgentActivity(
                     stepId = call.callId,
-                    title = when (tool?.riskLevel) {
-                        RiskLevel.DESTRUCTIVE -> "Confirming ${tool.title.lowercase()}"
-                        RiskLevel.ELEVATED -> "Running ${tool.title.lowercase()}"
-                        else -> tool?.title ?: call.toolId
-                    },
+                    title = resolvedTitle,
                     state = AgentActivity.State.RUNNING,
                     toolId = call.toolId,
                     actionDetail = com.neuron.ai.core.agent.AgentStepMapper

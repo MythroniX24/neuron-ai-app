@@ -113,4 +113,41 @@ class AgentStepMapperTest {
             AgentStepMapper.extractActionDetail("web.search", "not-json")
         )
     }
+
+    @Test
+    fun `git commit and push action extraction and title resolution`() {
+        val commitTitle = AgentStepMapper.resolveActivityTitle(
+            "terminal.run",
+            "{\"command\":\"git commit -m \\\"feat: new feature\\\"\"}",
+            "Running command"
+        )
+        assertEquals("Commit", commitTitle)
+
+        val pushTitle = AgentStepMapper.resolveActivityTitle(
+            "terminal.run",
+            "{\"command\":\"git push origin main\"}",
+            "Running command"
+        )
+        assertEquals("Push", pushTitle)
+
+        val commitPushTitle = AgentStepMapper.resolveActivityTitle(
+            "terminal.run",
+            "{\"command\":\"git commit -am \\\"update\\\" && git push\"}",
+            "Running command"
+        )
+        assertEquals("Commit & push", commitPushTitle)
+
+        val commitDetail = AgentStepMapper.extractActionDetail(
+            "terminal.run",
+            "{\"command\":\"git commit -m \\\"fix(ui): navbar\\\"\"}"
+        )
+        assertEquals("fix(ui): navbar", commitDetail)
+    }
+
+    @Test
+    fun `connector activity title resolution`() {
+        assertEquals("Send email", AgentStepMapper.resolveActivityTitle("google.gmail.send", "{}", "Tool"))
+        assertEquals("Create issue", AgentStepMapper.resolveActivityTitle("github.issues.create", "{}", "Tool"))
+        assertEquals("Google Drive", AgentStepMapper.resolveActivityTitle("google.drive.list", "{}", "Tool"))
+    }
 }

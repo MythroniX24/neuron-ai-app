@@ -22,12 +22,19 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Build
+import androidx.compose.material.icons.outlined.CalendarToday
+import androidx.compose.material.icons.outlined.CheckCircle
+import androidx.compose.material.icons.outlined.Code
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.KeyboardArrowDown
+import androidx.compose.material.icons.outlined.MailOutline
 import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material.icons.outlined.TableChart
 import androidx.compose.material.icons.outlined.Terminal
+import androidx.compose.material.icons.outlined.Upload
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -368,6 +375,16 @@ internal enum class AgentToolKind(
     EDIT("Edit", "Edit files", Icons.Outlined.Edit, Color(0xFF9AA4B2)),
     COMMAND("Run", "Run", Icons.Outlined.Terminal, Color(0xFF9AA4B2)),
     BUILD("Build", "Build", Icons.Outlined.Build, Color(0xFF9AA4B2)),
+    GIT_COMMIT("Commit", "Commit", Icons.Outlined.CheckCircle, Color(0xFFF97316)),
+    GIT_PUSH("Push", "Push", Icons.Outlined.Upload, Color(0xFF3B82F6)),
+    GIT_COMMIT_AND_PUSH("Commit & push", "Commit & push", Icons.Outlined.CheckCircle, Color(0xFF10B981)),
+    GITHUB("GitHub", "GitHub", Icons.Outlined.Code, Color(0xFF8B5CF6)),
+    GMAIL("Gmail", "Gmail", Icons.Outlined.MailOutline, Color(0xFFEA4335)),
+    GOOGLE_DRIVE("Google Drive", "Google Drive", Icons.Outlined.Folder, Color(0xFF4285F4)),
+    GOOGLE_DOCS("Google Docs", "Google Docs", Icons.Outlined.Description, Color(0xFF4285F4)),
+    GOOGLE_SHEETS("Google Sheets", "Google Sheets", Icons.Outlined.TableChart, Color(0xFF0F9D58)),
+    GOOGLE_CALENDAR("Google Calendar", "Google Calendar", Icons.Outlined.CalendarToday, Color(0xFFFBBC04)),
+    GOOGLE_SLIDES("Google Slides", "Google Slides", Icons.Outlined.Description, Color(0xFFF4B400)),
     OTHER("Tool", "Tool", Icons.Outlined.Build, Color(0xFF9AA4B2))
 }
 
@@ -397,18 +414,36 @@ internal fun buildAgentRunEntries(steps: List<AgentStepRecord>): List<AgentRunEn
             continue
         }
 
-        val kind = kindOf(step)
+        var kind = kindOf(step)
         val calls = mutableListOf<AgentToolCall>()
-        while (index < visible.size && !isThought(visible[index])) {
-            val callStep = visible[index]
-            if (kindOf(callStep) != kind) break
-            calls += AgentToolCall(
-                step = callStep,
-                title = displayTitle(callStep),
-                path = actionPath(callStep)
-            )
+
+        // Merge commit + push sequence into a unified "Commit & push" group
+        val nextStep = visible.getOrNull(index + 1)
+        val isCommitPushPair = nextStep != null && !isThought(nextStep) && (
+            (kind == AgentToolKind.GIT_COMMIT && kindOf(nextStep) == AgentToolKind.GIT_PUSH) ||
+            (kind == AgentToolKind.GIT_PUSH && kindOf(nextStep) == AgentToolKind.GIT_COMMIT)
+        )
+
+        if (isCommitPushPair) {
+            kind = AgentToolKind.GIT_COMMIT_AND_PUSH
+            calls += AgentToolCall(step, displayTitle(step), actionPath(step))
             index++
+            val secondStep = visible[index]
+            calls += AgentToolCall(secondStep, displayTitle(secondStep), actionPath(secondStep))
+            index++
+        } else {
+            while (index < visible.size && !isThought(visible[index])) {
+                val callStep = visible[index]
+                if (kindOf(callStep) != kind) break
+                calls += AgentToolCall(
+                    step = callStep,
+                    title = displayTitle(callStep),
+                    path = actionPath(callStep)
+                )
+                index++
+            }
         }
+
         entries += AgentRunEntry.Tools(
             AgentToolGroup(
                 key = "${kind.name}-${calls.first().step.stepId}",
@@ -426,7 +461,46 @@ private fun isThought(step: AgentStepRecord): Boolean =
 
 private fun kindOf(step: AgentStepRecord): AgentToolKind {
     val tool = step.toolId.orEmpty()
+    val label = step.label.lowercase()
+    val detail = (step.actionDetail ?: "").lowercase()
+
     return when {
+        step.type == AgentStepRecord.TYPE_GIT_COMMIT_PUSH ||
+            ("commit" in label && "push" in label) ||
+            ("git commit" in detail && "git push" in detail) ->
+            AgentToolKind.GIT_COMMIT_AND_PUSH
+
+        step.type == AgentStepRecord.TYPE_GIT_COMMIT ||
+            label.startsWith("commit") ||
+            ("git commit" in detail) ->
+            AgentToolKind.GIT_COMMIT
+
+        step.type == AgentStepRecord.TYPE_GIT_PUSH ||
+            label.startsWith("push") ||
+            ("git push" in detail) ->
+            AgentToolKind.GIT_PUSH
+
+        tool.startsWith("github.") || step.type == AgentStepRecord.TYPE_GITHUB || "github" in label ->
+            AgentToolKind.GITHUB
+
+        tool.startsWith("google.gmail.") || "gmail" in label || "email" in label ->
+            AgentToolKind.GMAIL
+
+        tool.startsWith("google.drive.") || "drive" in label ->
+            AgentToolKind.GOOGLE_DRIVE
+
+        tool.startsWith("google.docs.") || "doc" in label ->
+            AgentToolKind.GOOGLE_DOCS
+
+        tool.startsWith("google.sheets.") || "sheet" in label ->
+            AgentToolKind.GOOGLE_SHEETS
+
+        tool.startsWith("google.calendar.") || "calendar" in label ->
+            AgentToolKind.GOOGLE_CALENDAR
+
+        tool.startsWith("google.slides.") || "slide" in label ->
+            AgentToolKind.GOOGLE_SLIDES
+
         tool.startsWith("web.search") || tool.startsWith("browser.") -> AgentToolKind.SEARCH
         tool == "web.read" || tool == "fs.read" || tool == "fs.readfile" -> AgentToolKind.READ
         tool == "fs.listdir" || tool == "fs.list" -> AgentToolKind.LIST
@@ -444,14 +518,14 @@ private fun kindOf(step: AgentStepRecord): AgentToolKind {
             // Legacy activity rows have no toolId: classify by their public
             // title so old runs still get the right icon/group.
             else -> {
-                val label = step.label.lowercase()
+                val l = step.label.lowercase()
                 when {
-                    "search" in label || "find" in label -> AgentToolKind.SEARCH
-                    "list" in label -> AgentToolKind.LIST
-                    "read" in label -> AgentToolKind.READ
-                    "edit" in label || "write" in label -> AgentToolKind.EDIT
-                    "run" in label || "terminal" in label -> AgentToolKind.COMMAND
-                    "build" in label || "test" in label -> AgentToolKind.BUILD
+                    "search" in l || "find" in l -> AgentToolKind.SEARCH
+                    "list" in l -> AgentToolKind.LIST
+                    "read" in l -> AgentToolKind.READ
+                    "edit" in l || "write" in l -> AgentToolKind.EDIT
+                    "run" in l || "terminal" in l -> AgentToolKind.COMMAND
+                    "build" in l || "test" in l -> AgentToolKind.BUILD
                     else -> AgentToolKind.OTHER
                 }
             }
@@ -459,8 +533,23 @@ private fun kindOf(step: AgentStepRecord): AgentToolKind {
     }
 }
 
-private fun displayTitle(step: AgentStepRecord): String =
-    step.label.substringBefore(": ").ifBlank { "Tool" }
+private fun displayTitle(step: AgentStepRecord): String {
+    val label = step.label
+    val kind = kindOf(step)
+    return when (kind) {
+        AgentToolKind.GIT_COMMIT -> "Commit"
+        AgentToolKind.GIT_PUSH -> "Push"
+        AgentToolKind.GIT_COMMIT_AND_PUSH -> "Commit & push"
+        AgentToolKind.GITHUB -> if (label.contains(": ")) label.substringBefore(": ") else "GitHub"
+        AgentToolKind.GMAIL -> if (label.contains(": ")) label.substringBefore(": ") else "Gmail"
+        AgentToolKind.GOOGLE_DRIVE -> if (label.contains(": ")) label.substringBefore(": ") else "Google Drive"
+        AgentToolKind.GOOGLE_DOCS -> if (label.contains(": ")) label.substringBefore(": ") else "Google Docs"
+        AgentToolKind.GOOGLE_SHEETS -> if (label.contains(": ")) label.substringBefore(": ") else "Google Sheets"
+        AgentToolKind.GOOGLE_CALENDAR -> if (label.contains(": ")) label.substringBefore(": ") else "Google Calendar"
+        AgentToolKind.GOOGLE_SLIDES -> if (label.contains(": ")) label.substringBefore(": ") else "Google Slides"
+        else -> label.substringBefore(": ").ifBlank { "Tool" }
+    }
+}
 
 private fun actionPath(step: AgentStepRecord): String? {
     val detail = step.actionDetail?.trim()

@@ -255,7 +255,7 @@ class AppContainer(context: Context) {
         com.neuron.ai.data.storage.DeviceStorage.root(context)
     }
 
-    val terminalManager: TerminalManager = TerminalManager(dispatchers)
+    val terminalManager: TerminalManager = TerminalManager(dispatchers, context)
 
     // ---- Milestone 3 services --------------------------------------------------------------
 

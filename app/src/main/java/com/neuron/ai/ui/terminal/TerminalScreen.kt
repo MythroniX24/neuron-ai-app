@@ -98,9 +98,8 @@ fun TerminalScreen(
     val clipboard = LocalClipboardManager.current
 
     val session: TerminalSession = remember {
-        val workspaceDir = File(context.filesDir, "workspace").apply {
-            if (!exists()) mkdirs()
-        }
+        val workspaceDir = com.neuron.ai.data.terminal.LinuxEnvironment.getWorkspaceDir(context)
+        com.neuron.ai.data.terminal.LinuxEnvironment.initialize(context)
         container.terminalManager.sessionFor("termux-fullscreen", null, workspaceDir)
     }
 
@@ -266,7 +265,7 @@ fun TerminalScreen(
                     item {
                         Column(modifier = Modifier.padding(vertical = Spacing.lg)) {
                             Text(
-                                text = "Neuron Linux & Termux Environment v2.4",
+                                text = "Neuron Linux & Termux Environment [${session.shellInfo.name}]",
                                 style = TextStyle(
                                     fontFamily = FontFamily.Monospace,
                                     fontSize = 13.sp,

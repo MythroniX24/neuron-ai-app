@@ -29,8 +29,13 @@ object AgentStepMapper {
         typeOverride: String? = null
     ): com.neuron.ai.core.conversation.AgentStepRecord {
         val isThinking = activity.toolId == null || activity.stepId.startsWith("think-")
-        val type = typeOverride ?: classify(activity.toolId, isThinking)
-        val label = buildLabel(activity, toolTitle, isThinking)
+        val effectiveTitle = if (!isThinking && activity.toolId != null) {
+            resolveActivityTitle(activity.toolId, "", toolTitle ?: activity.title)
+        } else {
+            toolTitle
+        }
+        val type = typeOverride ?: classify(activity.toolId, isThinking, activity.actionDetail)
+        val label = buildLabel(activity, effectiveTitle, isThinking)
         return com.neuron.ai.core.conversation.AgentStepRecord(
             stepId = activity.stepId,
             type = type,
@@ -58,16 +63,30 @@ object AgentStepMapper {
     /**
      * Timeline step type: each gets a distinct icon + label style in the UI.
      */
-    fun typeOf(toolId: String?, stepId: String = ""): String {
+    fun typeOf(toolId: String?, stepId: String = "", actionDetail: String? = null): String {
         val isThinking = toolId == null || stepId.startsWith("think-")
-        return classify(toolId, isThinking)
+        return classify(toolId, isThinking, actionDetail)
     }
 
-    private fun classify(toolId: String?, isThinking: Boolean): String = when {
-        isThinking -> com.neuron.ai.core.conversation.AgentStepRecord.TYPE_THINKING
-        toolId == null -> com.neuron.ai.core.conversation.AgentStepRecord.TYPE_THINKING
-        toolId.startsWith("terminal.") ->
-            com.neuron.ai.core.conversation.AgentStepRecord.TYPE_COMMAND
+    private fun classify(toolId: String?, isThinking: Boolean, actionDetail: String? = null): String = when {
+        isThinking || toolId == null -> com.neuron.ai.core.conversation.AgentStepRecord.TYPE_THINKING
+        toolId.startsWith("terminal.") -> {
+            val d = (actionDetail ?: "").lowercase()
+            when {
+                d.contains("git commit") && d.contains("git push") ->
+                    com.neuron.ai.core.conversation.AgentStepRecord.TYPE_GIT_COMMIT_PUSH
+                d.contains("git commit") ->
+                    com.neuron.ai.core.conversation.AgentStepRecord.TYPE_GIT_COMMIT
+                d.contains("git push") ->
+                    com.neuron.ai.core.conversation.AgentStepRecord.TYPE_GIT_PUSH
+                else ->
+                    com.neuron.ai.core.conversation.AgentStepRecord.TYPE_COMMAND
+            }
+        }
+        toolId.startsWith("github.") ->
+            com.neuron.ai.core.conversation.AgentStepRecord.TYPE_GITHUB
+        toolId.startsWith("google.") ->
+            com.neuron.ai.core.conversation.AgentStepRecord.TYPE_GOOGLE
         toolId.startsWith("web.search") || toolId.startsWith("browser.") ->
             com.neuron.ai.core.conversation.AgentStepRecord.TYPE_WEB_SEARCH
         toolId == "web.read" || toolId == "fs.read" || toolId == "fs.readfile" ->
@@ -84,6 +103,70 @@ object AgentStepMapper {
     )
 
     private val BUILD_TOOLS = setOf("code.build", "code.test")
+
+    /**
+     * Resolves human-friendly activity titles for connectors (GitHub, Git commit/push, Google).
+     */
+    fun resolveActivityTitle(
+        toolId: String,
+        argumentsJson: String,
+        fallbackTitle: String
+    ): String {
+        if (toolId.startsWith("terminal.")) {
+            val cmd = runCatching {
+                Json.parseToJsonElement(argumentsJson).jsonObject["command"]?.jsonPrimitive?.content
+            }.getOrNull()?.trim().orEmpty()
+            val isCommit = cmd.contains("git commit", ignoreCase = true)
+            val isPush = cmd.contains("git push", ignoreCase = true)
+            return when {
+                isCommit && isPush -> "Commit & push"
+                isCommit -> "Commit"
+                isPush -> "Push"
+                else -> fallbackTitle
+            }
+        }
+        return when (toolId) {
+            "github.issues.create" -> "Create issue"
+            "github.issues.list" -> "List issues"
+            "github.pulls.list" -> "Pull requests"
+            "github.repo.search" -> "Search GitHub"
+            "github.repo.get" -> "GitHub repo"
+            "github.repo.readme" -> "Read README"
+            "github.file.get" -> "Read GitHub file"
+            "github.user.get" -> "View GitHub profile"
+            "google.gmail.send" -> "Send email"
+            "google.gmail.draft" -> "Save draft"
+            "google.gmail.read", "google.gmail.thread" -> "Read email"
+            "google.gmail.search" -> "Search Gmail"
+            "google.drive.list", "google.drive.search" -> "Drive search"
+            "google.drive.read" -> "Read Drive file"
+            "google.drive.move" -> "Move Drive file"
+            "google.drive.delete" -> "Delete Drive file"
+            "google.docs.create" -> "Create Google Doc"
+            "google.docs.read" -> "Read Google Doc"
+            "google.docs.write" -> "Edit Google Doc"
+            "google.sheets.create" -> "Create Sheet"
+            "google.sheets.read" -> "Read Sheet"
+            "google.sheets.update", "google.sheets.append" -> "Update Sheet"
+            "google.calendar.create" -> "Create event"
+            "google.calendar.delete" -> "Delete event"
+            "google.calendar.list" -> "Calendar events"
+            "google.slides.get" -> "Google Slides"
+            "google.slides.create" -> "Create presentation"
+            "google.slides.addSlide" -> "Add slide"
+            else -> when {
+                toolId.startsWith("github.") -> "GitHub"
+                toolId.startsWith("google.gmail.") -> "Gmail"
+                toolId.startsWith("google.drive.") -> "Google Drive"
+                toolId.startsWith("google.docs.") -> "Google Docs"
+                toolId.startsWith("google.sheets.") -> "Google Sheets"
+                toolId.startsWith("google.calendar.") -> "Google Calendar"
+                toolId.startsWith("google.slides.") -> "Google Slides"
+                toolId.startsWith("google.") -> "Google"
+                else -> fallbackTitle
+            }
+        }
+    }
 
     /**
      * Short human label. Tool steps use the tool's own title + the concrete
@@ -107,6 +190,7 @@ object AgentStepMapper {
         val detail = activity.actionDetail
         return when {
             detail.isNullOrBlank() -> base
+            base.contains(detail, ignoreCase = true) -> base
             else -> "$base: ${detail.take(80)}"
         }
     }
@@ -121,8 +205,77 @@ object AgentStepMapper {
         val obj = runCatching {
             Json.parseToJsonElement(argumentsJson).jsonObject
         }.getOrNull() ?: return null
+
+        if (toolId.startsWith("terminal.")) {
+            val cmd = obj["command"]?.jsonPrimitive?.content?.trim().orEmpty()
+            val isCommit = cmd.contains("git commit", ignoreCase = true)
+            val isPush = cmd.contains("git push", ignoreCase = true)
+            if (isCommit || isPush) {
+                val commitMsgRegex = Regex("""-m\s+["']([^"']+)["']""")
+                val commitMsg = commitMsgRegex.find(cmd)?.groupValues?.get(1)
+                val pushTarget = if (isPush) {
+                    val pushPart = cmd.substringAfter("git push").trim().substringBefore("&&").substringBefore(";").trim()
+                    pushPart.ifBlank { "origin" }
+                } else null
+
+                return when {
+                    isCommit && isPush -> {
+                        val msg = commitMsg ?: "commit"
+                        "$msg ($pushTarget)"
+                    }
+                    isCommit -> commitMsg ?: cmd
+                    isPush -> pushTarget ?: cmd
+                    else -> cmd
+                }.take(120)
+            }
+            return cmd.take(120)
+        }
+
+        if (toolId.startsWith("github.")) {
+            val owner = obj["owner"]?.jsonPrimitive?.content.orEmpty()
+            val repo = obj["repo"]?.jsonPrimitive?.content.orEmpty()
+            val repoContext = if (owner.isNotBlank() && repo.isNotBlank()) "$owner/$repo" else ""
+            val title = obj["title"]?.jsonPrimitive?.content
+            val path = obj["path"]?.jsonPrimitive?.content
+            val query = obj["query"]?.jsonPrimitive?.content
+
+            return when {
+                !title.isNullOrBlank() && repoContext.isNotBlank() -> "$title ($repoContext)"
+                !title.isNullOrBlank() -> title
+                !path.isNullOrBlank() && repoContext.isNotBlank() -> "$path ($repoContext)"
+                !path.isNullOrBlank() -> path
+                !query.isNullOrBlank() -> query
+                repoContext.isNotBlank() -> repoContext
+                else -> obj["user"]?.jsonPrimitive?.content
+            }?.take(120)
+        }
+
+        if (toolId.startsWith("google.")) {
+            val to = obj["to"]?.jsonPrimitive?.content.orEmpty()
+            val subject = obj["subject"]?.jsonPrimitive?.content.orEmpty()
+            val title = obj["title"]?.jsonPrimitive?.content
+            val summary = obj["summary"]?.jsonPrimitive?.content
+            val query = obj["query"]?.jsonPrimitive?.content
+            val range = obj["range"]?.jsonPrimitive?.content
+            val name = obj["name"]?.jsonPrimitive?.content
+            val docId = obj["documentId"]?.jsonPrimitive?.content
+                ?: obj["spreadsheetId"]?.jsonPrimitive?.content
+                ?: obj["fileId"]?.jsonPrimitive?.content
+
+            return when {
+                to.isNotBlank() && subject.isNotBlank() -> "$to — $subject"
+                to.isNotBlank() -> to
+                !summary.isNullOrBlank() -> summary
+                !title.isNullOrBlank() -> title
+                !range.isNullOrBlank() -> range
+                !name.isNullOrBlank() -> name
+                !query.isNullOrBlank() -> query
+                !docId.isNullOrBlank() -> docId
+                else -> null
+            }?.take(120)
+        }
+
         val keys = when {
-            toolId.startsWith("terminal.") -> listOf("command")
             toolId.startsWith("web.search") -> listOf("query")
             toolId == "web.read" || toolId.startsWith("browser.") -> listOf("url")
             toolId.startsWith("fs.") || toolId.startsWith("code.") ->
