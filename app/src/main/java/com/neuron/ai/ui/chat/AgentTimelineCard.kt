@@ -173,7 +173,7 @@ private fun AgentThoughtBlock(
         label = "thoughtChevron"
     )
 
-    Column(Modifier.fillMaxWidth()) {
+    Column(Modifier.fillMaxWidth().animateContentSize(animationSpec = tween(200, easing = FastOutSlowInEasing))) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -237,7 +237,7 @@ private fun AgentToolGroupBlock(
     val path = group.calls.firstOrNull()?.path
     val failed = group.calls.any { it.step.status == AgentStepRecord.STATUS_FAILED }
 
-    Column(Modifier.fillMaxWidth()) {
+    Column(Modifier.fillMaxWidth().animateContentSize(animationSpec = tween(200, easing = FastOutSlowInEasing))) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()

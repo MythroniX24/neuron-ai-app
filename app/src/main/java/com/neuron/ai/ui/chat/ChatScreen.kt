@@ -824,11 +824,17 @@ fun ChatScreen(
         }
     }
 
-    activeSourcesSheet?.let { sources ->
-        SourcesSheet(
-            sources = sources,
-            onDismiss = { activeSourcesSheet = null }
-        )
+    androidx.compose.animation.AnimatedVisibility(
+        visible = activeSourcesSheet != null,
+        enter = fadeIn(tween(200)) + slideInVertically(tween(240, easing = FastOutSlowInEasing)) { it / 3 },
+        exit = fadeOut(tween(160)) + slideOutVertically(tween(200, easing = FastOutSlowInEasing)) { it / 3 }
+    ) {
+        activeSourcesSheet?.let { sources ->
+            SourcesSheet(
+                sources = sources,
+                onDismiss = { activeSourcesSheet = null }
+            )
+        }
     }
     }
     }
@@ -862,13 +868,18 @@ private fun ChatTopBar(
                 shape = RoundedCornerShape(20.dp),
                 color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
                 border = BorderStroke(
-                    1.dp,
-                    if (isThinking) MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
-                    else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
-                ),
+                        1.dp,
+                        animateColorAsState(
+                            if (isThinking) MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
+                            else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+                            animationSpec = tween(300),
+                            label = "modelChipBorder"
+                        ).value
+                    ),
                 modifier = Modifier
                     .onGloballyPositioned { titleBounds = it.boundsInWindow() }
                     .clip(RoundedCornerShape(20.dp))
+                    .pressScale()
                     .clickable(enabled = modelOptions.isNotEmpty()) {
                         menuExpanded = true
                     }
@@ -937,7 +948,11 @@ private fun ChatTopBar(
         )
     )
 
-    if (menuExpanded) {
+    var showModelDropdown by remember { mutableStateOf(false) }
+    LaunchedEffect(menuExpanded) {
+        if (menuExpanded) showModelDropdown = true
+    }
+    if (showModelDropdown) {
         // Custom dropdown card — anchored to the measured title block so its
         // top edge sits immediately below the header ("header ke niche"),
         // never near the composer.
@@ -949,11 +964,16 @@ private fun ChatTopBar(
                 properties = androidx.compose.ui.window.PopupProperties(focusable = true)
             ) {
                 var popupVisible by remember { mutableStateOf(false) }
-                LaunchedEffect(Unit) {
-                    popupVisible = true
+                LaunchedEffect(menuExpanded) {
+                    if (menuExpanded) {
+                        popupVisible = true
+                    } else {
+                        kotlinx.coroutines.delay(150)
+                        showModelDropdown = false
+                    }
                 }
                 AnimatedVisibility(
-                    visible = popupVisible,
+                    visible = popupVisible && menuExpanded,
                     enter = fadeIn(tween(180)) +
                         scaleIn(tween(220, easing = FastOutSlowInEasing), initialScale = 0.86f, transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0.5f, 0f)) +
                         slideInVertically(tween(220, easing = FastOutSlowInEasing)) { -it / 6 },
@@ -1016,6 +1036,7 @@ private fun ChatTopBar(
                                         verticalAlignment = Alignment.CenterVertically,
                                         modifier = Modifier
                                             .fillMaxWidth()
+                                            .pressScale()
                                             .clickable {
                                                 onSelectModel(option.providerId, option.modelId)
                                                 menuExpanded = false
@@ -1121,7 +1142,7 @@ private fun ChatTopBar(
             } // AnimatedVisibility
             } // Popup content
         } // if (bounds != null)
-    } // if (menuExpanded)
+    } // if (showModelDropdown)
 }
 
 /**
