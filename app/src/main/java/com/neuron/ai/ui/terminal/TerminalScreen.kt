@@ -262,28 +262,55 @@ fun TerminalScreen(
                 verticalArrangement = Arrangement.spacedBy(2.dp)
             ) {
                 if (output.isEmpty()) {
-                    item {
-                        Column(modifier = Modifier.padding(vertical = Spacing.lg)) {
-                            Text(
-                                text = "Neuron Linux & Termux Environment [${session.shellInfo.name}]",
-                                style = TextStyle(
-                                    fontFamily = FontFamily.Monospace,
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = TerminalGreen
-                                )
-                            )
-                            Text(
-                                text = "Type commands below or use virtual accessory keys. Run 'help' or explore files in workspace.",
-                                style = TextStyle(
-                                    fontFamily = FontFamily.Monospace,
-                                    fontSize = 12.sp,
-                                    color = TerminalText.copy(alpha = 0.6f)
-                                )
-                            )
-                        }
-                    }
+        item {
+            Column(modifier = Modifier.padding(vertical = Spacing.lg)) {
+                if (!session.isRealTermux) {
+                    Text(
+                        text = "⚠ Linux / Termux Environment Not Installed",
+                        style = TextStyle(
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = TerminalRed
+                        )
+                    )
+                    Spacer(Modifier.height(Spacing.sm))
+                    Text(
+                        text = "The in-built Linux/Termux shell could not be found on this device.\n" +
+                            "Only the Android system shell is available as a fallback.\n\n" +
+                            "To get the full Termux experience:\n" +
+                            "1. Install Termux from F-Droid or GitHub\n" +
+                            "2. Open the app once to initialize\n" +
+                            "3. Return here — Neuron will detect it automatically\n\n" +
+                            "Or use Settings → Storage Access to configure.",
+                        style = TextStyle(
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 12.sp,
+                            color = TerminalText.copy(alpha = 0.7f)
+                        )
+                    )
+                } else {
+                    Text(
+                        text = "Neuron Linux & Termux Environment [${session.shellInfo.name}]",
+                        style = TextStyle(
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = TerminalGreen
+                        )
+                    )
+                    Text(
+                        text = "Type commands below or use virtual accessory keys. Run 'help' or explore files in workspace.",
+                        style = TextStyle(
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 12.sp,
+                            color = TerminalText.copy(alpha = 0.6f)
+                        )
+                    )
                 }
+            }
+        }
+    }
 
                 items(output) { line ->
                     val color = when {

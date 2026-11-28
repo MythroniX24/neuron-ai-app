@@ -30,6 +30,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -58,10 +59,8 @@ fun AttachmentSheet(
     onCamera: () -> Unit,
     onPhotos: () -> Unit,
     onFiles: () -> Unit,
-    terminalEnabled: Boolean,
-    onToggleTerminal: (Boolean) -> Unit,
-    browserEnabled: Boolean,
-    onToggleBrowser: (Boolean) -> Unit
+    permissionMode: String = "ask_when_needed",
+    onPermissionModeChange: (String) -> Unit = {}
 ) {
     val haptic = LocalHapticFeedback.current
 
@@ -187,9 +186,9 @@ fun AttachmentSheet(
 
             Spacer(Modifier.height(Spacing.lg))
 
-            // Agent Capabilities Group
+            // Permission Mode Group
             Text(
-                text = "CAPABILITIES",
+                text = "PERMISSION MODE",
                 style = MaterialTheme.typography.labelSmall.copy(
                     letterSpacing = 1.5.sp,
                     fontWeight = FontWeight.Bold
@@ -209,33 +208,55 @@ fun AttachmentSheet(
                     .padding(horizontal = Spacing.lg)
             ) {
                 Column {
-                    CapabilitySwitchRow(
-                        icon = Icons.Outlined.Public,
-                        title = "Web Search & Browsing",
-                        enabled = browserEnabled,
-                        iconTint = Color(0xFF06B6D4),
-                        onToggle = {
-                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                            onToggleBrowser(!browserEnabled)
+                    val modes = listOf(
+                        "ask_every_time" to "Ask every time",
+                        "ask_when_needed" to "Ask when needed",
+                        "fully_automated" to "Fully automated"
+                    )
+                    modes.forEachIndexed { index, (mode, label) ->
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    onPermissionModeChange(mode)
+                                }
+                                .padding(horizontal = Spacing.md, vertical = 12.dp)
+                        ) {
+                            RadioButton(
+                                selected = permissionMode == mode,
+                                onClick = {
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    onPermissionModeChange(mode)
+                                }
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                text = label,
+                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
                         }
-                    )
-                    HorizontalDivider(
-                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
-                        thickness = 0.8.dp,
-                        modifier = Modifier.padding(horizontal = Spacing.md)
-                    )
-                    CapabilitySwitchRow(
-                        icon = Icons.Outlined.Terminal,
-                        title = "Terminal & Shell Tools",
-                        enabled = terminalEnabled,
-                        iconTint = Color(0xFF10B981),
-                        onToggle = {
-                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                            onToggleTerminal(!terminalEnabled)
+                        if (index < modes.size - 1) {
+                            HorizontalDivider(
+                                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
+                                thickness = 0.8.dp,
+                                modifier = Modifier.padding(horizontal = Spacing.md)
+                            )
                         }
-                    )
+                    }
                 }
             }
+
+            Spacer(Modifier.height(Spacing.sm))
+
+            Text(
+                text = "Terminal and browser are always available. Permission prompts depend on the selected mode.",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                modifier = Modifier.padding(horizontal = Spacing.lg)
+            )
         }
     }
 }

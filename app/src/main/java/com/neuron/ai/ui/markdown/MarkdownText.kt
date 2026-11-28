@@ -189,6 +189,7 @@ private fun BlockView(
                 model = block.url,
                 contentDescription = block.alt.ifBlank { "Image" },
                 contentScale = ContentScale.Fit,
+                minHeight = 120.dp,
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(Radius.md)),

@@ -371,6 +371,7 @@ fun ChatScreen(
 
     // ---- Attachment entry points (sheet: Camera / Photos / Files) ----------------
     var showAttachmentSheet by remember { mutableStateOf(false) }
+    var permissionMode by remember { mutableStateOf("ask_when_needed") }
     var pendingCaptureFile by remember { mutableStateOf<java.io.File?>(null) }
 
     val filePicker = rememberLauncherForActivityResult(
@@ -790,10 +791,8 @@ fun ChatScreen(
                         )
                     },
                     onFiles = { filePicker.launch(arrayOf("*/*")) },
-                    terminalEnabled = terminalEnabled,
-                    onToggleTerminal = { viewModel.setTerminalEnabled(it) },
-                    browserEnabled = browserEnabled,
-                    onToggleBrowser = { viewModel.setBrowserEnabled(it) }
+                    permissionMode = permissionMode,
+                    onPermissionModeChange = { permissionMode = it }
                 )
             }
         }

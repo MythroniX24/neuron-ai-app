@@ -166,6 +166,8 @@ fun OnboardingScreen(
             linuxStatus = "Configuring workspace & verifying shell..."
             withContext(Dispatchers.IO) {
                 try {
+                    // Minimum loading time to show proper loading state
+                    kotlinx.coroutines.delay(800)
                     val shellInfo = com.neuron.ai.data.terminal.LinuxEnvironment.initialize(context)
                     val workspaceDir = com.neuron.ai.data.terminal.LinuxEnvironment.getWorkspaceDir(context)
                     val fullEnv = com.neuron.ai.data.terminal.LinuxEnvironment.buildEnvironment(context, workspaceDir)
@@ -306,18 +308,12 @@ fun OnboardingScreen(
             OnboardingCard(
                 icon = Icons.Outlined.Terminal,
                 title = "2. Linux & Termux Shell",
-                subtitle = "Execute real shell commands, scripts, and build tools.",
+                subtitle = "In-built Linux environment with Termux utilities.",
                 statusText = linuxStatus,
                 isCompleted = linuxConfigured,
                 badgeColor = if (linuxConfigured) Color(0xFF10B981) else MaterialTheme.colorScheme.primary
             ) {
                 Column(verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
-                    Text(
-                        text = "Neuron provides an interactive full-featured Termux terminal screen with virtual accessory keys (ESC, TAB, CTRL, ALT, arrows) and working directory management.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-
                     OutlinedButton(
                         onClick = { checkAndInitLinux() },
                         enabled = !linuxInitializing,
