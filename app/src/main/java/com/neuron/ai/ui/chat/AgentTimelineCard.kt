@@ -1,7 +1,6 @@
 package com.neuron.ai.ui.chat
 
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -174,7 +173,7 @@ private fun AgentThoughtBlock(
         label = "thoughtChevron"
     )
 
-    Column(Modifier.fillMaxWidth().animateContentSize(animationSpec = tween(200, easing = FastOutSlowInEasing))) {
+    Column(Modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -238,7 +237,7 @@ private fun AgentToolGroupBlock(
     val path = group.calls.firstOrNull()?.path
     val failed = group.calls.any { it.step.status == AgentStepRecord.STATUS_FAILED }
 
-    Column(Modifier.fillMaxWidth().animateContentSize(animationSpec = tween(200, easing = FastOutSlowInEasing))) {
+    Column(Modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
